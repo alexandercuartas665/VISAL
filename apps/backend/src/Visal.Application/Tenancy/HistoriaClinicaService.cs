@@ -460,31 +460,7 @@ public sealed class HistoriaClinicaService(
         // envia (AsignacionTurnoId, SessionNo) — la fila puede no existir aun
         // porque solo se crea al cerrar la sesion. La creamos aqui como parte
         // del flujo de apertura de HC para tener un ancla estable en el pivote.
-        Guid? sesionResuelta = req.SesionId;
-        if (sesionResuelta is null
-            && req.AsignacionTurnoId is Guid atId
-            && req.SessionNo is int sno && sno >= 1)
-        {
-            var existente = await db.AsignacionTurnoSesiones
-                .FirstOrDefaultAsync(s => s.AsignacionTurnoId == atId && s.SessionNo == sno, ct);
-            if (existente is not null)
-            {
-                sesionResuelta = existente.Id;
-            }
-            else
-            {
-                var nueva = new AsignacionTurnoSesion
-                {
-                    TenantId = tid,
-                    AsignacionTurnoId = atId,
-                    SessionNo = sno,
-                    Completado = false
-                };
-                db.AsignacionTurnoSesiones.Add(nueva);
-                await db.SaveChangesAsync(ct);
-                sesionResuelta = nueva.Id;
-            }
-        }
+        Guid? sesionResuelta = await ResolverOCrearSesionAsync(req.SesionId, req.AsignacionTurnoId, req.SessionNo, tid, ct);
 
         // Gate de orden secuencial /atencion: cuando la HC viene desde una sesion
         // programada, la UI ya bloqueo el boton pero validamos de nuevo aqui como
@@ -956,6 +932,28 @@ public sealed class HistoriaClinicaService(
             throw new InvalidOperationException("No se puede copiar una historia inactiva.");
         }
 
+        // Sesion DESTINO: la que se esta atendiendo AHORA (contexto de /atencion),
+        // NUNCA la de la HC origen. Si viene contexto, se valida y se liga igual que
+        // una HC creada normal (gate de orden secuencial + regla "1 HC activa por
+        // sesion") para que la copia no deje la sesion huerfana ni duplique HC. Si no
+        // viene contexto, la copia no se liga (el llamador en /atencion lo bloquea).
+        var sesionDestino = await ResolverOCrearSesionAsync(req.SesionId, req.AsignacionTurnoId, req.SessionNo, tid, ct);
+        if (sesionDestino is Guid sesionValidar)
+        {
+            var bloqueo = await atencionOrden.ValidarAperturaAsync(sesionValidar, actor, ct);
+            if (bloqueo is not null) { throw new InvalidOperationException(bloqueo.Motivo); }
+
+            var yaTieneHcActiva = await db.AsignacionTurnoSesionHcs
+                .Join(db.HistoriasClinicas, p => p.HistoriaClinicaId, h => h.Id, (p, h) => new { p, h })
+                .AnyAsync(x => x.p.SesionId == sesionValidar
+                            && x.h.Estado != HistoriaClinicaEstado.Inactiva, ct);
+            if (yaTieneHcActiva)
+            {
+                throw new InvalidOperationException(
+                    "Ya existe una historia clinica activa para esta sesion. Consulta el historial del paciente para verla.");
+            }
+        }
+
         // Crear la copia. Estrategia:
         //   - Estado siempre Abierta y FechaApertura = ahora (es una HC nueva).
         //   - Profesional/Especialista: usar los del actor si vienen; si no, heredar los del origen.
@@ -984,6 +982,15 @@ public sealed class HistoriaClinicaService(
         };
         db.HistoriasClinicas.Add(nueva);
         await db.SaveChangesAsync(ct);
+
+        // Pivote HC <-> sesion ACTUAL (si hay contexto de atencion). Mismo helper
+        // idempotente que usa la creacion normal: sin esto la copia quedaba huerfana
+        // (no entraba a facturacion/snapshots ni marcaba la sesion). La sesion ya fue
+        // validada arriba.
+        if (sesionDestino is Guid sesionLink)
+        {
+            await VincularSesionYRecalcularAsync(nueva.Id, sesionLink, tid, ct);
+        }
 
         // Clonar las 7 colecciones clinicas. Cada item nuevo lleva Id fresco + HistoriaClinicaId
         // apuntando a la HC copia. Escalas / Documentos NO se copian: son adjuntos con fecha propia.
@@ -1119,6 +1126,37 @@ public sealed class HistoriaClinicaService(
     /// flag Completado de la sesion (por definicion queda false, la HC nace
     /// Abierta).
     /// </summary>
+    /// <summary>
+    /// Resuelve la sesion destino de una HC que nace desde /atencion: si viene
+    /// <paramref name="sesionId"/> lo devuelve tal cual; si no, la ubica por
+    /// (<paramref name="asignacionTurnoId"/>, <paramref name="sessionNo"/>) y la
+    /// CREA si aun no existe (la fila de sesion solo se materializa al cerrar, asi
+    /// que la anclamos aqui para tener pivote estable). Devuelve null cuando no hay
+    /// contexto suficiente para resolverla (la HC quedaria sin ligar). Compartido
+    /// por <c>CrearAsync</c> y <c>CopiarAsync</c> para no duplicar la regla.
+    /// </summary>
+    private async Task<Guid?> ResolverOCrearSesionAsync(Guid? sesionId, Guid? asignacionTurnoId, int? sessionNo, Guid tid, CancellationToken ct)
+    {
+        if (sesionId is Guid sid) { return sid; }
+        if (asignacionTurnoId is Guid atId && sessionNo is int sno && sno >= 1)
+        {
+            var existente = await db.AsignacionTurnoSesiones
+                .FirstOrDefaultAsync(s => s.AsignacionTurnoId == atId && s.SessionNo == sno, ct);
+            if (existente is not null) { return existente.Id; }
+            var nueva = new AsignacionTurnoSesion
+            {
+                TenantId = tid,
+                AsignacionTurnoId = atId,
+                SessionNo = sno,
+                Completado = false
+            };
+            db.AsignacionTurnoSesiones.Add(nueva);
+            await db.SaveChangesAsync(ct);
+            return nueva.Id;
+        }
+        return null;
+    }
+
     private async Task VincularSesionYRecalcularAsync(Guid historiaClinicaId, Guid sesionId, Guid tenantId, CancellationToken ct)
     {
         var yaExiste = await db.AsignacionTurnoSesionHcs

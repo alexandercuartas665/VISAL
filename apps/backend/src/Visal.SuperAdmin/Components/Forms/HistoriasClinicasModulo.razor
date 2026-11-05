@@ -2717,15 +2717,35 @@
     {
         _menuAbierto = null;
         if (PacienteActivo is not PacienteAsignacionDto p) { return; }
+
+        // La copia SOLO se permite dentro del contexto de una sesion de /atencion
+        // (turno + numero de sesion): asi queda ligada a la sesion ACTUAL, igual que
+        // una HC creada normal. Fuera de ese contexto bloqueamos para no generar HC
+        // huerfanas (sin asignacion/servicio, invisibles en facturacion/snapshots).
+        if (AsignacionTurnoId is null || SessionNo is null)
+        {
+            await JS.InvokeVoidAsync("alert",
+                "Esta copia debe hacerse desde el servicio en Atencion (con la sesion activa) para que quede ligada al servicio. "
+                + "Abre el servicio del paciente en Atencion y usa alli 'Crear una copia'.");
+            return;
+        }
+
         var ok = await JS.InvokeAsync<bool>("confirm",
-            $"Crear una copia de la historia del {src.Fecha:dd/MM/yyyy}?\nSe generara una HC nueva Abierta con los mismos items clinicos y datos, y con la fecha/hora/medico actualizados.");
+            $"Crear una copia de la historia del {src.Fecha:dd/MM/yyyy}?\nSe generara una HC nueva Abierta, ligada a la sesion actual, con los mismos items clinicos y datos, y con la fecha/hora/medico actualizados.");
         if (!ok) { return; }
 
         try
         {
             var especialista = await GetEspecialistaNombreAsync();
             var miProf = await ResolverMiProfesionalIdAsync();
-            var copia = await HcSvc.CopiarAsync(new CopiarHistoriaRequest(src.Id, especialista, miProf), Guid.Empty);
+            // Actor real (platform_user_id) para que el gate de orden secuencial lea el
+            // permiso del rol; la sesion destino es la del contexto actual (NUNCA la del
+            // origen): se pasa AsignacionTurnoId + SessionNo, igual que la creacion normal.
+            var actorCopia = await ResolverActorAsync();
+            var copia = await HcSvc.CopiarAsync(
+                new CopiarHistoriaRequest(src.Id, especialista, miProf,
+                    SesionId: null, AsignacionTurnoId: AsignacionTurnoId, SessionNo: SessionNo),
+                actorCopia);
             if (copia is null) { return; }
 
             // Insertar arriba en la lista + seleccionar (carga schema/valores + refresca

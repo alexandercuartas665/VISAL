@@ -258,8 +258,20 @@ public interface IHistoriaClinicaService
 
 /// <summary>Peticion de duplicacion de HC. EspecialistaNombre y ProfesionalId
 /// permiten reemplazar los datos del profesional origen por los del usuario que
-/// esta creando la copia; si son null, se conservan los del origen.</summary>
+/// esta creando la copia; si son null, se conservan los del origen.
+/// <para>
+/// El destino de la copia es SIEMPRE la sesion que se esta atendiendo EN ESE
+/// MOMENTO (contexto de /atencion), NUNCA la sesion/asignacion de la HC origen.
+/// Se identifica igual que en <see cref="CrearHistoriaRequest"/>: por
+/// <see cref="SesionId"/> directo, o por <see cref="AsignacionTurnoId"/> +
+/// <see cref="SessionNo"/> (el backend resuelve/crea la fila de sesion). Cuando
+/// vienen en null la copia NO se liga a ningun servicio (el llamador en /atencion
+/// debe bloquear ese caso para no generar HC huerfanas).
+/// </para></summary>
 public sealed record CopiarHistoriaRequest(
     Guid SourceHistoriaId,
     string? EspecialistaNombre,
-    Guid? ProfesionalId);
+    Guid? ProfesionalId,
+    Guid? SesionId = null,
+    Guid? AsignacionTurnoId = null,
+    int? SessionNo = null);

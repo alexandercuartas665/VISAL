@@ -4,7 +4,7 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext tenant) : IDocumentoHcService
+public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext tenant, IAuditWriter audit) : IDocumentoHcService
 {
     private static string NormalizarTipo(string? tipo)
     {
@@ -182,6 +182,28 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
         d.ValoresJson = string.IsNullOrWhiteSpace(valoresJson) ? d.ValoresJson : valoresJson;
         d.Estado = HistoriaClinicaEstado.Cerrada;
         d.FechaCierre = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    public async Task<bool> ReabrirAsync(Guid id, Guid actor, CancellationToken ct = default)
+    {
+        var d = await db.HistoriaClinicaDocumentos.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (d is null) { return false; }
+        if (d.Estado != HistoriaClinicaEstado.Cerrada)
+        {
+            throw new InvalidOperationException("Solo se puede reabrir un documento que este Cerrado.");
+        }
+        var fechaCierrePrev = d.FechaCierre;
+        d.Estado = HistoriaClinicaEstado.Abierta;
+        d.FechaCierre = null;
+        // Auditoria: reabrir un documento ya marcado como definitivo es una
+        // accion administrativa que debe quedar trazada (quien, cuando, sobre
+        // que documento, de que HC y de que tipo).
+        audit.Write(actor, "documento-hc.reabrir", nameof(HistoriaClinicaDocumento), d.Id,
+            previousValue: new { estado = HistoriaClinicaEstado.Cerrada.ToString(), fechaCierre = fechaCierrePrev },
+            newValue: new { estado = d.Estado.ToString(), historiaClinicaId = d.HistoriaClinicaId, tipo = d.Tipo },
+            tenantId: d.TenantId);
         await db.SaveChangesAsync(ct);
         return true;
     }

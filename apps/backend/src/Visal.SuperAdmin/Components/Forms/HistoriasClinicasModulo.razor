@@ -466,6 +466,7 @@
                                            PacienteId="@PacienteActivo?.Id"
                                            Paciente="@PacienteActivo"
                                            EspecialistaNombre="@_historiaSel?.Especialista"
+                                           PuedeReabrir="@_puedeReabrir"
                                            OnCountChanged="@(c => _escCount = c)"
                                            OnEscalaCerrada="RecargarValoresDesdeBackendAsync" />
                             }
@@ -476,6 +477,7 @@
                                               PacienteId="@PacienteActivo?.Id"
                                               Paciente="@PacienteActivo"
                                               EspecialistaNombre="@_historiaSel?.Especialista"
+                                              PuedeReabrir="@_puedeReabrir"
                                               OnCountChanged="@(c => _evoCount = c)" />
                             }
                             else if (_tabSel == "Consentimientos")
@@ -485,6 +487,7 @@
                                               PacienteId="@PacienteActivo?.Id"
                                               Paciente="@PacienteActivo"
                                               EspecialistaNombre="@_historiaSel?.Especialista"
+                                              PuedeReabrir="@_puedeReabrir"
                                               OnCountChanged="@(c => _conCount = c)" />
                             }
                             else if (_tabSel == "Atenciones")
@@ -495,6 +498,7 @@
                                               PacienteId="@PacienteActivo?.Id"
                                               Paciente="@PacienteActivo"
                                               EspecialistaNombre="@_historiaSel?.Especialista"
+                                              PuedeReabrir="@_puedeReabrir"
                                               OnCountChanged="@(c => _atCount = c)" />
                             }
                             else if (_tabSel == "Documentos externos")

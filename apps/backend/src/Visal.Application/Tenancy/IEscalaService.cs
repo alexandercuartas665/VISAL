@@ -64,6 +64,13 @@ public interface IEscalaService
     /// <summary>Marca la escala como cerrada.</summary>
     Task<bool> CerrarAsync(Guid id, string valoresJson, Guid actor, CancellationToken ct = default);
 
+    /// <summary>
+    /// Reabre una escala previamente marcada como definitiva (Cerrada) para
+    /// permitir su edicion de nuevo. Accion administrativa gateada por permiso
+    /// en la UI y auditada.
+    /// </summary>
+    Task<bool> ReabrirAsync(Guid id, Guid actor, CancellationToken ct = default);
+
     Task<bool> EliminarAsync(Guid id, Guid actor, CancellationToken ct = default);
 
     Task<int> ContarPorHistoriaAsync(Guid historiaId, CancellationToken ct = default);

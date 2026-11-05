@@ -883,7 +883,7 @@ public sealed class FacturacionSnapshotService(
 
     // ---- Export ----
 
-    public async Task<ArchivoExportado?> ExportarExcelAsync(Guid id, CancellationToken ct = default)
+    public async Task<ArchivoExportado?> ExportarExcelAsync(Guid id, SnapshotVistaOrden? vista = null, CancellationToken ct = default)
     {
         var ctx = await CargarParaExportAsync(id, ct);
         if (ctx is null) { return null; }
@@ -909,21 +909,57 @@ public sealed class FacturacionSnapshotService(
             cell.Style.Alignment.WrapText = false;
         }
 
-        // Filas. Iteramos por lotes para no cargar todo en memoria de golpe.
         var row = 2;
         var contador = 1;
-        await foreach (var fila in IterarFilasAsync(id, ct))
+
+        // Orden/agrupacion de la vista "Ver". Las columnas se validan contra el catalogo
+        // del snapshot (clave interna del dict) para ignorar criterios obsoletos.
+        var cols = new HashSet<string>(ctx.Columnas.Select(x => x.ColumnaOriginal), StringComparer.Ordinal);
+        var orden = (vista?.Orden ?? Array.Empty<SnapshotOrdenCrit>())
+            .Where(o => o is not null && cols.Contains(o.Col)).ToList();
+        var grupos = (vista?.Grupos ?? Array.Empty<string>())
+            .Where(g => !string.IsNullOrWhiteSpace(g) && cols.Contains(g)).Distinct(StringComparer.Ordinal).ToList();
+
+        if (orden.Count == 0 && grupos.Count == 0)
         {
-            hoja.Cell(row, 1).Value = contador;
-            for (var c = 0; c < ctx.Columnas.Count; c++)
+            // Sin vista: streaming en orden natural (NumeroFila), sin cargar todo en memoria.
+            await foreach (var fila in IterarFilasAsync(id, ct))
             {
-                var colInfo = ctx.Columnas[c];
-                if (!fila.TryGetValue(colInfo.ColumnaOriginal, out var val) || val is null) { continue; }
-                var cell = hoja.Cell(row, c + 2);
-                AplicarValorFormato(cell, val, colInfo.FormatoTipo, colInfo.FormatoPatron);
+                EscribirFilaExcel(hoja, row, contador, ctx, fila);
+                row++;
+                contador++;
             }
-            row++;
-            contador++;
+        }
+        else
+        {
+            // Con orden/agrupacion: cargamos todas las filas y replicamos la pantalla "Ver"
+            // (misma logica de BuildVerItems: cabeceras de grupo con conteo + orden en cascada).
+            var todas = new List<IReadOnlyDictionary<string, object?>>();
+            await foreach (var fila in IterarFilasAsync(id, ct)) { todas.Add(fila); }
+
+            var items = new List<VistaItem>();
+            ConstruirItemsVista(todas, 0, orden, grupos, items);
+
+            var totalCols = ctx.Columnas.Count + 1;
+            foreach (var it in items)
+            {
+                if (it.Fila is null)
+                {
+                    // Cabecera de grupo: label + conteo, fila combinada a lo ancho. El sangrado
+                    // por nivel refleja la anidacion de grupos que se ve en pantalla.
+                    hoja.Range(row, 1, row, totalCols).Merge();
+                    var cell = hoja.Cell(row, 1);
+                    cell.Value = new string(' ', it.Level * 4) + it.Label + $" ({it.Count} filas)";
+                    cell.Style.Font.Bold = true;
+                    cell.Style.Fill.BackgroundColor = XLColor.FromHtml("#eef2ff");
+                }
+                else
+                {
+                    EscribirFilaExcel(hoja, row, contador, ctx, it.Fila);
+                    contador++;
+                }
+                row++;
+            }
         }
 
         // Ajuste automatico de ancho — comodo para el usuario que abre el .xlsx.
@@ -935,6 +971,94 @@ public sealed class FacturacionSnapshotService(
             ms.ToArray(),
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             SanitizarNombreArchivo(ctx.Snapshot.Nombre) + ".xlsx");
+    }
+
+    /// <summary>Escribe una fila de datos (contador Nº + columnas formateadas) en la hoja.</summary>
+    private static void EscribirFilaExcel(
+        ClosedXML.Excel.IXLWorksheet hoja, int row, int contador, CtxExport ctx,
+        IReadOnlyDictionary<string, object?> fila)
+    {
+        hoja.Cell(row, 1).Value = contador;
+        for (var c = 0; c < ctx.Columnas.Count; c++)
+        {
+            var colInfo = ctx.Columnas[c];
+            if (!fila.TryGetValue(colInfo.ColumnaOriginal, out var val) || val is null) { continue; }
+            var cell = hoja.Cell(row, c + 2);
+            AplicarValorFormato(cell, val, colInfo.FormatoTipo, colInfo.FormatoPatron);
+        }
+    }
+
+    /// <summary>Item aplanado de la vista: o una cabecera de grupo (<see cref="Fila"/> null)
+    /// o una fila de datos.</summary>
+    private sealed record VistaItem(int Level, string? Label, int Count, IReadOnlyDictionary<string, object?>? Fila);
+
+    /// <summary>
+    /// Replica EXACTA del armado de la vista "Ver" (SnapshotsFacturacion.BuildVerItems):
+    /// agrupa por nivel (GroupBy ordenado por clave, case-insensitive) insertando una
+    /// cabecera con conteo, y en la hoja mas profunda ordena en cascada por <paramref name="orden"/>.
+    /// </summary>
+    private static void ConstruirItemsVista(
+        List<IReadOnlyDictionary<string, object?>> rows,
+        int level,
+        IReadOnlyList<SnapshotOrdenCrit> orden,
+        IReadOnlyList<string> grupos,
+        List<VistaItem> outl)
+    {
+        if (level >= grupos.Count)
+        {
+            foreach (var r in OrdenarFilasVista(rows, orden)) { outl.Add(new VistaItem(level, null, 0, r)); }
+            return;
+        }
+        var col = grupos[level];
+        var gs = rows.GroupBy(r => TextoGrupoVista(col, r)).OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase);
+        foreach (var g in gs)
+        {
+            var gl = g.ToList();
+            outl.Add(new VistaItem(level, $"{col}: {g.Key}", gl.Count, null));
+            ConstruirItemsVista(gl, level + 1, orden, grupos, outl);
+        }
+    }
+
+    private static string TextoGrupoVista(string col, IReadOnlyDictionary<string, object?> f)
+    {
+        var s = f.TryGetValue(col, out var v) ? (v?.ToString() ?? "").Trim() : "";
+        return string.IsNullOrWhiteSpace(s) ? "(sin dato)" : s;
+    }
+
+    private static IEnumerable<IReadOnlyDictionary<string, object?>> OrdenarFilasVista(
+        IEnumerable<IReadOnlyDictionary<string, object?>> src, IReadOnlyList<SnapshotOrdenCrit> orden)
+    {
+        if (orden.Count == 0) { return src; }
+        IOrderedEnumerable<IReadOnlyDictionary<string, object?>>? o = null;
+        foreach (var s in orden)
+        {
+            var sc = s;
+            Func<IReadOnlyDictionary<string, object?>, object> k = f => ClaveOrdenVista(sc.Col, f);
+            o = o is null
+                ? (sc.Desc ? src.OrderByDescending(k, VistaCmp.I) : src.OrderBy(k, VistaCmp.I))
+                : (sc.Desc ? o.ThenByDescending(k, VistaCmp.I) : o.ThenBy(k, VistaCmp.I));
+        }
+        return o!;
+    }
+
+    // Clave de orden: intenta numero y fecha (para ordenar bien montos/fechas), si no texto.
+    private static object ClaveOrdenVista(string col, IReadOnlyDictionary<string, object?> f)
+    {
+        var s = f.TryGetValue(col, out var v) ? (v?.ToString() ?? "").Trim() : "";
+        if (decimal.TryParse(s, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var n)) { return n; }
+        if (DateTime.TryParse(s, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var d)) { return d; }
+        return s;
+    }
+
+    private sealed class VistaCmp : IComparer<object?>
+    {
+        public static readonly VistaCmp I = new();
+        public int Compare(object? a, object? b)
+        {
+            if (a is decimal da && b is decimal db) { return da.CompareTo(db); }
+            if (a is DateTime ta && b is DateTime tb) { return ta.CompareTo(tb); }
+            return string.Compare(a?.ToString(), b?.ToString(), StringComparison.OrdinalIgnoreCase);
+        }
     }
 
     /// <summary>

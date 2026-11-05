@@ -86,6 +86,18 @@ public sealed record CompletarCodigosResultado(
 /// Varios se combinan con AND (cascada). La columna debe existir en el catalogo del builder.</summary>
 public sealed record FiltroColumna(string Columna, string Valor);
 
+/// <summary>Un criterio de orden de la vista "Ver" (columna + direccion).</summary>
+public sealed record SnapshotOrdenCrit(string Col, bool Desc);
+
+/// <summary>
+/// Orden y agrupacion de la vista "Ver" de un snapshot, para que la descarga xlsx
+/// salga igual que la pantalla. <see cref="Orden"/> se aplica en cascada; <see cref="Grupos"/>
+/// inserta una cabecera de grupo con conteo por nivel (anidadas). Vacio = orden natural.
+/// </summary>
+public sealed record SnapshotVistaOrden(
+    IReadOnlyList<SnapshotOrdenCrit> Orden,
+    IReadOnlyList<string> Grupos);
+
 /// <summary>Resultado paginado de un ListarFilas.</summary>
 public sealed record PagedResult<T>(
     IReadOnlyList<T> Items,
@@ -166,8 +178,11 @@ public interface IFacturacionSnapshotService
     /// Exporta el snapshot en xlsx. Los headers respetan EXACTAMENTE los nombres del
     /// builder (incluyendo tildes rotas del template original). Devuelve null si el
     /// snapshot no existe o no es del tenant activo.
+    /// <paramref name="vista"/> opcional replica el orden y la agrupacion de la pantalla
+    /// "Ver" (columnas agrupadas insertan una cabecera con conteo por nivel; el resto se
+    /// ordena en cascada). Null o vacio = orden natural (NumeroFila), como el CSV.
     /// </summary>
-    Task<ArchivoExportado?> ExportarExcelAsync(Guid id, CancellationToken ct = default);
+    Task<ArchivoExportado?> ExportarExcelAsync(Guid id, SnapshotVistaOrden? vista = null, CancellationToken ct = default);
 
     /// <summary>
     /// Exporta el snapshot en CSV con separador ; y encoding UTF-8 con BOM (para que

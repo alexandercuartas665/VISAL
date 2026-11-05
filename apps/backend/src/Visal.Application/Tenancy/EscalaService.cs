@@ -6,7 +6,7 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenant, IBarthelDenormalizador barthel) : IEscalaService
+public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenant, IBarthelDenormalizador barthel, IAuditWriter audit) : IEscalaService
 {
     public async Task<IReadOnlyList<EscalaFormatoDto>> ListarFormatosDisponiblesAsync(
         Guid historiaId, CancellationToken ct = default)
@@ -159,6 +159,28 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
         // Si es una escala Barthel, vuelca su puntaje/datos al paciente (denormalizado) para
         // el CENSO y la ficha. No-op silencioso si no es Barthel o si no es la mas reciente.
         await barthel.AplicarDesdeEscalaAsync(e.Id, ct);
+        return true;
+    }
+
+    public async Task<bool> ReabrirAsync(Guid id, Guid actor, CancellationToken ct = default)
+    {
+        var e = await db.HistoriaClinicaEscalas.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (e is null) { return false; }
+        if (e.Estado != HistoriaClinicaEstado.Cerrada)
+        {
+            throw new InvalidOperationException("Solo se puede reabrir una escala que este Cerrada.");
+        }
+        var fechaCierrePrev = e.FechaCierre;
+        e.Estado = HistoriaClinicaEstado.Abierta;
+        e.FechaCierre = null;
+        // Auditoria: reabrir una escala ya marcada como definitiva es una accion
+        // administrativa que debe quedar trazada (quien, cuando, sobre que escala
+        // y de que HC).
+        audit.Write(actor, "escala.reabrir", nameof(HistoriaClinicaEscala), e.Id,
+            previousValue: new { estado = HistoriaClinicaEstado.Cerrada.ToString(), fechaCierre = fechaCierrePrev },
+            newValue: new { estado = e.Estado.ToString(), historiaClinicaId = e.HistoriaClinicaId },
+            tenantId: e.TenantId);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 

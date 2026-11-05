@@ -50,8 +50,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
         byte[]? Inline, int RenderIdx, string? Cup = null, string? CupNombre = null, string? Sede = null);
 
     /// <summary>URL de un documento de historia a renderizar + su CUP, nombre de servicio y
-    /// sede (para el rotulo separador por CUP). Cup null = no se pidio rotulo.</summary>
-    private readonly record struct UrlCup(string Url, string? Cup, string? CupNombre, string? Sede);
+    /// sede (para el rotulo separador por CUP). Cup null = no se pidio rotulo. <see cref="Fecha"/>
+    /// (fecha de atencion) permite ordenar JUNTAS las HC de varios contenidos "Formulario por
+    /// tipo" por CUP->fecha, para que el archivo siga el mismo orden plano del snapshot.</summary>
+    private readonly record struct UrlCup(string Url, string? Cup, string? CupNombre, string? Sede, DateTimeOffset Fecha);
 
     /// <summary>Fila de HC para ordenar el contenido "Formulario por tipo": id + fecha
     /// de atencion (para orden cronologico) — el CUP se resuelve aparte por lote.</summary>
@@ -671,11 +673,15 @@ public sealed class TipologiaZipService : ITipologiaZipService
             .FirstOrDefaultAsync(ct);
         if (pid is not Guid pacienteId) { return null; }
 
-        // Que adjuntos (escalas/consentimientos/docs de evolucion) puede renderizar
-        // /p/hc-form para ESTE archivo: depende de los tipos configurados (content-driven).
+        // Modelo plano (v0.155.0): cada HC base renderiza solo su hoja (docsRender=HC), sin
+        // anidar sub-documentos. Los distintos tipos de formato se renderizan como lineas y se
+        // ordenan JUNTAS por CUP->fecha (ver abajo), igual que el detalle del snapshot.
         var docsRender = CalcularDocsRender(archivo);
 
         var partes = new List<PartePlan>();
+        // Acumula las HC de TODOS los contenidos "Formulario por tipo" para ordenarlas juntas.
+        var formTipoUrls = new List<UrlCup>();
+        int? ftInsertIdx = null;
         foreach (var c in archivo.Contenidos)
         {
             ct.ThrowIfCancellationRequested();
@@ -694,11 +700,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     }
                     break;
                 case OrigenInformeItem.FormularioPorTipo:
-                    foreach (var u in await ResolverUrlsFormularioPorTipoAsync(pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct, desde: desde, hasta: hasta, rotuloPorCup: archivo.RotuloSeparadorCup))
-                    {
-                        partes.Add(new PartePlan(null, allUrls.Count, u.Cup, u.CupNombre, u.Sede));
-                        allUrls.Add(u.Url);
-                    }
+                    ftInsertIdx ??= partes.Count;
+                    formTipoUrls.AddRange(await ResolverUrlsFormularioPorTipoAsync(
+                        pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct,
+                        desde: desde, hasta: hasta, rotuloPorCup: archivo.RotuloSeparadorCup));
                     break;
                 case OrigenInformeItem.DocumentoHc:
                 case OrigenInformeItem.DocumentoPacienteLibre:
@@ -714,7 +719,26 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     break;
             }
         }
+        InsertarFormTipoUnificado(partes, formTipoUrls, ftInsertIdx, allUrls, archivo);
         return partes;
+    }
+
+    /// <summary>Ordena las HC acumuladas de los contenidos "Formulario por tipo" por CUP->fecha
+    /// (modelo plano) y las inserta como un bloque unico en la posicion del PRIMER contenido de
+    /// ese tipo, preservando el resto de partes (autorizacion/firma/anexos) en su lugar.</summary>
+    private static void InsertarFormTipoUnificado(
+        List<PartePlan> partes, List<UrlCup> formTipoUrls, int? insertIdx,
+        List<string> allUrls, InformeItemDto archivo)
+    {
+        if (formTipoUrls.Count == 0) { return; }
+        var ordenadas = OrdenarUrlCupsUnificado(formTipoUrls, archivo.OrdenNiveles, archivo.RotuloSeparadorCup);
+        var bloque = new List<PartePlan>(ordenadas.Count);
+        foreach (var u in ordenadas)
+        {
+            bloque.Add(new PartePlan(null, allUrls.Count, u.Cup, u.CupNombre, u.Sede));
+            allUrls.Add(u.Url);
+        }
+        partes.InsertRange(Math.Clamp(insertIdx ?? partes.Count, 0, partes.Count), bloque);
     }
 
     /// <summary>
@@ -861,6 +885,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
     {
         var unoCodigo = new[] { codigo };
         var partes = new List<PartePlan>();
+        // Modelo plano (v0.155.0): las HC de todos los contenidos "Formulario por tipo" se juntan
+        // y ordenan por CUP->fecha (igual que el detalle del snapshot); sin anidar sub-documentos.
+        var formTipoUrls = new List<UrlCup>();
+        int? ftInsertIdx = null;
         foreach (var c in archivo.Contenidos)
         {
             ct.ThrowIfCancellationRequested();
@@ -880,12 +908,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     }
                     break;
                 case OrigenInformeItem.FormularioPorTipo:
-                    foreach (var u in await ResolverUrlsFormularioPorTipoAsync(
-                        pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct, codigo, hcAut, desde, hasta, archivo.RotuloSeparadorCup))
-                    {
-                        partes.Add(new PartePlan(null, allUrls.Count, u.Cup, u.CupNombre, u.Sede));
-                        allUrls.Add(u.Url);
-                    }
+                    ftInsertIdx ??= partes.Count;
+                    formTipoUrls.AddRange(await ResolverUrlsFormularioPorTipoAsync(
+                        pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct,
+                        codigo, hcAut, desde, hasta, archivo.RotuloSeparadorCup));
                     break;
                 case OrigenInformeItem.DocumentoHc:
                 case OrigenInformeItem.DocumentoPacienteLibre:
@@ -900,6 +926,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     break;
             }
         }
+        InsertarFormTipoUnificado(partes, formTipoUrls, ftInsertIdx, allUrls, archivo);
         return partes;
     }
 
@@ -1006,20 +1033,13 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// base (<c>HC</c>); agrega adjuntos SOLO si el archivo tiene un contenido de ese tipo, para
     /// que "Formulario por tipo" no arrastre escalas/consentimientos que el usuario no pidio.
     /// Mapeo: ESCALAS-&gt;ESC, CONSENTIMIENTO-&gt;CON, EVOLUCION-&gt;EVO.</summary>
-    private static string CalcularDocsRender(InformeItemDto archivo)
-    {
-        var tipos = archivo.Contenidos
-            .Where(c => c.Origen == OrigenInformeItem.FormularioPorTipo
-                        && !string.IsNullOrWhiteSpace(c.FormularioTipo))
-            .Select(c => c.FormularioTipo!.Trim().ToUpperInvariant())
-            .ToHashSet();
-
-        var docs = new List<string> { "HC" };
-        if (tipos.Any(t => t.StartsWith("ESCALA", StringComparison.Ordinal))) { docs.Add("ESC"); }
-        if (tipos.Any(t => t.StartsWith("CONSENTIMIENTO", StringComparison.Ordinal))) { docs.Add("CON"); }
-        if (tipos.Any(t => t.StartsWith("EVOLUCION", StringComparison.Ordinal))) { docs.Add("EVO"); }
-        return string.Join(",", docs);
-    }
+    /// <summary>Modelo PLANO (v0.155.0): cada HC base renderiza SOLO su propia hoja, sin
+    /// anidar sub-documentos (evoluciones/escalas/consentimientos) debajo. Cada tipo de
+    /// formato (HISTORIA CLINICA / EVOLUCION / NOTAS...) se renderiza por su propio contenido
+    /// "Formulario por tipo" como una linea mas, y las lineas se ordenan JUNTAS por CUP->fecha
+    /// (ver <see cref="OrdenarUrlCupsUnificado"/>). Asi el archivo = exactamente las lineas del
+    /// snapshot, en su mismo orden. Reemplaza el modelo anidado anterior (y su dedup).</summary>
+    private static string CalcularDocsRender(InformeItemDto archivo) => "HC";
 
     private async Task<List<UrlCup>> ResolverUrlsFormularioPorTipoAsync(
         Guid pacienteId, string? tipo, bool soloUltimo,
@@ -1173,10 +1193,67 @@ public sealed class TipologiaZipService : ITipologiaZipService
         return filas.Select(f =>
         {
             var url = $"{baseUrl}/p/hc-form/{f.Id}?t={_printTokens.Mint(f.Id, tid)}&docs={docsRender}{rango}";
-            if (!rotuloPorCup) { return new UrlCup(url, null, null, null); }
+            if (!rotuloPorCup) { return new UrlCup(url, null, null, null, f.Fecha); }
             var ci = cupInfo.TryGetValue(f.Id, out var c) ? c : ("", "", "");
-            return new UrlCup(url, ci.Item1, ci.Item2, ci.Item3);
+            return new UrlCup(url, ci.Item1, ci.Item2, ci.Item3, f.Fecha);
         }).ToList();
+    }
+
+    /// <summary>Ordena JUNTAS las HC de varios contenidos "Formulario por tipo" (HISTORIA
+    /// CLINICA + EVOLUCION + NOTAS...) en una sola secuencia, para que el archivo siga el
+    /// mismo orden PLANO del snapshot (cada HC base = una linea), en vez de agrupar por tipo
+    /// de formato. Con rotulo por CUP: el CUP manda (numericos primero, los que empiezan por
+    /// letra al final) y la fecha ordena dentro de cada CUP. Sin rotulo: respeta OrdenNiveles
+    /// (o cronologico ascendente por defecto).</summary>
+    private static List<UrlCup> OrdenarUrlCupsUnificado(
+        List<UrlCup> urls, IReadOnlyList<InformeOrdenNivelDto>? ordenNiveles, bool rotuloPorCup)
+    {
+        if (urls.Count <= 1) { return urls; }
+
+        List<InformeOrdenNivelDto> niveles;
+        if (rotuloPorCup)
+        {
+            niveles = new List<InformeOrdenNivelDto> { new("cup", false) };
+            var fechas = (ordenNiveles ?? Array.Empty<InformeOrdenNivelDto>())
+                .Where(n => n.Campo == "fecha").ToList();
+            niveles.AddRange(fechas.Count > 0 ? fechas : new List<InformeOrdenNivelDto> { new("fecha", false) });
+        }
+        else
+        {
+            niveles = (ordenNiveles is { Count: > 0 })
+                ? ordenNiveles.ToList()
+                : new List<InformeOrdenNivelDto> { new("fecha", false) };
+        }
+
+        IOrderedEnumerable<UrlCup>? ordered = null;
+        foreach (var n in niveles)
+        {
+            if (n.Campo == "cup")
+            {
+                Func<UrlCup, int> kG = u => CupSortKey(u.Cup).Grupo;
+                Func<UrlCup, string> kA = u => CupSortKey(u.Cup).Alfa;
+                Func<UrlCup, decimal> kN = u => CupSortKey(u.Cup).Num;
+                if (ordered is null)
+                {
+                    ordered = n.Desc ? urls.OrderByDescending(kG) : urls.OrderBy(kG);
+                }
+                else
+                {
+                    ordered = n.Desc ? ordered.ThenByDescending(kG) : ordered.ThenBy(kG);
+                }
+                ordered = n.Desc
+                    ? ordered.ThenByDescending(kA, StringComparer.Ordinal).ThenByDescending(kN)
+                    : ordered.ThenBy(kA, StringComparer.Ordinal).ThenBy(kN);
+            }
+            else
+            {
+                Func<UrlCup, IComparable> key = u => u.Fecha;
+                ordered = ordered is null
+                    ? (n.Desc ? urls.OrderByDescending(key) : urls.OrderBy(key))
+                    : (n.Desc ? ordered.ThenByDescending(key) : ordered.ThenBy(key));
+            }
+        }
+        return (ordered ?? urls.OrderBy(u => u.Fecha)).ToList();
     }
 
     /// <summary>Periodo (fechaInicio/fechaFin) del snapshot desde su FiltrosJson. Se usa

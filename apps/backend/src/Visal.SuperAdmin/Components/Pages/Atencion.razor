@@ -1161,7 +1161,11 @@ else
         new ColDef("nom_paciente",  "NomPaciente",     "Paciente",                                17),
         new ColDef("sede",          "Sede",            "Sede",                                    18),
         new ColDef("profesional",   "Profesional",     "Profesional",                             19),
-        new ColDef("fec_nota",      "FecNota",         "Fecha<br/>Nota",                          20),
+        // Fecha de atencion de la HC vinculada a la sesion (columna fecha_atencion,
+        // fuente unica). Se ve "—" mientras la sesion sigue Pendiente (aun no hay HC).
+        // Antes esta columna se llamaba "Fecha Nota" (clave fec_nota); se renombro a
+        // "Fecha de atencion" para que sea clara y visible por defecto.
+        new ColDef("fecha_atencion", "Fecha de atencion", "Fecha de<br/>atencion",                 20),
         // HH:mm de HistoriaClinica.FechaCierre — cuando la HC vinculada a esta
         // sesion ya esta Cerrada. Colocado a la derecha de FechaNota (misma
         // sesion, mismo evento) para que el operador vea fecha + hora juntos.
@@ -1427,10 +1431,10 @@ else
                     : "—");
                 __b.CloseElement();
                 break;
-            case "fec_nota":
+            case "fecha_atencion":
                 __b.OpenElement(seq++, "td");
                 __b.AddAttribute(seq++, "data-label", label);
-                __b.AddContent(seq++, s.FechaAtencion is DateOnly fa ? fa.ToString("dd/MM/yyyy") : "");
+                __b.AddContent(seq++, s.FechaAtencion is DateOnly fa ? fa.ToString("dd/MM/yyyy") : "—");
                 __b.CloseElement();
                 break;
             case "hora_cierre":

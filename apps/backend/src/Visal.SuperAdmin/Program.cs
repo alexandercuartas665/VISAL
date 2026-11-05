@@ -1450,9 +1450,10 @@ app.MapGet("/facturacion-clinica/snapshots/{id:guid}/tipologia/{itemId:guid}/fal
 }).RequireAuthorization();
 
 // Simulacion (dry-run) de la generacion de un archivo de cuenta medica: corre solo la
-// planeacion (no renderiza PDFs) y entrega un .xlsx con lo que saldria + hoja de duplicados.
-// Sirve para validar casos de impresion y cazar contenido repetido sin generar nada pesado.
-app.MapGet("/facturacion-clinica/snapshots/{id:guid}/tipologia/{itemId:guid}/simulacion.xlsx", async (
+// planeacion (no renderiza PDFs) y entrega un .txt que lista, por cada PDF que saldria, el
+// orden REAL de sus partes (HC-xxxxxx / [AUT] / [FIRMA] / [ANEXO]) y marca las historias que
+// se repiten dentro del mismo archivo. Sirve para validar rapido cada snapshot y cazar fallas.
+app.MapGet("/facturacion-clinica/snapshots/{id:guid}/tipologia/{itemId:guid}/simulacion.txt", async (
     Guid id,
     Guid itemId,
     Visal.SuperAdmin.Facturacion.ITipologiaZipService zipSvc,

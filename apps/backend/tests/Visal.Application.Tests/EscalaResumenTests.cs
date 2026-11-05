@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
 using Visal.Application.Tenancy;
 using Visal.Domain.Entities;
+using Visal.Domain.Enums;
 using Visal.Infrastructure.Persistence;
 using Xunit;
 
@@ -25,6 +26,13 @@ namespace Visal.Application.Tests;
 public sealed class EscalaResumenTests
 {
     private static readonly Guid Tenant = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+
+    private sealed class NoopAudit : IAuditWriter
+    {
+        public void Write(Guid actorUserId, string actionName, string entityName, Guid? entityId,
+            object? previousValue, object? newValue, Guid? tenantId = null, string? reason = null,
+            AuditActorType actorType = AuditActorType.Human) { }
+    }
 
     private sealed class FakeTenantContext : ITenantContext
     {
@@ -121,7 +129,7 @@ public sealed class EscalaResumenTests
         var escalaId = await SembrarEscalaAbiertaAsync(ctx, hcId, escFormId, "90", "DEPENDENCIA LEVE");
 
         var svc = new EscalaService(ctx, new FakeTenantContext { TenantId = Tenant },
-            new Visal.Application.Tenancy.Forms.BarthelDenormalizador(ctx));
+            new Visal.Application.Tenancy.Forms.BarthelDenormalizador(ctx), new NoopAudit());
         var ok = await svc.CerrarAsync(escalaId, "", Guid.NewGuid());
 
         Assert.True(ok);
@@ -144,7 +152,7 @@ public sealed class EscalaResumenTests
         var e2 = await SembrarEscalaAbiertaAsync(ctx, hcId, escFormId, "40", "DEPENDENCIA MODERADA");
 
         var svc = new EscalaService(ctx, new FakeTenantContext { TenantId = Tenant },
-            new Visal.Application.Tenancy.Forms.BarthelDenormalizador(ctx));
+            new Visal.Application.Tenancy.Forms.BarthelDenormalizador(ctx), new NoopAudit());
         await svc.CerrarAsync(e1, "", Guid.NewGuid());
         await svc.CerrarAsync(e2, "", Guid.NewGuid());
 
@@ -163,7 +171,7 @@ public sealed class EscalaResumenTests
         var escalaId = await SembrarEscalaAbiertaAsync(ctx, hcId, escFormId, "90", "DEPENDENCIA LEVE");
 
         var svc = new EscalaService(ctx, new FakeTenantContext { TenantId = Tenant },
-            new Visal.Application.Tenancy.Forms.BarthelDenormalizador(ctx));
+            new Visal.Application.Tenancy.Forms.BarthelDenormalizador(ctx), new NoopAudit());
         await svc.CerrarAsync(escalaId, "", Guid.NewGuid());
 
         Assert.Null(LeerAnalisis(ctx, hcId));   // analisis sigue vacio

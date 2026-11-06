@@ -2,7 +2,7 @@ namespace Visal.Application.Tenancy;
 
 /// <summary>Subcategoria (segundo nivel) de una tipologia.</summary>
 public sealed record SubcategoriaArchivoDto(
-    Guid Id, Guid TipologiaArchivoId, string Nombre, bool Activo);
+    Guid Id, Guid TipologiaArchivoId, string Nombre, bool Activo, int Orden = 0);
 
 public sealed record TipologiaArchivoDto(
     Guid Id, string Nombre, string Color, bool Activo, DateTimeOffset CreatedAt,
@@ -12,7 +12,7 @@ public sealed record SaveTipologiaArchivoRequest(
     Guid? Id, string Nombre, string Color, bool Activo);
 
 public sealed record SaveSubcategoriaArchivoRequest(
-    Guid? Id, Guid TipologiaArchivoId, string Nombre, bool Activo);
+    Guid? Id, Guid TipologiaArchivoId, string Nombre, bool Activo, int Orden = 0);
 
 /// <summary>
 /// Catalogo de tipologias (conceptos) que el tenant le da a los documentos que se

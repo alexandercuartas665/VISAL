@@ -141,6 +141,7 @@ public sealed record AdjuntarDocumentoPacienteRequest(
     long Tamano,
     string? Categoria,
     string? Anotaciones,
+    string? Subcategoria = null,
     DateTimeOffset? FechaDocumento = null);
 
 /// <summary>

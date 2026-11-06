@@ -427,6 +427,7 @@ public sealed class NotaMedicaService(
             TipoMime = req.TipoMime,
             Tamano = req.Tamano,
             Categoria = req.Categoria,
+            Subcategoria = string.IsNullOrWhiteSpace(req.Subcategoria) ? null : req.Subcategoria.Trim(),
             Anotaciones = req.Anotaciones,
             // Sin HC de origen: la fecha del documento arranca en la que mande la UI,
             // o el momento de la carga.

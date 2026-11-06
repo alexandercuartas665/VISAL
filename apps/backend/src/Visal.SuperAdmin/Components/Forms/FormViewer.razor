@@ -356,6 +356,10 @@ else
     /// editarlos a mano (su valor se recalcula desde la fuente).
     /// </summary>
     [Parameter] public HashSet<string>? ReadOnlyKeys { get; set; }
+    /// <summary>Tipo de documento del paciente (RC/TI/CC/CE/PT...). Si se provee, el campo del
+    /// documento (clave "cc", etiqueta estatica "CC") se rotula con este tipo real en vez de "CC".
+    /// Null = se mantiene la etiqueta del esquema (sin cambio). No altera datos ni claves.</summary>
+    [Parameter] public string? TipoDocumentoPaciente { get; set; }
     [Parameter] public EventCallback<KeyValuePair<string, string?>> OnValueChanged { get; set; }
 
     /// <summary>True si el nodo concreto debe renderizarse readonly: porque el visor
@@ -941,7 +945,7 @@ else
                 var esPrefill = !string.IsNullOrEmpty(node.Name) && ReadOnlyKeys is not null && ReadOnlyKeys.Contains(node.Name);
                 var auto = esPrefill && !node.EditableConPrefill;
                 <label class="fv-lbl">
-                    @node.Label @(node.Required ? "*" : "")
+                    @EtiquetaCampoDocumento.Resolver(node.Name, node.Label, TipoDocumentoPaciente) @(node.Required ? "*" : "")
                     @if (auto) { <span class="fv-auto-badge" title="Este campo se llena automaticamente desde la HC. No se edita manualmente.">auto</span> }
                     else if (esPrefill && node.EditableConPrefill) { <span class="fv-auto-badge" style="background:#e0f2fe;color:#075985;" title="Se prellena automaticamente pero puedes editarlo.">prellenado - editable</span> }
                 </label>

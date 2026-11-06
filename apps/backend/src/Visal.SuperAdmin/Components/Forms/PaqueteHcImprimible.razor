@@ -1832,7 +1832,7 @@ else
         // (textarea, text, etc.) sin transformar.
         var fieldDisplay = FormatCellForPrint(val, n.FieldType);
         <div class="pack-cell" style="grid-column: span @span;">
-            <div class="pack-label">@n.Label</div>
+            <div class="pack-label">@EtiquetaCampoDocumento.Resolver(n.Name, n.Label, _paciente?.TipoDocumento)</div>
             @if (IsImageUrl(val))
             {
                 @if (n.FieldType == "image")

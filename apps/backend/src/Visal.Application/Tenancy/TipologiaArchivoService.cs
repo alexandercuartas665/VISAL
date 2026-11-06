@@ -25,12 +25,12 @@ public sealed class TipologiaArchivoService : ITipologiaArchivoService
         var tipIds = tips.Select(t => t.Id).ToList();
         var sq = _db.TipologiaArchivoSubcategorias.AsNoTracking().Where(s => tipIds.Contains(s.TipologiaArchivoId));
         if (soloActivos) { sq = sq.Where(s => s.Activo); }
-        var subsPorTip = (await sq.OrderBy(s => s.Nombre).ToListAsync(ct))
+        var subsPorTip = (await sq.OrderBy(s => s.Orden).ThenBy(s => s.Nombre).ToListAsync(ct))
             .GroupBy(s => s.TipologiaArchivoId)
             .ToDictionary(
                 g => g.Key,
                 g => (IReadOnlyList<SubcategoriaArchivoDto>)g
-                    .Select(s => new SubcategoriaArchivoDto(s.Id, s.TipologiaArchivoId, s.Nombre, s.Activo)).ToList());
+                    .Select(s => new SubcategoriaArchivoDto(s.Id, s.TipologiaArchivoId, s.Nombre, s.Activo, s.Orden)).ToList());
 
         return tips.Select(t => new TipologiaArchivoDto(
             t.Id, t.Nombre, t.Color, t.Activo, t.CreatedAt,
@@ -42,8 +42,8 @@ public sealed class TipologiaArchivoService : ITipologiaArchivoService
         var t = await _db.TipologiaArchivos.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (t is null) { return null; }
         var subs = await _db.TipologiaArchivoSubcategorias.AsNoTracking()
-            .Where(s => s.TipologiaArchivoId == id).OrderBy(s => s.Nombre)
-            .Select(s => new SubcategoriaArchivoDto(s.Id, s.TipologiaArchivoId, s.Nombre, s.Activo))
+            .Where(s => s.TipologiaArchivoId == id).OrderBy(s => s.Orden).ThenBy(s => s.Nombre)
+            .Select(s => new SubcategoriaArchivoDto(s.Id, s.TipologiaArchivoId, s.Nombre, s.Activo, s.Orden))
             .ToListAsync(ct);
         return new TipologiaArchivoDto(t.Id, t.Nombre, t.Color, t.Activo, t.CreatedAt, subs);
     }
@@ -132,8 +132,9 @@ public sealed class TipologiaArchivoService : ITipologiaArchivoService
         }
         entity.Nombre = nombre;
         entity.Activo = req.Activo;
+        entity.Orden = req.Orden;
         await _db.SaveChangesAsync(ct);
-        return new SubcategoriaArchivoDto(entity.Id, entity.TipologiaArchivoId, entity.Nombre, entity.Activo);
+        return new SubcategoriaArchivoDto(entity.Id, entity.TipologiaArchivoId, entity.Nombre, entity.Activo, entity.Orden);
     }
 
     public async Task<bool> DeleteSubcategoriaAsync(Guid id, Guid actor, CancellationToken ct = default)

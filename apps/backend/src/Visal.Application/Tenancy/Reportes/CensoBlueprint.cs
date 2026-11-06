@@ -40,6 +40,10 @@ public static class CensoBlueprint
         {
             new("sede", "Sede", ReporteParametroTipo.Lista, ReporteParametroFuente.Sedes),
             new("rango_fecha", "Rango de fechas (inicial / final)", ReporteParametroTipo.RangoFecha),
+            // Filtro de paciente (documento exacto): pensado para PRUEBAS, generar el censo de un
+            // solo paciente. Enlazado como Eq en las 6 hojas (numero_documento en las de paciente,
+            // paciente.numero_documento en las de encuesta). Vacio = censo completo (no filtra).
+            new("paciente", "Paciente (documento, para pruebas)", ReporteParametroTipo.Texto),
             // El Barthel NO es un parametro opcional: es una condicion fija de la hoja "Base de
             // Pacientes" (ver sus Existencias). No se pide al descargar.
         };
@@ -61,6 +65,7 @@ public static class CensoBlueprint
     // Claves de los parametros de ejecucion (una sola fuente de verdad para los filtros).
     private const string ParamSede = "sede";
     private const string ParamRangoFecha = "rango_fecha";
+    private const string ParamPaciente = "paciente";
 
     // Codigo del FormDefinition de la escala Barthel (destino de la relacion de formularios).
     private const string CodigoBarthel = "PP-FO-46";
@@ -118,6 +123,7 @@ public static class CensoBlueprint
             filtros:
             [
                 new("sede_id", ReporteFiltroOp.Eq, ParamClave: ParamSede),
+                new("numero_documento", ReporteFiltroOp.Eq, ParamClave: ParamPaciente),
             ],
             orden: [new("primer_apellido"), new("primer_nombre")]) with
         {
@@ -188,6 +194,7 @@ public static class CensoBlueprint
             [
                 new("sede_id", ReporteFiltroOp.Eq, ParamClave: ParamSede),
                 new("fecha_comentan", ReporteFiltroOp.Between, ParamClave: ParamRangoFecha),
+                new("numero_documento", ReporteFiltroOp.Eq, ParamClave: ParamPaciente),
             ],
             orden: [new("fecha_comentan")]);
 
@@ -221,6 +228,7 @@ public static class CensoBlueprint
             [
                 new("paciente.sede_id", ReporteFiltroOp.Eq, ParamClave: ParamSede),
                 new("fecha_llamada", ReporteFiltroOp.Between, ParamClave: ParamRangoFecha),
+                new("paciente.numero_documento", ReporteFiltroOp.Eq, ParamClave: ParamPaciente),
             ],
             orden: [new("mes")]);
 
@@ -241,6 +249,7 @@ public static class CensoBlueprint
             [
                 new("sede_id", ReporteFiltroOp.Eq, ParamClave: ParamSede),
                 new("fecha_ingreso", ReporteFiltroOp.Between, ParamClave: ParamRangoFecha),
+                new("numero_documento", ReporteFiltroOp.Eq, ParamClave: ParamPaciente),
             ],
             orden: [new("Cant Px's", Desc: true)]);
 
@@ -268,6 +277,7 @@ public static class CensoBlueprint
                 new("estado", ReporteFiltroOp.Eq, ["FALLECIMIENTO"]),
                 new("sede_id", ReporteFiltroOp.Eq, ParamClave: ParamSede),
                 new("fecha_fallecimiento", ReporteFiltroOp.Between, ParamClave: ParamRangoFecha),
+                new("numero_documento", ReporteFiltroOp.Eq, ParamClave: ParamPaciente),
             ],
             orden: [new("mes_fallecimiento")]);
 
@@ -284,6 +294,7 @@ public static class CensoBlueprint
                 new("estado", ReporteFiltroOp.Eq, ["Realizada"]),
                 new("paciente.sede_id", ReporteFiltroOp.Eq, ParamClave: ParamSede),
                 new("fecha_llamada", ReporteFiltroOp.Between, ParamClave: ParamRangoFecha),
+                new("paciente.numero_documento", ReporteFiltroOp.Eq, ParamClave: ParamPaciente),
             ],
             orden: [new("mes")]) with
         {

@@ -16,6 +16,11 @@ public class TipologiaArchivoSubcategoria : TenantEntity
     /// <summary>Nombre visible de la subcategoria (ej. "Laboratorio").</summary>
     public string Nombre { get; set; } = null!;
 
+    /// <summary>Orden de aparicion en los dropdowns y en la configuracion (ascendente).
+    /// Se captura como numero en la fila de la subcategoria. A igualdad de orden se
+    /// desempata por <see cref="Nombre"/>. Por defecto 0.</summary>
+    public int Orden { get; set; }
+
     /// <summary>Si esta inactiva no aparece en los dropdowns, pero se conserva el
     /// historial de documentos que la usaron.</summary>
     public bool Activo { get; set; } = true;

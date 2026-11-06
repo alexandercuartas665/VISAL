@@ -579,7 +579,7 @@
                             <div class="pac-doc-upload-row">
                                 <div class="pac-doc-upload-f">
                                     <label>Tipologia</label>
-                                    <select class="form-select form-select-sm" @bind="_docUpTipologia">
+                                    <select class="form-select form-select-sm" @bind="_docUpTipologia" @bind:after="OnDocUpTipologiaChanged">
                                         <option value="">Seleccione...</option>
                                         @foreach (var t in _tipologiasArchivo)
                                         {
@@ -593,6 +593,19 @@
                                         </small>
                                     }
                                 </div>
+                                @if (SubcatsDe(_docUpTipologia).Count > 0)
+                                {
+                                    <div class="pac-doc-upload-f">
+                                        <label>Subcategoria</label>
+                                        <select class="form-select form-select-sm" @bind="_docUpSubcategoria" title="Subcategoria del archivo">
+                                            <option value="">-- Subcategoria (opcional) --</option>
+                                            @foreach (var s in SubcatsDe(_docUpTipologia))
+                                            {
+                                                <option value="@s.Nombre">@s.Nombre</option>
+                                            }
+                                        </select>
+                                    </div>
+                                }
                                 <div class="pac-doc-upload-f pac-doc-upload-f-wide">
                                     <label>Anotaciones (opcional)</label>
                                     <input class="form-control form-control-sm" @bind="_docUpAnotaciones"
@@ -1394,6 +1407,7 @@
     // NotaMedicaId=null y HistoriaClinicaId=null, quedando ligado solo al paciente.
     private List<TipologiaArchivoDto> _tipologiasArchivo = new();
     private string _docUpTipologia = "";
+    private string _docUpSubcategoria = "";
     private string _docUpAnotaciones = "";
     private bool _docUpBusy;
     private string? _docUpError;
@@ -1421,6 +1435,9 @@
         catch (Exception ex) { _docs = new(); _docsError = ex.Message; }
         finally { _docsBusy = false; }
     }
+
+    // Al cambiar la tipologia del proximo archivo, la subcategoria anterior ya no aplica.
+    private void OnDocUpTipologiaChanged() => _docUpSubcategoria = "";
 
     private async Task OnAdjuntarArchivoPaciente(InputFileChangeEventArgs e, Guid pacienteId)
     {
@@ -1453,7 +1470,8 @@
                 f.ContentType,
                 f.Size,
                 string.IsNullOrWhiteSpace(_docUpTipologia) ? null : _docUpTipologia,
-                string.IsNullOrWhiteSpace(_docUpAnotaciones) ? null : _docUpAnotaciones.Trim()
+                string.IsNullOrWhiteSpace(_docUpAnotaciones) ? null : _docUpAnotaciones.Trim(),
+                string.IsNullOrWhiteSpace(_docUpSubcategoria) ? null : _docUpSubcategoria
             ), Guid.Empty);
 
             _docUpMsg = "Archivo adjuntado.";

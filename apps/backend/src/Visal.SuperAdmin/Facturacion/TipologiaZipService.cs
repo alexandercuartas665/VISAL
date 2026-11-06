@@ -1103,9 +1103,9 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 case OrigenInformeItem.DocumentoHc:
                 case OrigenInformeItem.DocumentoPacienteLibre:
                 case OrigenInformeItem.DocumentoNota:
-                    foreach (var b in await CargarDocumentosExternosAsync(pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct, membrete: archivo.MembreteHcCup))
+                    foreach (var d in await CargarDocumentosExternosAsync(pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct, membrete: archivo.MembreteHcCup, rotuloPorCup: archivo.RotuloSeparadorCup))
                     {
-                        partes.Add(new PartePlan(b, -1, Etiqueta: "[ANEXO]"));
+                        partes.Add(new PartePlan(d.Bytes, -1, Cup: d.Cup, CupNombre: d.CupNombre, Etiqueta: "[ANEXO]"));
                     }
                     break;
                 default:
@@ -1312,10 +1312,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 case OrigenInformeItem.DocumentoHc:
                 case OrigenInformeItem.DocumentoPacienteLibre:
                 case OrigenInformeItem.DocumentoNota:
-                    foreach (var b in await CargarDocumentosExternosAsync(
-                        pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct, codigo, hcAut, archivo.MembreteHcCup))
+                    foreach (var d in await CargarDocumentosExternosAsync(
+                        pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct, codigo, hcAut, archivo.MembreteHcCup, archivo.RotuloSeparadorCup))
                     {
-                        partes.Add(new PartePlan(b, -1, Etiqueta: "[ANEXO]"));
+                        partes.Add(new PartePlan(d.Bytes, -1, Cup: d.Cup, CupNombre: d.CupNombre, Etiqueta: "[ANEXO]"));
                     }
                     break;
                 default:
@@ -1331,10 +1331,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// (binario en wwwroot/uploads/notas), filtrando por "ambito" segun el origen y por
     /// categoria = tipologia elegida (si no se eligio, cualquiera). PDFs pasan tal cual;
     /// imagenes se envuelven en una pagina. SoloUltimo = solo el adjunto mas reciente.</summary>
-    private async Task<List<byte[]>> CargarDocumentosExternosAsync(
+    private async Task<List<(byte[] Bytes, string? Cup, string? CupNombre)>> CargarDocumentosExternosAsync(
         Guid pacienteId, OrigenInformeItem origen, string? tipologiaNombre, bool soloUltimo, CancellationToken ct,
         string? filtroAutorizacion = null, IReadOnlyDictionary<Guid, HashSet<string>>? hcAut = null,
-        bool membrete = false)
+        bool membrete = false, bool rotuloPorCup = false)
     {
         var q = _db.NotaMedicaDocumentos.AsNoTracking()
             .Where(d => d.PacienteId == pacienteId);
@@ -1370,20 +1370,36 @@ public sealed class TipologiaZipService : ITipologiaZipService
             rows = rows.Where(r => r.HistoriaClinicaId is Guid hid
                                    && hcAut.TryGetValue(hid, out var set) && set.Contains(fa)).ToList();
         }
-        if (rows.Count == 0) { return new List<byte[]>(); }
+        if (rows.Count == 0) { return new(); }
 
         // SoloUltimo = el mas reciente; si no, todos en orden cronologico ascendente.
         var seleccion = (soloUltimo ? rows.Take(1) : rows.AsEnumerable().Reverse()).ToList();
 
-        // Membrete por documento (opcional): resuelve HC-xxxxxx + CUP + servicio de la historia
-        // de la que cuelga cada anexo, en una sola consulta, para estamparlo arriba del PDF.
-        var membretes = membrete
+        // Resuelve HC-xxxxxx + CUP + servicio de la historia de la que cuelga cada anexo (una sola
+        // consulta) si hace falta: para estampar el membrete (membrete) y/o para ordenar por CUP
+        // y poner la cabecera "CUP ..." (rotuloPorCup).
+        var info = (membrete || rotuloPorCup)
             ? await ResolverMembretePorHcAsync(
                 seleccion.Where(r => r.HistoriaClinicaId is Guid)
                          .Select(r => r.HistoriaClinicaId!.Value).Distinct().ToList(), ct)
             : new Dictionary<Guid, (string Hc, string Cup, string Serv)>();
 
-        var res = new List<byte[]>();
+        string? CupDe(Guid? hid) => hid is Guid id && info.TryGetValue(id, out var m) && !string.IsNullOrWhiteSpace(m.Cup) ? m.Cup : null;
+        string? ServDe(Guid? hid) => hid is Guid id && info.TryGetValue(id, out var m) && !string.IsNullOrWhiteSpace(m.Serv) ? m.Serv : null;
+
+        // "Ordenar por CUP": agrupa los anexos por el CUP de su historia (numericos primero, los
+        // que empiezan por letra despues; los anexos sin CUP al final), respetando el orden
+        // cronologico dentro de cada CUP (OrderBy es estable). Sin el flag -> orden cronologico.
+        if (rotuloPorCup)
+        {
+            seleccion = seleccion
+                .OrderBy(r => CupSortKey(CupDe(r.HistoriaClinicaId)).Grupo)
+                .ThenBy(r => CupSortKey(CupDe(r.HistoriaClinicaId)).Alfa, StringComparer.Ordinal)
+                .ThenBy(r => CupSortKey(CupDe(r.HistoriaClinicaId)).Num)
+                .ToList();
+        }
+
+        var res = new List<(byte[] Bytes, string? Cup, string? CupNombre)>();
         foreach (var r in seleccion)
         {
             var ruta = r.RutaArchivo;
@@ -1392,10 +1408,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
             if (pdf is null) { continue; }
             if (membrete)
             {
-                var texto = ConstruirTextoMembrete(r.HistoriaClinicaId, membretes);
+                var texto = ConstruirTextoMembrete(r.HistoriaClinicaId, info);
                 pdf = EstamparMembrete(pdf, texto) ?? pdf;
             }
-            res.Add(pdf);
+            res.Add((pdf, CupDe(r.HistoriaClinicaId), ServDe(r.HistoriaClinicaId)));
         }
         return res;
     }

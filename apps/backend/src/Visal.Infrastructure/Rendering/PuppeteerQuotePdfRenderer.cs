@@ -102,6 +102,25 @@ public sealed class PuppeteerQuotePdfRenderer : IQuotePdfRenderer
             Timeout = 30000
         });
         await page.WaitForSelectorAsync(waitForSelector, new WaitForSelectorOptions { Timeout = 25000 });
+
+        // Las firmas, logos y QR son <img src="/uploads/..."> que se descargan por red
+        // DESPUES de que aparece el selector del render. Si capturamos el PDF sin esperarlas,
+        // a veces una imagen pierde la carrera y esa pagina sale en blanco (p. ej. una firma
+        // de profesional ausente de forma intermitente, con el mismo dato correcto). Esperamos
+        // a que TODA imagen quede 'complete' (cargada o con error) antes de imprimir. Usar
+        // 'complete' (true tambien en error) evita colgarse en un 404 real; y el tope + catch
+        // garantizan que una sola imagen atascada no tumbe la generacion del PDF.
+        try
+        {
+            await page.WaitForFunctionAsync(
+                "() => Array.from(document.images).every(i => i.complete)",
+                new WaitForFunctionOptions { Timeout = 8000 });
+        }
+        catch (Exception)
+        {
+            // Alguna imagen quedo colgada mas alla del tope: imprimimos igual.
+        }
+
         return await page.PdfDataAsync(new PdfOptions
         {
             Format = PaperFormat.A4,

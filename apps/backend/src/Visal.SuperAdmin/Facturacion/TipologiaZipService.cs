@@ -15,6 +15,7 @@ using Visal.Application.Tenancy;
 using Visal.Domain.Common;
 using Visal.Domain.Entities;
 using Visal.Domain.Enums;
+using Visal.Infrastructure.Pdf;
 
 namespace Visal.SuperAdmin.Facturacion;
 
@@ -1102,7 +1103,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 case OrigenInformeItem.DocumentoHc:
                 case OrigenInformeItem.DocumentoPacienteLibre:
                 case OrigenInformeItem.DocumentoNota:
-                    foreach (var b in await CargarDocumentosExternosAsync(pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct))
+                    foreach (var b in await CargarDocumentosExternosAsync(pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct, membrete: archivo.MembreteHcCup))
                     {
                         partes.Add(new PartePlan(b, -1, Etiqueta: "[ANEXO]"));
                     }
@@ -1312,7 +1313,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 case OrigenInformeItem.DocumentoPacienteLibre:
                 case OrigenInformeItem.DocumentoNota:
                     foreach (var b in await CargarDocumentosExternosAsync(
-                        pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct, codigo, hcAut))
+                        pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct, codigo, hcAut, archivo.MembreteHcCup))
                     {
                         partes.Add(new PartePlan(b, -1, Etiqueta: "[ANEXO]"));
                     }
@@ -1332,7 +1333,8 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// imagenes se envuelven en una pagina. SoloUltimo = solo el adjunto mas reciente.</summary>
     private async Task<List<byte[]>> CargarDocumentosExternosAsync(
         Guid pacienteId, OrigenInformeItem origen, string? tipologiaNombre, bool soloUltimo, CancellationToken ct,
-        string? filtroAutorizacion = null, IReadOnlyDictionary<Guid, HashSet<string>>? hcAut = null)
+        string? filtroAutorizacion = null, IReadOnlyDictionary<Guid, HashSet<string>>? hcAut = null,
+        bool membrete = false)
     {
         var q = _db.NotaMedicaDocumentos.AsNoTracking()
             .Where(d => d.PacienteId == pacienteId);
@@ -1371,16 +1373,125 @@ public sealed class TipologiaZipService : ITipologiaZipService
         if (rows.Count == 0) { return new List<byte[]>(); }
 
         // SoloUltimo = el mas reciente; si no, todos en orden cronologico ascendente.
-        var seleccion = (soloUltimo ? rows.Take(1) : rows.AsEnumerable().Reverse())
-            .Select(r => r.RutaArchivo);
+        var seleccion = (soloUltimo ? rows.Take(1) : rows.AsEnumerable().Reverse()).ToList();
+
+        // Membrete por documento (opcional): resuelve HC-xxxxxx + CUP + servicio de la historia
+        // de la que cuelga cada anexo, en una sola consulta, para estamparlo arriba del PDF.
+        var membretes = membrete
+            ? await ResolverMembretePorHcAsync(
+                seleccion.Where(r => r.HistoriaClinicaId is Guid)
+                         .Select(r => r.HistoriaClinicaId!.Value).Distinct().ToList(), ct)
+            : new Dictionary<Guid, (string Hc, string Cup, string Serv)>();
 
         var res = new List<byte[]>();
-        foreach (var ruta in seleccion)
+        foreach (var r in seleccion)
         {
+            var ruta = r.RutaArchivo;
             if (string.IsNullOrWhiteSpace(ruta) || !EsDocRenderable(ruta)) { continue; }
             var pdf = LeerArchivoComoPdf(ruta);
-            if (pdf is not null) { res.Add(pdf); }
+            if (pdf is null) { continue; }
+            if (membrete)
+            {
+                var texto = ConstruirTextoMembrete(r.HistoriaClinicaId, membretes);
+                pdf = EstamparMembrete(pdf, texto) ?? pdf;
+            }
+            res.Add(pdf);
         }
+        return res;
+    }
+
+    /// <summary>Resuelve, para cada HC, su codigo publico (HC-xxxxxx), su CUP (CodigoRips de la
+    /// primera asignacion via cadena de sesiones) y el nombre del servicio, con el mismo
+    /// fallback que RelacionFacturas (si la asignacion no estampo CodigoRips, se deriva del
+    /// ServicioContrato vivo: codigo base sin sufijo d/f). Una sola consulta por lote de HC.</summary>
+    private async Task<Dictionary<Guid, (string Hc, string Cup, string Serv)>> ResolverMembretePorHcAsync(
+        List<Guid> hcIds, CancellationToken ct)
+    {
+        var res = new Dictionary<Guid, (string Hc, string Cup, string Serv)>();
+        if (hcIds.Count == 0) { return res; }
+
+        var consec = await _db.HistoriasClinicas.AsNoTracking()
+            .Where(h => hcIds.Contains(h.Id))
+            .Select(h => new { h.Id, h.Consecutivo })
+            .ToListAsync(ct);
+        var hcCode = consec.ToDictionary(x => x.Id, x => CodigoPublico.Hc(x.Consecutivo));
+
+        // Primera asignacion por HC (via pivote sesion->turno->asignacion), con su servicio.
+        var cups = await (
+            from p in _db.AsignacionTurnoSesionHcs.AsNoTracking()
+            where hcIds.Contains(p.HistoriaClinicaId)
+            join s in _db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+            join t in _db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+            join a in _db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+            select new { p.HistoriaClinicaId, a.CodigoRips, a.NombreServicio, a.ServicioId })
+            .ToListAsync(ct);
+        var asigPorHc = new Dictionary<Guid, (string? Cup, string? Nombre, string? ServicioId)>();
+        foreach (var r in cups)
+        {
+            if (!asigPorHc.ContainsKey(r.HistoriaClinicaId))
+            {
+                asigPorHc[r.HistoriaClinicaId] = (r.CodigoRips, r.NombreServicio, r.ServicioId);
+            }
+        }
+
+        // Fallback de CUP/nombre desde el ServicioContrato vivo cuando la asignacion es legacy.
+        var servIds = asigPorHc.Values
+            .Where(v => string.IsNullOrWhiteSpace(v.Cup) && Guid.TryParse(v.ServicioId, out _))
+            .Select(v => Guid.Parse(v.ServicioId!))
+            .Distinct().ToList();
+        var servInfo = servIds.Count == 0
+            ? new Dictionary<Guid, (string? Codigo, string? Descripcion)>()
+            : await _db.ServiciosContrato.AsNoTracking()
+                .Where(s => servIds.Contains(s.Id))
+                .Select(s => new { s.Id, s.CodigoServicio, s.Descripcion })
+                .ToDictionaryAsync(s => s.Id, s => ((string?)s.CodigoServicio, (string?)s.Descripcion), ct);
+
+        foreach (var id in hcIds)
+        {
+            var hc = hcCode.TryGetValue(id, out var h) ? h : "";
+            string cup = "", serv = "";
+            if (asigPorHc.TryGetValue(id, out var a))
+            {
+                cup = a.Cup?.Trim() ?? "";
+                serv = a.Nombre?.Trim() ?? "";
+                if (string.IsNullOrWhiteSpace(cup)
+                    && Guid.TryParse(a.ServicioId, out var sid)
+                    && servInfo.TryGetValue(sid, out var sc))
+                {
+                    cup = ServicioCodigo.Base(sc.Item1) ?? "";
+                    if (string.IsNullOrWhiteSpace(serv)) { serv = sc.Item2?.Trim() ?? ""; }
+                }
+            }
+            res[id] = (hc, cup, serv);
+        }
+        return res;
+    }
+
+    /// <summary>Texto del membrete de un anexo: "HC-xxxxxx  |  CUP {codigo} - {servicio}".
+    /// Sin HC resoluble -> "(documento sin historia clinica)"; sin CUP -> solo el HC-.</summary>
+    private static string ConstruirTextoMembrete(
+        Guid? hcId, IReadOnlyDictionary<Guid, (string Hc, string Cup, string Serv)> map)
+    {
+        if (hcId is not Guid id || !map.TryGetValue(id, out var m) || string.IsNullOrWhiteSpace(m.Hc))
+        {
+            return "(documento sin historia clinica)";
+        }
+        var sb = new StringBuilder(m.Hc);
+        if (!string.IsNullOrWhiteSpace(m.Cup))
+        {
+            sb.Append("   |   CUP ").Append(m.Cup);
+            if (!string.IsNullOrWhiteSpace(m.Serv)) { sb.Append(" - ").Append(m.Serv); }
+        }
+        return sb.ToString();
+    }
+
+    /// <summary>Estampa el membrete (franja superior con el texto) en la PRIMERA pagina del PDF
+    /// via <see cref="MembreteEstampador"/>. Si el PDF no se pudo modificar (cifrado/corrupto),
+    /// el helper devuelve null y el anexo sale sin membrete en vez de romper el archivo.</summary>
+    private byte[]? EstamparMembrete(byte[] pdf, string texto)
+    {
+        var res = MembreteEstampador.Estampar(pdf, texto);
+        if (res is null) { _log.LogWarning("Tipologia ZIP: no se pudo estampar el membrete de un anexo"); }
         return res;
     }
 

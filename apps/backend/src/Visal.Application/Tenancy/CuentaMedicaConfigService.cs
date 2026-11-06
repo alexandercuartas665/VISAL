@@ -114,7 +114,8 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
             ParseOrdenNiveles(i.OrdenJson),
             i.PdfUnico,
             i.UnoPorAutorizacion,
-            i.RotuloSeparadorCup))
+            i.RotuloSeparadorCup,
+            i.MembreteHcCup))
             .ToList();
     }
 
@@ -205,6 +206,7 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
         item.PdfUnico = req.PdfUnico;
         item.UnoPorAutorizacion = req.UnoPorAutorizacion;
         item.RotuloSeparadorCup = req.RotuloSeparadorCup;
+        item.MembreteHcCup = req.MembreteHcCup;
         // Campos legacy (1 item = 1 origen): reflejan el primer contenido por
         // compatibilidad; la fuente de verdad es la tabla de contenidos.
         var primero = contenidos[0];
@@ -348,6 +350,7 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
                 OrdenJson = src.OrdenJson,
                 UnoPorAutorizacion = src.UnoPorAutorizacion,
                 RotuloSeparadorCup = src.RotuloSeparadorCup,
+                MembreteHcCup = src.MembreteHcCup,
             };
             if (contPorItem.TryGetValue(src.Id, out var cs))
             {

@@ -123,7 +123,7 @@
                         _rigidFrag["fecha_nacimiento"] = @<div class="ase-f"><label>Fecha Nacimiento</label><input type="date" class="form-control form-control-sm" @bind="_fnac" @bind:after="RecalcularEdad" /></div>;
                         _rigidFrag["edad"] = @<div class="ase-f"><label>Edad <small class="text-muted">(auto)</small></label><input type="number" class="form-control form-control-sm" @bind="_edad" readonly /></div>;
 
-                        _rigidFrag["ips_comenta"] = @<div class="ase-f"><label>IPS Que Comenta</label>
+                        _rigidFrag["ips_comenta"] = @<div class="ase-f"><label>EPS Que Comenta</label>
                             <select class="form-select form-select-sm" value="@_ipsComenta" @onchange="OnIpsComentaChanged">
                                 <option value="">Seleccione Elemento</option>
                                 @foreach (var a in _aseguradorasTodas) { <option value="@a.Id">@a.Nombre (@a.Codigo)</option> }

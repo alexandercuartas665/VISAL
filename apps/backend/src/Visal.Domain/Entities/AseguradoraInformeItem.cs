@@ -88,4 +88,13 @@ public class AseguradoraInformeItem : TenantEntity
     /// orden configurado (fecha/sesion). Solo aplica al contenido con CUP (historias);
     /// autorizaciones, firmas y anexos quedan en su lugar. Default false.</summary>
     public bool RotuloSeparadorCup { get; set; }
+
+    /// <summary>Si true, cada documento externo (anexo) que entra al archivo recibe un
+    /// "membrete" estampado en la parte superior de su PRIMERA pagina con el codigo de la
+    /// historia clinica de la que proviene (HC-xxxxxx), su CUP (CodigoRips de la asignacion)
+    /// y el nombre del servicio. Pensado para los "Listados de firmas" y demas anexos, para
+    /// identificar de que historia/servicio viene cada hoja. Solo aplica a los contenidos de
+    /// documento externo (DocumentoHc/DocumentoPacienteLibre/DocumentoNota); las historias,
+    /// autorizaciones y firmas no se tocan. Default false.</summary>
+    public bool MembreteHcCup { get; set; }
 }

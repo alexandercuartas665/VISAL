@@ -253,6 +253,10 @@ else
                         <input type="checkbox" class="form-check-input" @bind="_itemEdit.RotuloSeparadorCup" />
                         <span>Ordenar por CUP (agrupa las historias por CUP; los numericos van primero y los que empiezan por letra al final)</span>
                     </label>
+                    <label class="cm-flag" style="margin-top:2px;">
+                        <input type="checkbox" class="form-check-input" @bind="_itemEdit.MembreteHcCup" />
+                        <span>Membrete por documento (estampa HC + CUP + servicio en la parte superior de la primera pagina de cada anexo externo, p. ej. los listados de firmas)</span>
+                    </label>
 
                     @* ===== Contenidos del archivo ===== *@
                     <div class="cm-cont-head">
@@ -719,6 +723,7 @@ else
             PdfUnico = it.PdfUnico,
             UnoPorAutorizacion = it.UnoPorAutorizacion,
             RotuloSeparadorCup = it.RotuloSeparadorCup,
+            MembreteHcCup = it.MembreteHcCup,
             Contenidos = it.Contenidos
                 .OrderBy(c => c.Orden)
                 .Select(c => new ContenidoEditModel
@@ -805,7 +810,7 @@ else
                 _itemEdit.Id, aid, _itemEdit.Seccion, _itemEdit.Alias,
                 _itemEdit.Descripcion, _itemEdit.PatronNombre, _itemEdit.Obligatorio,
                 contenidos, ordenNiveles, _itemEdit.PdfUnico, _itemEdit.UnoPorAutorizacion,
-                _itemEdit.RotuloSeparadorCup),
+                _itemEdit.RotuloSeparadorCup, _itemEdit.MembreteHcCup),
                 Guid.Empty);
             CerrarItemModal();
             _items = (await Svc.ListarItemsAsync(aid)).ToList();
@@ -983,6 +988,7 @@ else
         public bool PdfUnico { get; set; }
         public bool UnoPorAutorizacion { get; set; }
         public bool RotuloSeparadorCup { get; set; }
+        public bool MembreteHcCup { get; set; }
         public List<ContenidoEditModel> Contenidos { get; set; } = new();
         // Orden multinivel de Historias medicas (Formulario por tipo). Vacio = cronologico.
         public List<OrdenNivelEditModel> OrdenNiveles { get; set; } = new();

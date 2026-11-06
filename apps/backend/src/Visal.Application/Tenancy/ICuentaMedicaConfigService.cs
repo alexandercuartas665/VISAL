@@ -55,7 +55,10 @@ public sealed record InformeItemDto(
     bool UnoPorAutorizacion = false,
     // True = agrupa las historias por CUP e inserta una pagina "rotulo" separadora (logo del
     // tenant + CUP + servicio + sede) antes de cada CUP. Default false.
-    bool RotuloSeparadorCup = false);
+    bool RotuloSeparadorCup = false,
+    // True = estampa un membrete (HC + CUP + servicio) en la primera pagina de cada documento
+    // externo (anexo) del archivo. Default false.
+    bool MembreteHcCup = false);
 
 /// <summary>Un contenido dentro de un archivo (un origen documental).</summary>
 public sealed record InformeContenidoDto(
@@ -79,7 +82,8 @@ public sealed record GuardarItemRequest(
     IReadOnlyList<InformeOrdenNivelDto>? OrdenNiveles = null,
     bool PdfUnico = false,
     bool UnoPorAutorizacion = false,
-    bool RotuloSeparadorCup = false);
+    bool RotuloSeparadorCup = false,
+    bool MembreteHcCup = false);
 
 /// <summary>Contenido a persistir dentro de un archivo (sin Id: se reemplazan
 /// todos en cada guardado).</summary>

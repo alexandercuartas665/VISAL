@@ -957,6 +957,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(300)")
                         .HasColumnName("descripcion");
 
+                    b.Property<bool>("MembreteHcCup")
+                        .HasColumnType("boolean")
+                        .HasColumnName("membrete_hc_cup");
+
                     b.Property<bool>("Obligatorio")
                         .HasColumnType("boolean")
                         .HasColumnName("obligatorio");

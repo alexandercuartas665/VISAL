@@ -485,7 +485,14 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// resto), incluidas las repeticiones: asi el TXT delata la historia que sale dos veces.</summary>
     private sealed record SimFila(
         string Nombre, string Paciente, string TipoDoc, string Documento, string Autorizacion,
-        IReadOnlyList<string> Partes, string Estado, IReadOnlyList<string>? Avisos = null);
+        IReadOnlyList<SimParte> Partes, string Estado, IReadOnlyList<string>? Avisos = null);
+
+    /// <summary>Una parte del PDF en el TXT de simulacion: su etiqueta (HC-xxxxxx / [AUT] / ...)
+    /// y, cuando el archivo pide "Ordenar por CUP", el CUP (CodigoRips) y el nombre de servicio
+    /// de esa historia -&gt; el TXT inserta una cabecera "CUP {codigo} - {servicio}" al cambiar de
+    /// CUP. Cup null = la parte no tiene CUP (autorizacion/firma/anexo) o el archivo no ordena
+    /// por CUP, y no dispara cabecera.</summary>
+    private sealed record SimParte(string Label, string? Cup = null, string? CupNombre = null);
 
     /// <inheritdoc />
     public async Task<ArchivoExportado?> SimularGeneracionAsync(
@@ -546,7 +553,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 if (!docToId.TryGetValue(pac.Documento, out var pacienteId))
                 {
                     filas.Add(new SimFila("(no se genera)", pac.Nombre ?? "", pac.TipoDocumento ?? "",
-                        pac.Documento ?? "", "", Array.Empty<string>(), "Paciente no existe en el sistema"));
+                        pac.Documento ?? "", "", Array.Empty<SimParte>(), "Paciente no existe en el sistema"));
                     continue;
                 }
 
@@ -565,7 +572,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     {
                         // El generador real omite las unidades vacias (no produce archivo).
                         filas.Add(new SimFila("(no se genera)", pac.Nombre ?? "", pac.TipoDocumento ?? "",
-                            pac.Documento ?? "", codigo, Array.Empty<string>(), "Vacio: sin contenido para esta autorizacion"));
+                            pac.Documento ?? "", codigo, Array.Empty<SimParte>(), "Vacio: sin contenido para esta autorizacion"));
                         continue;
                     }
 
@@ -590,14 +597,14 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 if (partes is null)
                 {
                     filas.Add(new SimFila("(no se genera)", pac.Nombre ?? "", pac.TipoDocumento ?? "",
-                        pac.Documento ?? "", "", Array.Empty<string>(), "Paciente no existe en el sistema"));
+                        pac.Documento ?? "", "", Array.Empty<SimParte>(), "Paciente no existe en el sistema"));
                     continue;
                 }
 
                 if (partes.Count == 0)
                 {
                     filas.Add(new SimFila("(no se genera)", pac.Nombre ?? "", pac.TipoDocumento ?? "",
-                        pac.Documento ?? "", "", Array.Empty<string>(), "Vacio: sin contenido para este paciente"));
+                        pac.Documento ?? "", "", Array.Empty<SimParte>(), "Vacio: sin contenido para este paciente"));
                     continue;
                 }
 
@@ -619,7 +626,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// <summary>Resultado de expandir las partes de un PDF: la lista de etiquetas EN ORDEN REAL
     /// (ya con las evoluciones que el motor anidaria bajo cada HC base, si <c>incluyeEvo</c>) y los
     /// avisos de "doble fuente" encontrados.</summary>
-    private sealed record SimExpand(List<string> Partes, List<string> Avisos);
+    private sealed record SimExpand(List<SimParte> Partes, List<string> Avisos);
 
     /// <summary>Expande las partes de primer nivel del plan agregando lo que el RENDER anida
     /// dentro de cada HC base (evoluciones de terapia), modelando el motor de impresion sin
@@ -629,7 +636,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     private async Task<SimExpand> ExpandirYDiagnosticarAsync(
         List<PartePlan> partes, bool incluyeEvo, DateOnly? desde, DateOnly? hasta, CancellationToken ct)
     {
-        var res = new List<string>(partes.Count);
+        var res = new List<SimParte>(partes.Count);
         var avisos = new List<string>();
 
         // Consecutivos de HC que van como documento SUELTO (parte de primer nivel) en este PDF.
@@ -642,16 +649,17 @@ public sealed class TipologiaZipService : ITipologiaZipService
         foreach (var p in partes)
         {
             var etq = string.IsNullOrWhiteSpace(p.Etiqueta) ? "[?]" : p.Etiqueta!;
-            res.Add(etq);
+            res.Add(new SimParte(etq, p.Cup, p.CupNombre));
             if (p.HcId == Guid.Empty) { continue; }
 
             var anidadas = await ConsultarEvolucionesAnidadasAsync(p.HcId, desde, hasta, ct);
             if (anidadas.Count == 0) { continue; }
 
             // Refleja el render: las evoluciones salen DENTRO de la hoja base solo si docs incluye EVO.
+            // Heredan el CUP de su hoja base para quedar bajo la misma cabecera de CUP en el TXT.
             if (incluyeEvo)
             {
-                foreach (var c in anidadas) { res.Add($"{CodigoPublico.Hc(c)} (anidada en {etq})"); }
+                foreach (var c in anidadas) { res.Add(new SimParte($"{CodigoPublico.Hc(c)} (anidada en {etq})", p.Cup, p.CupNombre)); }
             }
 
             // Diagnostico independiente del gate: evoluciones de esta base que ADEMAS van sueltas.
@@ -750,8 +758,8 @@ public sealed class TipologiaZipService : ITipologiaZipService
             var cuenta = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             foreach (var e in f.Partes)
             {
-                if (!e.StartsWith("HC-", StringComparison.OrdinalIgnoreCase)) { continue; }
-                cuenta[e] = cuenta.TryGetValue(e, out var v) ? v + 1 : 1;
+                if (!e.Label.StartsWith("HC-", StringComparison.OrdinalIgnoreCase)) { continue; }
+                cuenta[e.Label] = cuenta.TryGetValue(e.Label, out var v) ? v + 1 : 1;
             }
             return cuenta.Where(kv => kv.Value > 1).Select(kv => $"{kv.Key} x{kv.Value}")
                 .OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
@@ -824,13 +832,27 @@ public sealed class TipologiaZipService : ITipologiaZipService
             }
             sb.AppendLine($"     Partes en orden ({f.Partes.Count}):");
             var vistas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            // Solo si el archivo esta marcado "Ordenar por CUP": las partes ya vienen agrupadas
+            // por CUP y se inserta una cabecera "CUP {codigo} - {servicio}" al cambiar de CUP.
+            var agrupaCup = archivo.RotuloSeparadorCup;
+            string? cupActual = null;
+            var huboCup = false;
             var n = 0;
             foreach (var e in f.Partes)
             {
+                if (agrupaCup && !string.IsNullOrWhiteSpace(e.Cup)
+                    && !string.Equals(e.Cup, cupActual, StringComparison.OrdinalIgnoreCase))
+                {
+                    cupActual = e.Cup;
+                    huboCup = true;
+                    var nom = string.IsNullOrWhiteSpace(e.CupNombre) ? "" : $" - {e.CupNombre!.Trim()}";
+                    sb.AppendLine($"       CUP {e.Cup!.Trim()}{nom}");
+                }
                 n++;
-                var esHc = e.StartsWith("HC-", StringComparison.OrdinalIgnoreCase);
-                var marca = esHc && !vistas.Add(e) ? "   <-- REPETIDA" : "";
-                sb.AppendLine($"       {n,3}. {e}{marca}");
+                var esHc = e.Label.StartsWith("HC-", StringComparison.OrdinalIgnoreCase);
+                var marca = esHc && !vistas.Add(e.Label) ? "   <-- REPETIDA" : "";
+                var sangria = (agrupaCup && huboCup) ? "         " : "       ";
+                sb.AppendLine($"{sangria}{n,3}. {e.Label}{marca}");
             }
             if (f.Avisos is { Count: > 0 })
             {

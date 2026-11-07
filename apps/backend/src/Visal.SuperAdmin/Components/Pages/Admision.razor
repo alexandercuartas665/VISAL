@@ -154,6 +154,12 @@
                                       disabled="@(_ingreso != "NO")"
                                       placeholder="@(_ingreso == "NO" ? "Escriba el motivo por el cual no ingresa" : "Se activa cuando el ingreso es NO")"></textarea>
                         </div>;
+                        _rigidFrag["motivo_ingreso"] = @<div class="ase-f"><label>Motivo de ingreso</label>
+                            <select class="form-select form-select-sm" @bind="_motivoIngreso">
+                                <option value="">--</option>
+                                @foreach (var c in CatItems(CatalogoPacienteTipo.MotivoIngreso)) { <option value="@c.Id">@c.Nombre</option> }
+                            </select>
+                        </div>;
                         _rigidFrag["usuario_ingreso"] = @<div class="ase-f"><label>Usuario del ingreso</label>
                             <select class="form-select form-select-sm" @bind="_usuarioIngresoId">
                                 <option value="">Seleccione usuario</option>
@@ -1751,7 +1757,7 @@
 
     // Clasificacion
     private string? _incapacidad, _grupoRh, _estado;
-    private string _tipoUsuario = "", _clasifPaciente = "", _clasifGrupo = "";
+    private string _tipoUsuario = "", _clasifPaciente = "", _clasifGrupo = "", _motivoIngreso = "";
     // Lista N de contratos del paciente (fuente de verdad — post-PC4 no
     // hay slots fijos). Cada fila conserva la aseguradora y el contrato
     // seleccionados via cascada en la mini tabla.
@@ -2495,7 +2501,7 @@
         _diasEst = _opIngreso = null;
         _ingreso = ""; _motivoNoIngreso = null; _usuarioIngresoId = ""; _condicion = null;
         _incapacidad = _grupoRh = _estado = null;
-        _tipoUsuario = _clasifPaciente = _clasifGrupo = "";
+        _tipoUsuario = _clasifPaciente = _clasifGrupo = _motivoIngreso = "";
         _contratosEdit.Clear();
         _estrato = _sexo = _estadoCivil = _zona = _ocupacion = _regimen = null;
         _dxPrincipal = _tutela = null;
@@ -2545,6 +2551,7 @@
         _incapacidad = d.Incapacidad; _grupoRh = d.GrupoRh; _estado = d.Estado;
         _tipoUsuario = d.TipoUsuarioId?.ToString() ?? "";
         _clasifPaciente = d.ClasificacionPacienteId?.ToString() ?? "";
+        _motivoIngreso = d.MotivoIngresoId?.ToString() ?? "";
         _clasifGrupo = d.ClasificacionGrupoPatologiaId?.ToString() ?? "";
         // Cargar lista N de contratos (fuente de verdad post-PC1).
         _contratosEdit.Clear();
@@ -2667,7 +2674,8 @@
                 MotivoNoIngreso: _motivoNoIngreso,
                 FechaAtencion: AOffset(_fAtencion),
                 UsuarioIngresoId: Try(_usuarioIngresoId),
-                Condicion: _condicion);
+                Condicion: _condicion,
+                MotivoIngresoId: Try(_motivoIngreso));
             var saved = await Svc.SaveAsync(req, await Actor());
             if (saved is null) { _error = "No se pudo guardar (sin tenant activo)."; return; }
             await Select(saved.Id); await LoadLista(); _ok = $"Paciente \"{saved.NombreCompleto}\" guardado.";

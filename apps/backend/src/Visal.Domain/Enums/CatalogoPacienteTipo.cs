@@ -37,5 +37,10 @@ public enum CatalogoPacienteTipo
     /// el Nombre como snapshot en HistoriaClinicaIncapacidad.Tipo. DEBE ir al final del enum: el
     /// discriminador se persiste como ordinal int, insertarlo en otra posicion renumeraria las
     /// filas existentes.</summary>
-    TipoIncapacidad
+    TipoIncapacidad,
+    /// <summary>Motivo de ingreso al programa (hoja "Ingreso de Pacientes" del CENSO). Lista
+    /// configurable por tenant; alimenta el select "Motivo de ingreso" de Admision y se guarda como
+    /// FK en Paciente.MotivoIngresoId. DEBE ir al final del enum: el discriminador se persiste como
+    /// ordinal int, insertarlo en otra posicion renumeraria las filas existentes.</summary>
+    MotivoIngreso
 }

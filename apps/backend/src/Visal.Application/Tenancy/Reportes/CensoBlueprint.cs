@@ -176,6 +176,7 @@ public static class CensoBlueprint
                 new("clasif_paciente.nombre", "Clasificacion"),  // M
                 new("condicion", "Condicion"),                   // N
                 new("ingreso", "Ingreso"),                       // O
+                new("motivo_ingreso.nombre", "Motivo de ingreso"), // O2 (catalogo configurable)
                 new("motivo_no_ingreso", "Motivo de no ingreso"), // P
                 new("motivo_no_ingreso", "Observaciones de Motivo de NO Ingreso"), // Q (mismo campo)
                 new("tipo_documento", "Tipo ID"),                // R

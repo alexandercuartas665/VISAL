@@ -7126,6 +7126,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("motivo_fallecimiento");
 
+                    b.Property<Guid?>("MotivoIngresoId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("motivo_ingreso_id");
+
                     b.Property<string>("MotivoNoIngreso")
                         .HasColumnType("text")
                         .HasColumnName("motivo_no_ingreso");

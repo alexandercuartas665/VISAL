@@ -83,7 +83,9 @@ public sealed record PacienteDetailDto(
     string? BarthelDatosJson = null, DateTimeOffset? BarthelActualizadoEn = null,
     // Fallecimiento / mortalidad (solo lectura; lo llena RegistrarDecesoAsync).
     DateTimeOffset? FechaFallecimiento = null, string? FallecimientoReportadoPor = null,
-    string? CertificadoVisal = null, string? MotivoFallecimiento = null);
+    string? CertificadoVisal = null, string? MotivoFallecimiento = null,
+    // Motivo de ingreso (CENSO): FK a catalogos_paciente (tipo=MotivoIngreso). Lista configurable.
+    Guid? MotivoIngresoId = null);
 
 public sealed record SavePacienteRequest(
     Guid? Id,
@@ -128,7 +130,9 @@ public sealed record SavePacienteRequest(
     // Usuario del ingreso: solo se envia el Id del PlatformUser elegido; el servidor resuelve el nombre.
     Guid? UsuarioIngresoId = null,
     // Condicion del paciente (valor de lista fija). El SLA NO se envia: lo calcula el servidor.
-    string? Condicion = null);
+    string? Condicion = null,
+    // Motivo de ingreso (CENSO): FK a catalogos_paciente (tipo=MotivoIngreso). Lista configurable.
+    Guid? MotivoIngresoId = null);
 
 public interface IPacienteService
 {

@@ -503,7 +503,7 @@ else
                                                 <tr>
                                                     @for (var i = 0; i < _preview.Columnas.Count; i++)
                                                     {
-                                                        <td>@(i < row.Count ? row[i]?.ToString() : "")</td>
+                                                        <td>@(i < row.Count ? CeldaPreview(row[i]) : "")</td>
                                                     }
                                                 </tr>
                                             }
@@ -995,6 +995,15 @@ else
         ReporteAgregadoFunc.Max => "Maximo",
         ReporteAgregadoFunc.PctTotal => "% del total (indice)",
         _ => f.ToString()
+    };
+
+    // Celda de la vista previa: los booleanos se muestran como Si/No (igual que en el Excel);
+    // el resto como texto plano. Mantiene la vista previa consistente con el archivo descargado.
+    private static string CeldaPreview(object? v) => v switch
+    {
+        null => "",
+        bool b => b ? "Si" : "No",
+        _ => v.ToString() ?? ""
     };
 
     private string LabelRef(string entidadKey, string reff) =>

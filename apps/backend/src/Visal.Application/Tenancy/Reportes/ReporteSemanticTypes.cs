@@ -214,6 +214,9 @@ public sealed class ReportSemanticModel : IReportSemanticModel
                 // Cruces para mostrar/filtrar por NOMBRE los FK del paciente (hoja Ingreso de Pacientes del CENSO).
                 new("ips_comenta", "IPS que comenta", "aseguradora", nameof(Paciente.IpsComentaId)),
                 new("clasif_paciente", "Clasificacion del paciente", "catalogo_paciente", nameof(Paciente.ClasificacionPacienteId)),
+                // Motivo de ingreso al programa (hoja Ingreso de Pacientes): resuelve por NOMBRE el
+                // catalogo "Motivo de ingreso" (tipo=MotivoIngreso) que captura la admision.
+                new("motivo_ingreso", "Motivo de ingreso", "catalogo_paciente", nameof(Paciente.MotivoIngresoId)),
                 // Medicamento Controlado (SI/NO): columna V del CENSO. Resuelve por NOMBRE el catalogo
                 // "Med Contratado" (tipo=MedContratado, valores SI/NO) que ya captura la admision.
                 new("med_contratado", "Medicamento Controlado (SI/NO)", "catalogo_paciente", nameof(Paciente.MedContratadoId)),

@@ -191,7 +191,9 @@ public sealed class ReportePackService(
         DateTime dt => FechaCell(dt),
         DateTimeOffset dto => FechaCell(dto.LocalDateTime),
         DateOnly d => FechaCell(d.ToDateTime(TimeOnly.MinValue)),
-        bool b => XLCellValue.FromObject(b),
+        // Los booleanos del pack son conceptos Si/No para lectura humana (Ingreso, Activo,
+        // Habilitado): se escriben como texto "Si"/"No", no como VERDADERO/FALSO nativo de Excel.
+        bool b => XLCellValue.FromObject(b ? "Si" : "No"),
         int i => XLCellValue.FromObject(i),
         long l => XLCellValue.FromObject(l),
         short s => XLCellValue.FromObject(s),

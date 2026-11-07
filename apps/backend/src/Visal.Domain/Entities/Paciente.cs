@@ -54,6 +54,9 @@ public class Paciente : TenantEntity
     public bool? Ingreso { get; set; }
     /// <summary>Motivo por el cual el paciente NO ingresa. Solo aplica cuando <see cref="Ingreso"/> es false.</summary>
     public string? MotivoNoIngreso { get; set; }
+    /// <summary>FK a catalogos_paciente (tipo=MotivoIngreso). Motivo de ingreso al programa, de una
+    /// lista configurable por tenant (hoja "Ingreso de Pacientes" del CENSO). Null si no se eligio.</summary>
+    public Guid? MotivoIngresoId { get; set; }
 
     /// <summary>Usuario de la plataforma que registro el ingreso (hoja "Ingreso de Pacientes" del CENSO).
     /// Referencia al PlatformUser elegido en Admision. Null si no se asigno.</summary>

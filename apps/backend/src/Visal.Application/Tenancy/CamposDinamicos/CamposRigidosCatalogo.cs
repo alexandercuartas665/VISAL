@@ -44,6 +44,7 @@ public static class CamposRigidosCatalogo
         new("op_ingreso", "Op. de Ingreso (dias)", TabGenerales, "Datos administrativos PAD", 1, false, true),
         new("ingreso", "Ingreso (SI/NO)", TabGenerales, "Datos administrativos PAD", 1, false, true),
         new("motivo_no_ingreso", "Motivo de no ingreso", TabGenerales, "Datos administrativos PAD", 2, false, true),
+        new("motivo_ingreso", "Motivo de ingreso", TabGenerales, "Datos administrativos PAD", 1, false, true),
         new("usuario_ingreso", "Usuario del ingreso", TabGenerales, "Datos administrativos PAD", 1, false, true),
         new("condicion", "Condicion", TabGenerales, "Datos administrativos PAD", 1, false, true),
 

@@ -6,13 +6,18 @@ using Visal.Domain.Enums;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class AsignacionService(IApplicationDbContext db, ITenantContext tenant, IAuditWriter audit) : IAsignacionService
+public sealed class AsignacionService(ITenantContext tenant, IAuditWriter audit, IApplicationDbContextFactory dbFactory) : IAsignacionService
 {
+    // Ola 2 estabilizacion (P0): este servicio ya NO comparte el DbContext scoped del circuito.
+    // Cada metodo publico abre un contexto CORTO propio (using var db = dbFactory.Create();) y lo
+    // usa durante toda la operacion; los helpers de instancia reciben ese mismo `db` por parametro
+    // para que una operacion = un solo contexto. Asi dos operaciones que se solapan (render + evento)
+    // no chocan con "A second operation was started on this context instance...".
     /// <summary>Arma el snapshot JSON (previousValue) de una coordinacion para la
     /// auditoria de eliminacion: identifica paciente/servicio/sede/turnos sin
     /// depender de joins posteriores (el registro debe ser legible aunque la
     /// asignacion ya no exista).</summary>
-    private async Task<object> SnapshotCoordinacionAsync(Asignacion asig, int turnos, bool forzar,
+    private async Task<object> SnapshotCoordinacionAsync(IApplicationDbContext db, Asignacion asig, int turnos, bool forzar,
         IReadOnlyList<Guid>? profesionalIds, CancellationToken ct)
     {
         var pac = await db.Pacientes.AsNoTracking()
@@ -39,6 +44,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     }
     public async Task<PacienteAsignacionDto?> GetPacienteAsync(Guid pacienteId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var p = await db.Pacientes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == pacienteId, ct);
         if (p is null) { return null; }
 
@@ -132,6 +138,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<IReadOnlyList<PacienteAsignacionDto>> BuscarPacientesAsync(string? texto, Guid? contratoId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var q = db.Pacientes.AsNoTracking();
         if (!string.IsNullOrWhiteSpace(texto))
         {
@@ -158,6 +165,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<IReadOnlyList<ContratoMiniDto>> ListContratosDisponiblesAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.ContratosAseguradora.AsNoTracking()
             .Where(c => c.Estado == "ACTIVO")
             .Join(db.Aseguradoras.AsNoTracking(), c => c.AseguradoraId, a => a.Id,
@@ -169,6 +177,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<IReadOnlyList<PacienteFiltroResultadoDto>> BuscarPacientesAvanzadoAsync(BusquedaPacienteFiltro filtro, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var q = db.Pacientes.AsNoTracking().AsQueryable();
 
         // Filtro por contratos: trae todas las aseguradoras de esos contratos y filtra pacientes por aseguradora.
@@ -223,6 +232,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<IReadOnlyList<string>> TiposServicioPorContratoAsync(Guid contratoId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.ServiciosContrato.AsNoTracking()
             .Where(s => s.ContratoId == contratoId && s.Modulo != null && s.Modulo != "")
             .Select(s => s.Modulo!)
@@ -233,6 +243,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<IReadOnlyList<ServicioCatalogoDto>> ServiciosPorContratoAsync(Guid contratoId, string? tipo, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var q = db.ServiciosContrato.AsNoTracking().Where(s => s.ContratoId == contratoId);
         if (!string.IsNullOrWhiteSpace(tipo)) { q = q.Where(s => s.Modulo == tipo); }
         return await q.OrderBy(s => s.Descripcion)
@@ -248,6 +259,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<IReadOnlyList<AsignacionMiniDto>> UltimasAsignacionesAsync(Guid pacienteId, int n, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (n <= 0) { n = 10; }
         // El codigo publico AS-xxxxxx sale del consecutivo POR SERVICIO (asignacion),
         // no del lote: cada servicio tiene el suyo.
@@ -265,6 +277,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<LoteCreadoDto> CrearLoteAsync(CrearLoteRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (req.Items is null || req.Items.Count == 0) { throw new InvalidOperationException("El lote no tiene servicios."); }
         foreach (var it in req.Items)
@@ -409,6 +422,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<bool> EliminarAsignacionAsync(Guid asignacionId, Guid actor, string? motivo = null, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var a = await db.Asignaciones.FirstOrDefaultAsync(x => x.Id == asignacionId, ct);
         if (a is null) { return false; }
 
@@ -478,6 +492,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<bool> ActualizarAsignacionAsync(ActualizarAsignacionRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var a = await db.Asignaciones.FirstOrDefaultAsync(x => x.Id == req.AsignacionId, ct);
         if (a is null) { return false; }
 
@@ -546,6 +561,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         Guid asignacionId, string codigoAutorizacion, string? pdfAutorizacionUrl,
         Guid actor, string? pdfAutorizacionHash = null, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var a = await db.Asignaciones.FirstOrDefaultAsync(x => x.Id == asignacionId, ct);
         if (a is null) { return false; }
 
@@ -583,6 +599,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         string? pdfAutorizacionHash, string? codigoAutorizacion,
         Guid? excludeAsignacionId = null, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var hash = string.IsNullOrWhiteSpace(pdfAutorizacionHash) ? null : pdfAutorizacionHash.Trim();
         var numero = string.IsNullOrWhiteSpace(codigoAutorizacion) ? null : codigoAutorizacion.Trim();
         if (hash is null && numero is null)
@@ -628,6 +645,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<AutorizacionInfoDto?> GetAutorizacionAsync(Guid asignacionId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var row = await (
             from a in db.Asignaciones.AsNoTracking()
             where a.Id == asignacionId
@@ -651,6 +669,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<bool> ActualizarContactoPacienteAsync(ActualizarContactoPacienteRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (req.PacienteId == Guid.Empty) { return false; }
         var p = await db.Pacientes.FirstOrDefaultAsync(x => x.Id == req.PacienteId, ct);
         if (p is null) { return false; }
@@ -715,6 +734,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<IReadOnlyList<AsignacionListadoDto>> ListarAsignacionesAsync(AsignacionListadoFiltro filtro, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Join principal: asignaciones + paciente (in-tenant por query filter global).
         // El consecutivo publico "AS-000045" sale del propio servicio (a.Consecutivo).
         var q = from a in db.Asignaciones.AsNoTracking()
@@ -877,6 +897,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<IReadOnlyList<UsuarioCreadorDto>> ListarUsuariosCreadoresAsignacionesAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Ids distintos de usuarios que han creado al menos una asignacion del tenant.
         var ids = await db.Asignaciones.AsNoTracking()
             .Where(a => a.CreatedBy != null)
@@ -899,12 +920,15 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     }
 
     public async Task<IReadOnlyList<string>> ListarSucursalesAsignacionesAsync(CancellationToken ct = default)
-        => await db.Asignaciones.AsNoTracking()
+    {
+        using var db = dbFactory.Create();
+        return await db.Asignaciones.AsNoTracking()
             .Where(a => a.Sucursal != null && a.Sucursal != "")
             .Select(a => a.Sucursal)
             .Distinct()
             .OrderBy(s => s)
             .ToListAsync(ct);
+    }
 
     public async Task<IReadOnlyList<AsignacionPendienteDto>> ListarPendientesAsync(
         IReadOnlyList<string> modulosPermitidos,
@@ -915,6 +939,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         string? aseguradoraNombre = null,
         CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Sin modulos permitidos -> grid vacio (el usuario no es coordinador de ningun modulo).
         if (modulosPermitidos is null || modulosPermitidos.Count == 0)
         {
@@ -1049,6 +1074,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<IReadOnlyList<EspecialistaDto>> ListarEspecialistasPorModuloAsync(string modulo, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Filtro por tipo de profesional cuyo Nombre haga match (case-insensitive) con el modulo.
         var moduloUpper = (modulo ?? "").Trim().ToUpperInvariant();
         if (moduloUpper.Length == 0) { return Array.Empty<EspecialistaDto>(); }
@@ -1092,6 +1118,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<decimal?> ObtenerTarifaServicioAsync(string contratoCodigo, string codigoServicio, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (string.IsNullOrWhiteSpace(contratoCodigo) || string.IsNullOrWhiteSpace(codigoServicio)) { return null; }
         var c = contratoCodigo.Trim();
         var s = codigoServicio.Trim();
@@ -1108,6 +1135,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     public async Task<IReadOnlyList<PaqueteAsignadoDto>> ListarPaquetesDelPacienteAsync(
         Guid pacienteId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Agrupamos por PaqueteInstanciaId — cada lote es un "paquete asignado".
         // Traemos totalServicios (COUNT), el valor pactado (SUM ya que solo una fila lo lleva)
         // y la fecha de creacion mas temprana del lote para orden descendente.
@@ -1134,6 +1162,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     public async Task<PaqueteDeServicioDto?> GetPaqueteDeLaAsignacionAsync(
         Guid asignacionId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var datos = await db.Asignaciones.AsNoTracking()
             .Where(a => a.Id == asignacionId
                      && a.PaqueteInstanciaId != null
@@ -1152,6 +1181,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     public async Task<PaqueteExpansionDto?> ObtenerPaqueteExpansionAsync(
         Guid paqueteId, string contratoCodigo, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var pkg = await db.Paquetes.AsNoTracking().FirstOrDefaultAsync(p => p.Id == paqueteId, ct);
         if (pkg is null) { return null; }
 
@@ -1202,6 +1232,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<IReadOnlyList<TurnoCoordinadoDto>> ListarTurnosAsync(Guid asignacionId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var turnos = await db.AsignacionTurnos.AsNoTracking()
             .Where(t => t.AsignacionId == asignacionId)
             .OrderBy(t => t.CreatedAt)
@@ -1221,6 +1252,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<int> AsignarServicioAsync(AsignarServicioRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (req.Turnos is null || req.Turnos.Count == 0) { throw new InvalidOperationException("Debe agregar al menos un turno antes de asignar."); }
 
@@ -1273,7 +1305,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
                     throw new InvalidOperationException("Programacion no encontrada al guardar.");
                 }
                 var diaArranque = t.DiaArranque ?? 1;
-                CrearTurnoDesdeGrid(prog, asig, t.ProfesionalId, t.TurnoRowNombre!, diaArranque, tid, t.Tarifa);
+                CrearTurnoDesdeGrid(db, prog, asig, t.ProfesionalId, t.TurnoRowNombre!, diaArranque, tid, t.Tarifa);
             }
             else
             {
@@ -1317,7 +1349,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     /// con turnos de programacion). Muta el DbContext; el SaveChanges lo llama el
     /// caller.</summary>
     private void CrearTurnoDesdeGrid(
-        TurnoProgramacion prog, Asignacion asig, Guid profesionalId, string rowNombre,
+        IApplicationDbContext db, TurnoProgramacion prog, Asignacion asig, Guid profesionalId, string rowNombre,
         int diaArranque, Guid tid, decimal? tarifa)
     {
         var grid = System.Text.Json.JsonDocument.Parse(prog.GridDataJson).RootElement;
@@ -1375,6 +1407,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     public async Task<IReadOnlyList<TurnoProgramacionCardDto>> ListarProgramacionesElegiblesAsync(
         Guid asignacionId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { return Array.Empty<TurnoProgramacionCardDto>(); }
 
         var asig = await db.Asignaciones.AsNoTracking()
@@ -1468,6 +1501,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     public async Task<AplicarProgramacionResult> AplicarProgramacionAsync(
         AplicarProgramacionRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (req.DiaArranque < 1 || req.DiaArranque > 31)
         {
@@ -1603,6 +1637,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         string? sucursalNombre = null,
         CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (modulosPermitidos is null || modulosPermitidos.Count == 0)
         {
             return Array.Empty<AsignacionTableroKanbanDto>();
@@ -1740,6 +1775,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         string? sucursalNombre = null,
         CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (modulosPermitidos is null || modulosPermitidos.Count == 0)
         {
             return Array.Empty<SesionCalendarioDto>();
@@ -1890,6 +1926,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<string?> ResolverEpsAsignacionPorHcAsync(Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // HC -> pivote sesion/HC -> sesion -> turno -> asignacion (AseguradoraNombre).
         return await db.AsignacionTurnoSesionHcs.AsNoTracking()
             .Where(pv => pv.HistoriaClinicaId == historiaId
@@ -1911,6 +1948,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         string? idAsignacion = null,
         CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (modulosPermitidos is null || modulosPermitidos.Count == 0)
         {
             return Array.Empty<CoordinacionEliminableDto>();
@@ -2071,6 +2109,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
     public async Task<bool> EliminarCoordinacionAsync(Guid asignacionId, Guid actor, bool forzar = false, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Helper local: chequea si la asignacion tiene HC o nota downstream.
         // Se usa dos veces: al entrar (rechazo temprano) y justo antes del
         // delete (guarda contra carreras entre lista y borrado).
@@ -2125,13 +2164,13 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
 
         // Auditoria de accion destructiva (quien/cuando/que) — se agrega al mismo
         // contexto para persistir dentro de la transaccion del delete.
-        var snapshot = await SnapshotCoordinacionAsync(asig, turnoIds.Count, forzar, null, ct);
+        var snapshot = await SnapshotCoordinacionAsync(db, asig, turnoIds.Count, forzar, null, ct);
         audit.Write(actor, "coordinacion.delete", nameof(Asignacion), asignacionId,
             previousValue: snapshot, newValue: null, tenantId: tenant.TenantId);
 
         // Barre artefactos clinicos (si forzar) + sesiones + turnos, y luego la
         // asignacion. Todo en el mismo SaveChangesAsync (transaccion implicita).
-        await BorrarTurnosConCascadaAsync(turnoIds, forzar, ct);
+        await BorrarTurnosConCascadaAsync(db, turnoIds, forzar, ct);
         db.Asignaciones.Remove(asig);
         await db.SaveChangesAsync(ct);
         return true;
@@ -2152,7 +2191,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     /// es ON DELETE RESTRICT). NO llama a SaveChanges: el caller compone la transaccion.
     /// </summary>
     private async Task BorrarTurnosConCascadaAsync(
-        IReadOnlyList<Guid> turnoIds, bool forzar, CancellationToken ct)
+        IApplicationDbContext db, IReadOnlyList<Guid> turnoIds, bool forzar, CancellationToken ct)
     {
         if (turnoIds.Count == 0) { return; }
 
@@ -2206,6 +2245,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     public async Task<IReadOnlyList<ProfesionalCoordinacionDto>> ListarProfesionalesDeCoordinacionAsync(
         Guid asignacionId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var turnos = await db.AsignacionTurnos.AsNoTracking()
             .Where(t => t.AsignacionId == asignacionId)
             .Select(t => new { t.Id, t.ProfesionalId })
@@ -2265,6 +2305,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         Guid asignacionId, Guid profesionalId, Guid actor, bool forzar = false,
         CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var asig = await db.Asignaciones.FirstOrDefaultAsync(a => a.Id == asignacionId, ct);
         if (asig is null) { return false; }
 
@@ -2287,11 +2328,11 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             if (tieneNota) { throw new InvalidOperationException("No se puede eliminar: este profesional ya tiene notas medicas en la coordinacion."); }
         }
 
-        var snapshot = await SnapshotCoordinacionAsync(asig, turnoIds.Count, forzar, new[] { profesionalId }, ct);
+        var snapshot = await SnapshotCoordinacionAsync(db, asig, turnoIds.Count, forzar, new[] { profesionalId }, ct);
         audit.Write(actor, "coordinacion.delete-profesional", nameof(Asignacion), asignacionId,
             previousValue: snapshot, newValue: null, tenantId: tenant.TenantId);
 
-        await BorrarTurnosConCascadaAsync(turnoIds, forzar, ct);
+        await BorrarTurnosConCascadaAsync(db, turnoIds, forzar, ct);
 
         // Si el profesional era el ultimo (la coordinacion se queda sin turnos),
         // se elimina tambien la asignacion para no dejar una coordinacion vacia.
@@ -2307,6 +2348,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
         Guid asignacionId, IReadOnlyList<Guid> profesionalIds, Guid actor, bool forzar = false,
         CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (profesionalIds is null || profesionalIds.Count == 0) { return false; }
 
         var asig = await db.Asignaciones.FirstOrDefaultAsync(a => a.Id == asignacionId, ct);
@@ -2331,11 +2373,11 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
             if (tieneNota) { throw new InvalidOperationException("No se puede eliminar: alguno de los profesionales seleccionados ya tiene notas medicas en la coordinacion."); }
         }
 
-        var snapshot = await SnapshotCoordinacionAsync(asig, turnoIds.Count, forzar, idsSel, ct);
+        var snapshot = await SnapshotCoordinacionAsync(db, asig, turnoIds.Count, forzar, idsSel, ct);
         audit.Write(actor, "coordinacion.delete-profesional", nameof(Asignacion), asignacionId,
             previousValue: snapshot, newValue: null, tenantId: tenant.TenantId);
 
-        await BorrarTurnosConCascadaAsync(turnoIds, forzar, ct);
+        await BorrarTurnosConCascadaAsync(db, turnoIds, forzar, ct);
 
         // Si se eliminaron TODOS los profesionales (no quedan turnos), se borra
         // tambien la asignacion para no dejar una coordinacion vacia.
@@ -2350,6 +2392,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     public async Task<IReadOnlyList<EliminacionCoordinacionLogDto>> ListarEliminacionesCoordinacionAsync(
         int limite = 100, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { return new List<EliminacionCoordinacionLogDto>(); }
         if (limite <= 0 || limite > 500) { limite = 100; }
 
@@ -2408,6 +2451,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     public async Task<IReadOnlyList<TurnoReasignableDto>> ListarTurnosReasignablesAsync(
         Guid asignacionId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var turnos = await db.AsignacionTurnos.AsNoTracking()
             .Where(t => t.AsignacionId == asignacionId)
             .OrderBy(t => t.CreatedAt).ThenBy(t => t.Id)
@@ -2441,6 +2485,7 @@ public sealed class AsignacionService(IApplicationDbContext db, ITenantContext t
     public async Task<ReasignarTurnosResult> ReasignarTurnosAsync(
         ReasignarTurnosRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (req?.TurnoIds is null || req.TurnoIds.Count == 0)
         { throw new InvalidOperationException("No se indicaron turnos para reasignar."); }
         if (req.NuevoProfesionalId == Guid.Empty)

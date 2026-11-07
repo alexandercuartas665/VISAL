@@ -163,8 +163,13 @@ public sealed class AutorizacionTokenService(
             r.MotivoUso)).ToList();
     }
 
-    public async Task<UsarTokenResult> ValidarYMarcarUsoAsync(
+    public Task<UsarTokenResult> ValidarYMarcarUsoAsync(
         string codigo, Guid historiaClinicaId, Guid? asignacionId,
+        string? usadoPorNombre, Guid actor, string? motivo, CancellationToken ct = default)
+        => ValidarYMarcarUsoAsync(db, codigo, historiaClinicaId, asignacionId, usadoPorNombre, actor, motivo, ct);
+
+    public async Task<UsarTokenResult> ValidarYMarcarUsoAsync(
+        IApplicationDbContext db, string codigo, Guid historiaClinicaId, Guid? asignacionId,
         string? usadoPorNombre, Guid actor, string? motivo, CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { return new UsarTokenResult(false, "Sin tenant activo."); }
@@ -187,7 +192,7 @@ public sealed class AutorizacionTokenService(
         token.HistoriaClinicaId = historiaClinicaId;
         token.AsignacionId = asignacionId;
         token.MotivoUso = mot;
-        audit.Write(actor, "autorizacion-token.usar", nameof(AutorizacionToken), token.Id,
+        audit.Write(db, actor, "autorizacion-token.usar", nameof(AutorizacionToken), token.Id,
             previousValue: null,
             newValue: new { token.Codigo, historiaClinicaId, asignacionId, motivo = mot, usadoPor = token.UsadoPorNombre },
             tenantId: tid);

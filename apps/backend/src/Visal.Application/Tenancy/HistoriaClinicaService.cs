@@ -10,7 +10,6 @@ using Visal.Domain.Entities;
 namespace Visal.Application.Tenancy;
 
 public sealed class HistoriaClinicaService(
-    IApplicationDbContext db,
     ITenantContext tenant,
     IAuditWriter audit,
     IRevisionPolicyService revPolicy,
@@ -19,8 +18,18 @@ public sealed class HistoriaClinicaService(
     IPreRevisionIaPendingStore preRevisionStore,
     IAtencionOrdenService atencionOrden,
     IAutorizacionTokenService tokenSvc,
+    IApplicationDbContextFactory dbFactory,
     TimeProvider clock) : IHistoriaClinicaService
 {
+    // Estabilizacion P0 (Ola 2 lecturas + Ola 4 escrituras): este servicio YA NO recibe un
+    // IApplicationDbContext scoped del circuito. Cada metodo publico abre su propio contexto CORTO
+    // por operacion (using var db = dbFactory.Create();) y los helpers privados reciben ese mismo
+    // `db` por parametro, de modo que una operacion = un solo contexto que nadie mas comparte. Asi se
+    // elimina el choque "A second operation was started on this context instance" en lecturas Y
+    // escrituras. La auditoria y el token se escriben en ese contexto corto via los overloads
+    // Write(db, ...) / ValidarYMarcarUsoAsync(db, ...) para que el SaveChanges de la operacion los
+    // persista de forma atomica con la HC. CrearAsync/CopiarAsync persisten HC + pivote en un unico
+    // SaveChanges (Ola 4 atomicidad, no mas HC huerfanas).
     public async Task<IReadOnlyList<HistoriaClinicaResumenDto>> ListarPorPacienteAsync(
         Guid pacienteId,
         DateOnly? desde = null, DateOnly? hasta = null,
@@ -28,7 +37,8 @@ public sealed class HistoriaClinicaService(
         Guid? asignacionId = null,
         CancellationToken ct = default)
     {
-        var q = db.HistoriasClinicas.AsNoTracking()
+        using var rdb = dbFactory.Create();
+        var q = rdb.HistoriasClinicas.AsNoTracking()
             .Where(h => h.PacienteId == pacienteId);
 
         // Filtro por asignacion (atencion): solo HC ligadas a alguna sesion de esa
@@ -37,9 +47,9 @@ public sealed class HistoriaClinicaService(
         if (asignacionId is Guid aid)
         {
             var hcIdsDeAsig =
-                from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
-                join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
-                join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+                from p in rdb.AsignacionTurnoSesionHcs.AsNoTracking()
+                join s in rdb.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+                join t in rdb.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
                 where t.AsignacionId == aid
                 select p.HistoriaClinicaId;
             q = q.Where(h => hcIdsDeAsig.Contains(h.Id));
@@ -67,14 +77,14 @@ public sealed class HistoriaClinicaService(
         // Formatos que son "evolucion": su Codigo esta apuntado por el
         // FormatoEvolucionCodigo de algun formato de HC (modo terapia). Sirve para
         // etiquetar las sesiones 2..N en la lista de historias.
-        var evolucionCodes = await db.FormDefinitions.AsNoTracking()
+        var evolucionCodes = await rdb.FormDefinitions.AsNoTracking()
             .Where(f => f.FormatoEvolucionCodigo != null)
             .Select(f => f.FormatoEvolucionCodigo!)
             .Distinct()
             .ToListAsync(ct);
 
         var rows = await q
-            .Join(db.FormDefinitions.AsNoTracking(), h => h.FormDefinitionId, f => f.Id, (h, f) => new { h, f })
+            .Join(rdb.FormDefinitions.AsNoTracking(), h => h.FormDefinitionId, f => f.Id, (h, f) => new { h, f })
             .OrderByDescending(x => x.h.FechaApertura)
             .Take(200)
             // EF Core traduce esto a SQL — el ctor debe llamarse con TODOS los
@@ -99,9 +109,9 @@ public sealed class HistoriaClinicaService(
         if (rows.Count > 0)
         {
             var hcIds = rows.Select(r => r.Id).ToList();
-            var pivotes = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+            var pivotes = await rdb.AsignacionTurnoSesionHcs.AsNoTracking()
                 .Where(p => hcIds.Contains(p.HistoriaClinicaId))
-                .Join(db.AsignacionTurnoSesiones.AsNoTracking(),
+                .Join(rdb.AsignacionTurnoSesiones.AsNoTracking(),
                       p => p.SesionId, s => s.Id,
                       (p, s) => new { p.HistoriaClinicaId, s.AsignacionTurnoId })
                 .ToListAsync(ct);
@@ -111,7 +121,7 @@ public sealed class HistoriaClinicaService(
             var turnoIds = hcToTurno.Values.Distinct().ToList();
             var turnoToAsig = turnoIds.Count == 0
                 ? new Dictionary<Guid, Guid>()
-                : await db.AsignacionTurnos.AsNoTracking()
+                : await rdb.AsignacionTurnos.AsNoTracking()
                     .Where(t => turnoIds.Contains(t.Id))
                     .Select(t => new { t.Id, t.AsignacionId })
                     .ToDictionaryAsync(x => x.Id, x => x.AsignacionId, ct);
@@ -119,14 +129,14 @@ public sealed class HistoriaClinicaService(
             // Consecutivo publico AS-000045 POR SERVICIO: asignacion.Consecutivo.
             var asigToCons = asigIds.Count == 0
                 ? new Dictionary<Guid, long>()
-                : await db.Asignaciones.AsNoTracking()
+                : await rdb.Asignaciones.AsNoTracking()
                         .Where(a => asigIds.Contains(a.Id))
                         .Select(a => new { a.Id, a.Consecutivo })
                         .ToDictionaryAsync(x => x.Id, x => x.Consecutivo, ct);
             var turnoOrden = new Dictionary<Guid, int>();
             if (asigIds.Count > 0)
             {
-                var todosTurnos = await db.AsignacionTurnos.AsNoTracking()
+                var todosTurnos = await rdb.AsignacionTurnos.AsNoTracking()
                     .Where(t => asigIds.Contains(t.AsignacionId))
                     .Select(t => new { t.Id, t.AsignacionId, t.CreatedAt, t.NumeroSesion })
                     .ToListAsync(ct);
@@ -164,9 +174,10 @@ public sealed class HistoriaClinicaService(
 
     public async Task<HistoriaClinicaDetailDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
-        var row = await db.HistoriasClinicas.AsNoTracking()
+        using var rdb = dbFactory.Create();
+        var row = await rdb.HistoriasClinicas.AsNoTracking()
             .Where(h => h.Id == id)
-            .Join(db.FormDefinitions.AsNoTracking(), h => h.FormDefinitionId, f => f.Id, (h, f) => new { h, f })
+            .Join(rdb.FormDefinitions.AsNoTracking(), h => h.FormDefinitionId, f => f.Id, (h, f) => new { h, f })
             .Select(x => new HistoriaClinicaDetailDto(
                 x.h.Id, x.h.PacienteId, x.f.Id, x.f.Codigo, x.f.Nombre, x.f.Version,
                 x.f.SchemaJson, x.f.PrefillRoutesJson, x.h.ValoresJson,
@@ -183,11 +194,11 @@ public sealed class HistoriaClinicaService(
         // pivote sesion -> turno -> asignacion. Null si la HC no nacio de una asignacion
         // (p.ej. HC suelta). Se usa para imprimir "AS-000045" en el encabezado.
         var asigCons = await (
-            from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
+            from p in rdb.AsignacionTurnoSesionHcs.AsNoTracking()
             where p.HistoriaClinicaId == id
-            join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
-            join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
-            join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+            join s in rdb.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+            join t in rdb.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+            join a in rdb.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
             select (long?)a.Consecutivo).FirstOrDefaultAsync(ct);
         if (asigCons is not null) { row = row with { AsignacionConsecutivo = asigCons }; }
         return row;
@@ -196,6 +207,7 @@ public sealed class HistoriaClinicaService(
     public async Task<IReadOnlyList<HistoriaEvolucionLigadaDto>> GetEvolucionesLigadasAsync(
         Guid primeraSesionHcId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var vacio = (IReadOnlyList<HistoriaEvolucionLigadaDto>)Array.Empty<HistoriaEvolucionLigadaDto>();
 
         // 1) La HC impresa debe ser de un formato de terapia: su FormDefinition
@@ -277,6 +289,7 @@ public sealed class HistoriaClinicaService(
 
     public async Task<EvolucionBaseDto?> GetBaseDeEvolucionAsync(Guid hcId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // 1) Formato de la HC impresa. Si es una evolucion, su Codigo es el
         //    FormatoEvolucionCodigo que declara el formato completo (1ra sesion).
         var formatoCod = await db.HistoriasClinicas.AsNoTracking()
@@ -324,6 +337,7 @@ public sealed class HistoriaClinicaService(
     public async Task<IReadOnlyDictionary<DateOnly, int>> GetSesionesPorFechaAtencionAsync(
         Guid anyHcId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var vacio = (IReadOnlyDictionary<DateOnly, int>)new Dictionary<DateOnly, int>();
 
         // Asignacion a la que pertenece la HC (via pivote sesion -> turno -> asignacion).
@@ -360,22 +374,26 @@ public sealed class HistoriaClinicaService(
     }
 
     public async Task<long?> ResolverAsignacionConsecutivoPorTurnoAsync(Guid turnoId, CancellationToken ct = default)
-        => await (
-            from t in db.AsignacionTurnos.AsNoTracking()
+    {
+        using var rdb = dbFactory.Create();
+        return await (
+            from t in rdb.AsignacionTurnos.AsNoTracking()
             where t.Id == turnoId
-            join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+            join a in rdb.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
             select (long?)a.Consecutivo).FirstOrDefaultAsync(ct);
+    }
 
     public async Task<IReadOnlyList<AsignacionHistoriaOpcionDto>> ListarAsignacionesConHistoriaAsync(
         Guid pacienteId, CancellationToken ct = default)
     {
+        using var rdb = dbFactory.Create();
         // Asignaciones (atenciones) que tienen al menos una HC del paciente,
         // via el pivote sesion-HC -> turno -> asignacion.
         var asigIds = await (
-            from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
-            join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
-            join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
-            join h in db.HistoriasClinicas.AsNoTracking() on p.HistoriaClinicaId equals h.Id
+            from p in rdb.AsignacionTurnoSesionHcs.AsNoTracking()
+            join s in rdb.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+            join t in rdb.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+            join h in rdb.HistoriasClinicas.AsNoTracking() on p.HistoriaClinicaId equals h.Id
             where h.PacienteId == pacienteId
             select t.AsignacionId)
             .Distinct()
@@ -385,7 +403,7 @@ public sealed class HistoriaClinicaService(
             return Array.Empty<AsignacionHistoriaOpcionDto>();
         }
 
-        var asigs = await db.Asignaciones.AsNoTracking()
+        var asigs = await rdb.Asignaciones.AsNoTracking()
             .Where(a => asigIds.Contains(a.Id))
             .Select(a => new { a.Id, a.NombreServicio, a.FechaInicio, a.Consecutivo })
             .ToListAsync(ct);
@@ -403,6 +421,7 @@ public sealed class HistoriaClinicaService(
     public async Task<HistoriaClinicaDetailDto> CrearAsync(CrearHistoriaRequest req, Guid actor, CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+        using var db = dbFactory.Create();
 
         var formato = await db.FormDefinitions.AsNoTracking()
             .FirstOrDefaultAsync(f => f.Id == req.FormDefinitionId, ct)
@@ -460,7 +479,7 @@ public sealed class HistoriaClinicaService(
         // envia (AsignacionTurnoId, SessionNo) — la fila puede no existir aun
         // porque solo se crea al cerrar la sesion. La creamos aqui como parte
         // del flujo de apertura de HC para tener un ancla estable en el pivote.
-        Guid? sesionResuelta = await ResolverOCrearSesionAsync(req.SesionId, req.AsignacionTurnoId, req.SessionNo, tid, ct);
+        Guid? sesionResuelta = await ResolverOCrearSesionAsync(db, req.SesionId, req.AsignacionTurnoId, req.SessionNo, tid, ct);
 
         // Gate de orden secuencial /atencion: cuando la HC viene desde una sesion
         // programada, la UI ya bloqueo el boton pero validamos de nuevo aqui como
@@ -500,7 +519,7 @@ public sealed class HistoriaClinicaService(
         // sesion mal por numero_sesion NULL o asignacion multi-profesional, UI vieja,
         // o llamadas fuera de la UI).
         var formDefIdFinal = await ResolverFormatoPorHiloAsync(
-            formato, req.PacienteId, profesionalResuelto, req.AsignacionTurnoId, ct);
+            db, formato, req.PacienteId, profesionalResuelto, req.AsignacionTurnoId, ct);
 
         var entity = new HistoriaClinica
         {
@@ -520,15 +539,26 @@ public sealed class HistoriaClinicaService(
             RipsCausaExternaNombre = req.RipsCausaExternaNombre
         };
         db.HistoriasClinicas.Add(entity);
-        await db.SaveChangesAsync(ct);
 
-        // Vinculo HC <-> Sesion cuando la HC nace desde /atencion. Sin este pivote
-        // el modulo no puede marcar Completado ni bloquear el orden secuencial.
-        // La sesion queda Pendiente (Completado=false) porque la HC arranca Abierta;
-        // se marcara Completada cuando se llame CerrarAsync.
+        // Ola 4 (P1) ATOMICIDAD: la HC y su pivote HC<->Sesion se persisten en UN SOLO
+        // SaveChanges = una sola transaccion implicita de EF (todo-o-nada). Antes la HC se
+        // guardaba aqui y el pivote en un SaveChanges posterior; si algo fallaba entre medias
+        // (incluido el choque de concurrencia del P0) la HC quedaba SIN fila en
+        // asignacion_turno_sesion_hcs = HC huerfana (no entra a facturacion/snapshots ni marca
+        // la sesion). El Id de la HC ya esta asignado (Guid.CreateVersion7) antes de guardar.
+        // Sin este pivote el modulo /atencion no puede marcar Completado ni bloquear el orden.
         if (sesionResuelta is Guid sesionId)
         {
-            await VincularSesionYRecalcularAsync(entity.Id, sesionId, tid, ct);
+            await AgregarPivoteSesionSiFaltaAsync(db, entity.Id, sesionId, tid, ct);
+        }
+        await db.SaveChangesAsync(ct);
+
+        // Recalculo del flag Completado de la sesion DESPUES de persistir (lee datos ya guardados).
+        // La HC nace Abierta -> la sesion queda Pendiente (Completado=false); se marcara Completada
+        // cuando se llame CerrarAsync. Se mantiene por consistencia con las demas transiciones.
+        if (sesionResuelta is Guid sesionIdRecalc)
+        {
+            await RecalcularCompletadoDeSesionAsync(db, sesionIdRecalc, ct);
         }
 
         return (await GetAsync(entity.Id, ct))!;
@@ -545,7 +575,7 @@ public sealed class HistoriaClinicaService(
     /// Replica la semantica del puente de AtencionProfesionalService (profesional exacto).
     /// </summary>
     private async Task<Guid> ResolverFormatoPorHiloAsync(
-        FormDefinition formatoBase, Guid pacienteId, Guid? profesionalId,
+        IApplicationDbContext db, FormDefinition formatoBase, Guid pacienteId, Guid? profesionalId,
         Guid? asignacionTurnoId, CancellationToken ct)
     {
         // Solo aplica a formatos base que declaran evolucion (modo terapia).
@@ -623,6 +653,7 @@ public sealed class HistoriaClinicaService(
 
     public async Task<bool> GuardarValoresAsync(Guid id, string valoresJson, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.HistoriasClinicas.FirstOrDefaultAsync(h => h.Id == id, ct);
         if (e is null) { return false; }
         if (e.Estado != HistoriaClinicaEstado.Abierta)
@@ -633,13 +664,13 @@ public sealed class HistoriaClinicaService(
         // clientes viejos o flows que no pasen por el FormViewer nuevo con
         // hidratacion al abrir. Idempotente y sin sobrescribir vaciados
         // deliberados del doctor. Ver DefaultValuesHelper.HidratarDefaultsAusentes.
-        e.ValoresJson = await EnriquecerConDefaultsAsync(e.FormDefinitionId, valoresJson, ct);
+        e.ValoresJson = await EnriquecerConDefaultsAsync(db, e.FormDefinitionId, valoresJson, ct);
         // Prioridad de la fecha de atencion: (1) campo del cuerpo marcado
         // IsFechaAtencion -> (2) header "Ciudad y Fecha" (ambos los resuelve el
         // helper) -> (3) valor previo ya seteado -> (4) fecha de REGISTRO
         // (FechaApertura). Asi nunca queda null: si no hay cuerpo ni header, cae a
         // la fecha en que se abrio/registro la HC.
-        e.FechaAtencion = await CalcularFechaAtencionAsync(e.FormDefinitionId, e.ValoresJson, ct)
+        e.FechaAtencion = await CalcularFechaAtencionAsync(db, e.FormDefinitionId, e.ValoresJson, ct)
                           ?? e.FechaAtencion ?? e.FechaApertura;
         await db.SaveChangesAsync(ct);
         return true;
@@ -651,7 +682,8 @@ public sealed class HistoriaClinicaService(
     /// scoped del circuito Blazor.</summary>
     public async Task<bool> EsAbiertaAsync(Guid historiaClinicaId, CancellationToken ct = default)
     {
-        return await db.HistoriasClinicas
+        using var rdb = dbFactory.Create();
+        return await rdb.HistoriasClinicas
             .AsNoTracking()
             .Where(h => h.Id == historiaClinicaId && h.Estado == HistoriaClinicaEstado.Abierta)
             .AnyAsync(ct);
@@ -659,6 +691,7 @@ public sealed class HistoriaClinicaService(
 
     public async Task<bool> CerrarAsync(Guid id, string valoresJson, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.HistoriasClinicas.FirstOrDefaultAsync(h => h.Id == id, ct);
         if (e is null) { return false; }
         if (e.Estado == HistoriaClinicaEstado.Inactiva)
@@ -671,7 +704,7 @@ public sealed class HistoriaClinicaService(
         // enriquecemos el JSON ya persistido — asi HCs viejas se blindan al
         // menos en el momento del cierre.
         var jsonBase = string.IsNullOrWhiteSpace(valoresJson) ? e.ValoresJson : valoresJson;
-        e.ValoresJson = await EnriquecerConDefaultsAsync(e.FormDefinitionId, jsonBase, ct);
+        e.ValoresJson = await EnriquecerConDefaultsAsync(db, e.FormDefinitionId, jsonBase, ct);
         // Refuerzo del FechaAtencion al Cerrar: recalcula desde el JSON final.
         // Preserva el valor previo si el nuevo calculo es null (para no perder
         // una fecha ya seteada si el doctor limpio los campos marcados al final).
@@ -680,13 +713,13 @@ public sealed class HistoriaClinicaService(
         // helper) -> (3) valor previo ya seteado -> (4) fecha de REGISTRO
         // (FechaApertura). Asi nunca queda null: si no hay cuerpo ni header, cae a
         // la fecha en que se abrio/registro la HC.
-        e.FechaAtencion = await CalcularFechaAtencionAsync(e.FormDefinitionId, e.ValoresJson, ct)
+        e.FechaAtencion = await CalcularFechaAtencionAsync(db, e.FormDefinitionId, e.ValoresJson, ct)
                           ?? e.FechaAtencion ?? e.FechaApertura;
         // Respaldo DURO del control de fecha de atencion: si la fecha quedo fuera del
         // limite del tipo de servicio y la HC no tiene una autorizacion (token) que la
         // cubra, abortamos el cierre ANTES de mutar estado/persistir. La UI lo captura y
         // abre el modal de token. (El enganche principal esta en el autoguardado.)
-        var controlCierre = await EvaluarControlFechaAsync(e, ct);
+        var controlCierre = await EvaluarControlFechaAsync(db, e, ct);
         if (controlCierre.RequiereToken)
         {
             throw new CierreRequiereAutorizacionException(controlCierre.Detalle
@@ -698,7 +731,7 @@ public sealed class HistoriaClinicaService(
         // DbContext; los cambios se persisten en el mismo SaveChangesAsync que
         // guarda la HC, garantizando atomicidad (mismo patron que el resto del
         // codebase — ver FormDefinitionService, WhatsAppLineService, etc.).
-        audit.Write(actor, "historia-clinica.cerrar", nameof(HistoriaClinica), e.Id,
+        audit.Write(db, actor, "historia-clinica.cerrar", nameof(HistoriaClinica), e.Id,
             previousValue: new { estado = estadoPrev.ToString() },
             newValue: new { estado = e.Estado.ToString(), fechaCierre = e.FechaCierre, pacienteId = e.PacienteId, formDefinitionId = e.FormDefinitionId, especialista = e.EspecialistaNombre },
             tenantId: e.TenantId);
@@ -707,7 +740,7 @@ public sealed class HistoriaClinicaService(
         // guardamos despues, la query lee el estado viejo (Abierta) y no marca
         // la sesion. Mismo patron en Reabrir/Descartar/Activar mas abajo.
         await db.SaveChangesAsync(ct);
-        await RecalcularCompletadoDeSesionesVinculadasAsync(e.Id, ct);
+        await RecalcularCompletadoDeSesionesVinculadasAsync(db, e.Id, ct);
 
         // Capa 08 Ola 4 — trigger automatico del ciclo de revision al cerrar la HC.
         // Solo si el tenant tiene `AutoTriggerCierre = true` en `RevisionPolicy`.
@@ -752,7 +785,7 @@ public sealed class HistoriaClinicaService(
                     }
                     catch (Exception qEx)
                     {
-                        audit.Write(actor, "historia-clinica.prerevision-ia-queue-fail", nameof(HistoriaClinica), e.Id,
+                        audit.Write(db, actor, "historia-clinica.prerevision-ia-queue-fail", nameof(HistoriaClinica), e.Id,
                             previousValue: null,
                             newValue: new { revisionId = rev.Id, error = qEx.Message, exceptionType = qEx.GetType().Name },
                             tenantId: e.TenantId);
@@ -763,7 +796,7 @@ public sealed class HistoriaClinicaService(
         }
         catch (Exception ex)
         {
-            audit.Write(actor, "historia-clinica.trigger-revision-fail", nameof(HistoriaClinica), e.Id,
+            audit.Write(db, actor, "historia-clinica.trigger-revision-fail", nameof(HistoriaClinica), e.Id,
                 previousValue: null,
                 newValue: new { error = ex.Message, exceptionType = ex.GetType().Name },
                 tenantId: e.TenantId);
@@ -775,6 +808,7 @@ public sealed class HistoriaClinicaService(
 
     public async Task<bool> ReabrirAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.HistoriasClinicas.FirstOrDefaultAsync(h => h.Id == id, ct);
         if (e is null) { return false; }
         if (e.Estado != HistoriaClinicaEstado.Cerrada)
@@ -788,19 +822,20 @@ public sealed class HistoriaClinicaService(
         // que debe quedar trazada — que usuario reabrio, cuando, sobre que HC
         // y de que paciente. En caso de disputas clinicas o auditoria externa
         // (SOAT, Supersalud) este es el rastro para reconstruir el flujo.
-        audit.Write(actor, "historia-clinica.reabrir", nameof(HistoriaClinica), e.Id,
+        audit.Write(db, actor, "historia-clinica.reabrir", nameof(HistoriaClinica), e.Id,
             previousValue: new { estado = HistoriaClinicaEstado.Cerrada.ToString(), fechaCierre = fechaCierrePrev },
             newValue: new { estado = e.Estado.ToString(), pacienteId = e.PacienteId, formDefinitionId = e.FormDefinitionId, especialista = e.EspecialistaNombre },
             tenantId: e.TenantId);
         // La HC volvio a Abierta: si era la unica Cerrada en las sesiones vinculadas,
         // esas sesiones vuelven a Pendiente. Save antes del recalc (ver CerrarAsync).
         await db.SaveChangesAsync(ct);
-        await RecalcularCompletadoDeSesionesVinculadasAsync(e.Id, ct);
+        await RecalcularCompletadoDeSesionesVinculadasAsync(db, e.Id, ct);
         return true;
     }
 
     public async Task<bool> SetFolioPorHcAsync(Guid hcId, bool esFolio, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Resuelve la(s) asignacion(es) de la HC via el pivote sesion->turno->asignacion
         // y marca/desmarca EsFolio. Afecta la asignacion completa (todas sus HCs), que es
         // lo esperado: "esta asignacion es un folio". Las folio no caen en RelacionFacturas.
@@ -819,25 +854,27 @@ public sealed class HistoriaClinicaService(
 
     public async Task<bool> DescartarAsync(Guid id, string? motivo, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.HistoriasClinicas.FirstOrDefaultAsync(h => h.Id == id, ct);
         if (e is null) { return false; }
         var estadoPrev = e.Estado;
         e.Estado = HistoriaClinicaEstado.Inactiva;
         e.MotivoInactivacion = string.IsNullOrWhiteSpace(motivo) ? null : motivo.Trim();
         e.FechaCierre = DateTimeOffset.UtcNow;
-        audit.Write(actor, "historia-clinica.descartar", nameof(HistoriaClinica), e.Id,
+        audit.Write(db, actor, "historia-clinica.descartar", nameof(HistoriaClinica), e.Id,
             previousValue: new { estado = estadoPrev.ToString() },
             newValue: new { estado = e.Estado.ToString(), motivo = e.MotivoInactivacion, fechaCierre = e.FechaCierre, pacienteId = e.PacienteId },
             tenantId: e.TenantId);
         // HC descartada: si era la unica Cerrada de sus sesiones vinculadas,
         // las sesiones vuelven a Pendiente. Save antes del recalc (ver CerrarAsync).
         await db.SaveChangesAsync(ct);
-        await RecalcularCompletadoDeSesionesVinculadasAsync(e.Id, ct);
+        await RecalcularCompletadoDeSesionesVinculadasAsync(db, e.Id, ct);
         return true;
     }
 
     public async Task<bool> ActivarAsync(Guid id, string? motivo, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.HistoriasClinicas.FirstOrDefaultAsync(h => h.Id == id, ct);
         if (e is null) { return false; }
         if (e.Estado != HistoriaClinicaEstado.Inactiva)
@@ -852,7 +889,7 @@ public sealed class HistoriaClinicaService(
         // Auditoria administrativa: reactivar una HC descartada es tan sensible
         // como reabrir una Cerrada — deja rastro de quien lo hizo, motivo del
         // reingreso al flujo y el motivo original del descarte.
-        audit.Write(actor, "historia-clinica.activar", nameof(HistoriaClinica), e.Id,
+        audit.Write(db, actor, "historia-clinica.activar", nameof(HistoriaClinica), e.Id,
             previousValue: new { estado = HistoriaClinicaEstado.Inactiva.ToString(), motivoInactivacion = motivoPrev, fechaCierre = fechaCierrePrev },
             newValue: new { estado = e.Estado.ToString(), motivoActivacion = string.IsNullOrWhiteSpace(motivo) ? null : motivo.Trim(), pacienteId = e.PacienteId },
             tenantId: e.TenantId);
@@ -860,7 +897,7 @@ public sealed class HistoriaClinicaService(
         // "Completado=true" por alguna razon en el pivote, ahora ya no cuenta.
         // Save antes del recalc (ver CerrarAsync).
         await db.SaveChangesAsync(ct);
-        await RecalcularCompletadoDeSesionesVinculadasAsync(e.Id, ct);
+        await RecalcularCompletadoDeSesionesVinculadasAsync(db, e.Id, ct);
         return true;
     }
 
@@ -868,7 +905,8 @@ public sealed class HistoriaClinicaService(
     {
         // Si hay varias abiertas (raro pero posible si el profesional cerro sesion
         // sin cerrar la HC), tomamos la mas reciente.
-        return await db.HistoriasClinicas.AsNoTracking()
+        using var rdb = dbFactory.Create();
+        return await rdb.HistoriasClinicas.AsNoTracking()
             .Where(h => h.PacienteId == pacienteId && h.Estado == HistoriaClinicaEstado.Abierta)
             .OrderByDescending(h => h.FechaApertura)
             .Select(h => (Guid?)h.Id)
@@ -885,7 +923,9 @@ public sealed class HistoriaClinicaService(
         // BuscarAbiertaDeSesionAsync — de lo contrario, un paciente con varias
         // sesiones del mismo formato (p.ej. notas de enfermeria) hace que el
         // modal reanude/ cierre una sesion distinta a la que el usuario abrio.
-        return await db.HistoriasClinicas.AsNoTracking()
+        // Ola 2 (P0): contexto corto propio (lectura en apertura de modal).
+        using var rdb = dbFactory.Create();
+        return await rdb.HistoriasClinicas.AsNoTracking()
             .Where(h => h.PacienteId == pacienteId
                      && h.ProfesionalId == profesionalId
                      && h.FormDefinitionId == formDefinitionId
@@ -898,8 +938,10 @@ public sealed class HistoriaClinicaService(
     public async Task<Guid?> BuscarAbiertaDeSesionAsync(Guid asignacionTurnoId, int sessionNo, CancellationToken ct = default)
     {
         if (asignacionTurnoId == Guid.Empty || sessionNo < 1) { return null; }
+        // Ola 2 (P0): contexto corto propio (lectura en apertura de modal).
+        using var rdb = dbFactory.Create();
         // 1) Resolver la sesion concreta (AsignacionTurnoSesion) del turno+numero.
-        var sesionId = await db.AsignacionTurnoSesiones.AsNoTracking()
+        var sesionId = await rdb.AsignacionTurnoSesiones.AsNoTracking()
             .Where(s => s.AsignacionTurnoId == asignacionTurnoId && s.SessionNo == sessionNo)
             .Select(s => (Guid?)s.Id)
             .FirstOrDefaultAsync(ct);
@@ -908,9 +950,9 @@ public sealed class HistoriaClinicaService(
         //    modal reanuda solo la HC de la sesion que el usuario abrio, no
         //    cualquier otra abierta del mismo (paciente+profesional+formato).
         //    Si hubiera varias abiertas para la misma sesion (raro), la mas reciente.
-        return await db.AsignacionTurnoSesionHcs.AsNoTracking()
+        return await rdb.AsignacionTurnoSesionHcs.AsNoTracking()
             .Where(p => p.SesionId == sid)
-            .Join(db.HistoriasClinicas.AsNoTracking(),
+            .Join(rdb.HistoriasClinicas.AsNoTracking(),
                   p => p.HistoriaClinicaId, h => h.Id, (p, h) => h)
             .Where(h => h.Estado == HistoriaClinicaEstado.Abierta)
             .OrderByDescending(h => h.FechaApertura)
@@ -921,6 +963,7 @@ public sealed class HistoriaClinicaService(
     public async Task<HistoriaClinicaDetailDto?> CopiarAsync(CopiarHistoriaRequest req, Guid actor, CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+        using var db = dbFactory.Create();
 
         // Cargar la HC origen — sirve tanto para copiar sus campos base como para
         // validar que existe y pertenece al tenant (via Query Filter).
@@ -937,7 +980,7 @@ public sealed class HistoriaClinicaService(
         // una HC creada normal (gate de orden secuencial + regla "1 HC activa por
         // sesion") para que la copia no deje la sesion huerfana ni duplique HC. Si no
         // viene contexto, la copia no se liga (el llamador en /atencion lo bloquea).
-        var sesionDestino = await ResolverOCrearSesionAsync(req.SesionId, req.AsignacionTurnoId, req.SessionNo, tid, ct);
+        var sesionDestino = await ResolverOCrearSesionAsync(db, req.SesionId, req.AsignacionTurnoId, req.SessionNo, tid, ct);
         if (sesionDestino is Guid sesionValidar)
         {
             var bloqueo = await atencionOrden.ValidarAperturaAsync(sesionValidar, actor, ct);
@@ -981,15 +1024,15 @@ public sealed class HistoriaClinicaService(
             RipsCausaExternaNombre = source.RipsCausaExternaNombre
         };
         db.HistoriasClinicas.Add(nueva);
-        await db.SaveChangesAsync(ct);
 
-        // Pivote HC <-> sesion ACTUAL (si hay contexto de atencion). Mismo helper
-        // idempotente que usa la creacion normal: sin esto la copia quedaba huerfana
-        // (no entraba a facturacion/snapshots ni marcaba la sesion). La sesion ya fue
-        // validada arriba.
+        // Ola 4 (P1) ATOMICIDAD: pivote HC<->sesion en el MISMO SaveChanges que la HC copia (ver
+        // CrearAsync). Antes se guardaba la HC y LUEGO el pivote en un SaveChanges aparte -> ventana
+        // en la que la copia quedaba huerfana (no entraba a facturacion/snapshots ni marcaba la
+        // sesion). La sesion ya fue validada arriba. El SaveChanges se hace mas abajo, junto con las
+        // colecciones clonadas y la auditoria, para que toda la copia sea una sola transaccion.
         if (sesionDestino is Guid sesionLink)
         {
-            await VincularSesionYRecalcularAsync(nueva.Id, sesionLink, tid, ct);
+            await AgregarPivoteSesionSiFaltaAsync(db, nueva.Id, sesionLink, tid, ct);
         }
 
         // Clonar las 7 colecciones clinicas. Cada item nuevo lleva Id fresco + HistoriaClinicaId
@@ -1087,14 +1130,14 @@ public sealed class HistoriaClinicaService(
 
         // Enriquecer los valores copiados con defaults ausentes por si el schema
         // evoluciono despues de que se guardo la HC origen. Idempotente.
-        nueva.ValoresJson = await EnriquecerConDefaultsAsync(nueva.FormDefinitionId, nueva.ValoresJson, ct);
+        nueva.ValoresJson = await EnriquecerConDefaultsAsync(db, nueva.FormDefinitionId, nueva.ValoresJson, ct);
         // FechaAtencion se recalcula sobre el JSON copiado — hereda la del origen
         // si el schema no cambio. Si no hay cuerpo ni header, cae a la fecha de
         // registro (FechaApertura) en vez de quedar null (misma prioridad que Cerrar/Guardar).
-        nueva.FechaAtencion = await CalcularFechaAtencionAsync(nueva.FormDefinitionId, nueva.ValoresJson, ct)
+        nueva.FechaAtencion = await CalcularFechaAtencionAsync(db, nueva.FormDefinitionId, nueva.ValoresJson, ct)
                               ?? nueva.FechaApertura;
 
-        audit.Write(actor, "historia-clinica.copiar", nameof(HistoriaClinica), nueva.Id,
+        audit.Write(db, actor, "historia-clinica.copiar", nameof(HistoriaClinica), nueva.Id,
             previousValue: null,
             newValue: new
             {
@@ -1113,19 +1156,18 @@ public sealed class HistoriaClinicaService(
                 }
             },
             tenantId: tid);
+        // Ola 4 (P1): un unico SaveChanges persiste HC + pivote + colecciones clonadas + auditoria
+        // de forma atomica (todo-o-nada). El recalculo del Completado de la sesion va DESPUES de
+        // guardar porque lee datos ya commiteados.
         await db.SaveChangesAsync(ct);
+        if (sesionDestino is Guid sesionRecalc)
+        {
+            await RecalcularCompletadoDeSesionAsync(db, sesionRecalc, ct);
+        }
 
         return await GetAsync(nueva.Id, ct);
     }
 
-    /// <summary>
-    /// Inserta el pivote AsignacionTurnoSesionHc para vincular la HC recien
-    /// creada con la sesion desde donde se abrio en /atencion. Si el pivote
-    /// ya existiera (race o retry) el indice unico (sesion_id, hc_id) haria
-    /// fallar el insert; por eso chequeamos primero. Luego recalcula el
-    /// flag Completado de la sesion (por definicion queda false, la HC nace
-    /// Abierta).
-    /// </summary>
     /// <summary>
     /// Resuelve la sesion destino de una HC que nace desde /atencion: si viene
     /// <paramref name="sesionId"/> lo devuelve tal cual; si no, la ubica por
@@ -1135,7 +1177,7 @@ public sealed class HistoriaClinicaService(
     /// contexto suficiente para resolverla (la HC quedaria sin ligar). Compartido
     /// por <c>CrearAsync</c> y <c>CopiarAsync</c> para no duplicar la regla.
     /// </summary>
-    private async Task<Guid?> ResolverOCrearSesionAsync(Guid? sesionId, Guid? asignacionTurnoId, int? sessionNo, Guid tid, CancellationToken ct)
+    private async Task<Guid?> ResolverOCrearSesionAsync(IApplicationDbContext db, Guid? sesionId, Guid? asignacionTurnoId, int? sessionNo, Guid tid, CancellationToken ct)
     {
         if (sesionId is Guid sid) { return sid; }
         if (asignacionTurnoId is Guid atId && sessionNo is int sno && sno >= 1)
@@ -1157,7 +1199,18 @@ public sealed class HistoriaClinicaService(
         return null;
     }
 
-    private async Task VincularSesionYRecalcularAsync(Guid historiaClinicaId, Guid sesionId, Guid tenantId, CancellationToken ct)
+    /// <summary>
+    /// Agrega (si falta) el pivote AsignacionTurnoSesionHc que liga la HC con su sesion de
+    /// /atencion. NO hace SaveChanges ni recalcula: el llamador persiste el pivote en el MISMO
+    /// SaveChanges que la HC para que sean atomicos, y recalcula el Completado DESPUES de guardar.
+    /// Ola 4 (P1): antes esta rutina guardaba el pivote en un SaveChanges propio, separado del de
+    /// la HC; una falla entre ambos (incluido el choque de concurrencia del P0) dejaba la HC
+    /// huerfana (fila en historias_clinicas sin fila en asignacion_turno_sesion_hcs). El Id de la
+    /// HC ya viene asignado (Guid.CreateVersion7 en el ctor de la entidad), asi que no hace falta
+    /// guardar la HC antes para conocerlo. El chequeo de existencia protege ante reintentos/carreras
+    /// (indice unico sesion_id + hc_id).
+    /// </summary>
+    private async Task AgregarPivoteSesionSiFaltaAsync(IApplicationDbContext db, Guid historiaClinicaId, Guid sesionId, Guid tenantId, CancellationToken ct)
     {
         var yaExiste = await db.AsignacionTurnoSesionHcs
             .AnyAsync(p => p.SesionId == sesionId && p.HistoriaClinicaId == historiaClinicaId, ct);
@@ -1169,9 +1222,7 @@ public sealed class HistoriaClinicaService(
                 SesionId = sesionId,
                 HistoriaClinicaId = historiaClinicaId
             });
-            await db.SaveChangesAsync(ct);
         }
-        await RecalcularCompletadoDeSesionAsync(sesionId, ct);
     }
 
     /// <summary>
@@ -1184,7 +1235,7 @@ public sealed class HistoriaClinicaService(
     /// Definicion: sesion.Completado = true si al menos UNA HC vinculada esta
     /// en estado Cerrada. HC Abierta o Inactiva NO cuentan como completada.
     /// </summary>
-    private async Task RecalcularCompletadoDeSesionesVinculadasAsync(Guid historiaClinicaId, CancellationToken ct)
+    private async Task RecalcularCompletadoDeSesionesVinculadasAsync(IApplicationDbContext db, Guid historiaClinicaId, CancellationToken ct)
     {
         var sesionIds = await db.AsignacionTurnoSesionHcs
             .Where(p => p.HistoriaClinicaId == historiaClinicaId)
@@ -1192,11 +1243,11 @@ public sealed class HistoriaClinicaService(
             .ToListAsync(ct);
         foreach (var sesionId in sesionIds)
         {
-            await RecalcularCompletadoDeSesionAsync(sesionId, ct);
+            await RecalcularCompletadoDeSesionAsync(db, sesionId, ct);
         }
     }
 
-    private async Task RecalcularCompletadoDeSesionAsync(Guid sesionId, CancellationToken ct)
+    private async Task RecalcularCompletadoDeSesionAsync(IApplicationDbContext db, Guid sesionId, CancellationToken ct)
     {
         var sesion = await db.AsignacionTurnoSesiones.FirstOrDefaultAsync(s => s.Id == sesionId, ct);
         if (sesion is null) { return; }
@@ -1228,7 +1279,7 @@ public sealed class HistoriaClinicaService(
     /// JSON original saneado ({} para blanco). Los tenants sin schema (imposible
     /// en la practica pero defensivo) obtienen el JSON tal cual.
     /// </summary>
-    private async Task<string> EnriquecerConDefaultsAsync(Guid formDefinitionId, string? valoresJson, CancellationToken ct)
+    private async Task<string> EnriquecerConDefaultsAsync(IApplicationDbContext db, Guid formDefinitionId, string? valoresJson, CancellationToken ct)
     {
         var jsonSaneado = string.IsNullOrWhiteSpace(valoresJson) ? "{}" : valoresJson;
 
@@ -1262,7 +1313,7 @@ public sealed class HistoriaClinicaService(
     /// la fecha calculada por <see cref="FechaAtencionHelper"/>. null si no hay
     /// campos marcados con IsFechaAtencion o ninguno tiene valor.
     /// </summary>
-    private async Task<DateTimeOffset?> CalcularFechaAtencionAsync(Guid formDefinitionId, string? valoresJson, CancellationToken ct)
+    private async Task<DateTimeOffset?> CalcularFechaAtencionAsync(IApplicationDbContext db, Guid formDefinitionId, string? valoresJson, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(valoresJson)) { return null; }
         var schemaJson = await db.FormDefinitions.AsNoTracking()
@@ -1294,7 +1345,7 @@ public sealed class HistoriaClinicaService(
     /// de la asignacion ligada a la HC via pivote sesion-HC -> sesion -> turno -> asignacion.
     /// Toma el turno de menor NumeroSesion. null si la HC no esta ligada a ninguna sesion.</summary>
     private async Task<(int NumeroSesion, DateTimeOffset Coordinacion, Guid AsignacionId, string? Tipo, string? Modulo)?>
-        ResolverTurnoAsigDeHcAsync(Guid hcId, CancellationToken ct)
+        ResolverTurnoAsigDeHcAsync(IApplicationDbContext db, Guid hcId, CancellationToken ct)
     {
         var fila = await (
             from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
@@ -1309,13 +1360,13 @@ public sealed class HistoriaClinicaService(
         return (fila.Num ?? 1, fila.CreatedAt, fila.AsigId, fila.TipoServicio, fila.Modulo);
     }
 
-    private async Task<ControlFechaAtencionDto> EvaluarControlFechaAsync(HistoriaClinica e, CancellationToken ct)
+    private async Task<ControlFechaAtencionDto> EvaluarControlFechaAsync(IApplicationDbContext db, HistoriaClinica e, CancellationToken ct)
     {
         if (e.FechaAtencion is not DateTimeOffset fecha)
         {
             return new ControlFechaAtencionDto(false, null, null, null, null);
         }
-        var info = await ResolverTurnoAsigDeHcAsync(e.Id, ct);
+        var info = await ResolverTurnoAsigDeHcAsync(db, e.Id, ct);
         if (info is null)
         {
             // HC suelta (sin sesion): no hay tipo/coordinacion -> sin control.
@@ -1365,22 +1416,26 @@ public sealed class HistoriaClinicaService(
 
     public async Task<ControlFechaAtencionDto> EvaluarControlFechaAsync(Guid hcId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.HistoriasClinicas.AsNoTracking().FirstOrDefaultAsync(h => h.Id == hcId, ct);
         if (e is null) { return new ControlFechaAtencionDto(false, null, null, null, null); }
-        return await EvaluarControlFechaAsync(e, ct);
+        return await EvaluarControlFechaAsync(db, e, ct);
     }
 
     public async Task<AutorizarFechaResult> AutorizarFechaConTokenAsync(
         Guid hcId, string codigo, string motivo, string? actorNombre, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.HistoriasClinicas.FirstOrDefaultAsync(h => h.Id == hcId, ct);
         if (e is null) { return new AutorizarFechaResult(false, "Historia clinica no encontrada."); }
         if (e.FechaAtencion is not DateTimeOffset fecha)
         {
             return new AutorizarFechaResult(false, "La historia aun no tiene fecha de atencion.");
         }
-        var info = await ResolverTurnoAsigDeHcAsync(e.Id, ct);
-        var res = await tokenSvc.ValidarYMarcarUsoAsync(codigo, e.Id, info?.AsignacionId, actorNombre, actor, motivo, ct);
+        var info = await ResolverTurnoAsigDeHcAsync(db, e.Id, ct);
+        // Token marcado en ESTE contexto corto (overload con db) para que el unico SaveChanges de abajo
+        // persista token + HC de forma atomica (Ola 4). Ver IAutorizacionTokenService.
+        var res = await tokenSvc.ValidarYMarcarUsoAsync(db, codigo, e.Id, info?.AsignacionId, actorNombre, actor, motivo, ct);
         if (!res.Ok) { return new AutorizarFechaResult(false, res.Mensaje); }
         // Marca la HC como autorizada para ESTA fecha (no re-pregunta mientras no cambie).
         e.AutorizacionFechaTokenId = res.TokenId;

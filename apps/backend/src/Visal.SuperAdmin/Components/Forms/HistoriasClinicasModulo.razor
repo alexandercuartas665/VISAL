@@ -1834,6 +1834,7 @@
             // clasico — reanudar la HC en curso del profesional sobre ese formato.
             var miProf = await ResolverMiProfesionalIdAsync();
             if (miProf is not Guid pidProf) { return; }
+            // Ola 3 (P0): BuscarAbiertaDelProfesionalAsync ya usa contexto corto (factory); retry Ola 1 redundante.
             hcId = await HcSvc.BuscarAbiertaDelProfesionalAsync(p.Id, pidProf, fid);
         }
         if (hcId is not Guid id) { return; }
@@ -2377,6 +2378,7 @@
         var miProf = await ResolverMiProfesionalIdAsync();
         if (miProf is Guid pidProf)
         {
+            // Ola 3 (P0): BuscarAbiertaDelProfesionalAsync ya usa contexto corto (factory); retry Ola 1 redundante.
             var enCurso = await HcSvc.BuscarAbiertaDelProfesionalAsync(p.Id, pidProf, fid);
             if (enCurso is Guid hcId)
             {

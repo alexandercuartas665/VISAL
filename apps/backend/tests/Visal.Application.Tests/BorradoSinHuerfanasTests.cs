@@ -35,6 +35,9 @@ public sealed class BorradoSinHuerfanasTests
         public void Write(Guid actorUserId, string actionName, string entityName, Guid? entityId,
             object? previousValue, object? newValue, Guid? tenantId = null, string? reason = null,
             AuditActorType actorType = AuditActorType.Human) { }
+        public void Write(IApplicationDbContext db, Guid actorUserId, string actionName, string entityName, Guid? entityId,
+            object? previousValue, object? newValue, Guid? tenantId = null, string? reason = null,
+            AuditActorType actorType = AuditActorType.Human) { }
     }
 
     private sealed class FakeFestivos : IFestivosColombiaService
@@ -49,7 +52,8 @@ public sealed class BorradoSinHuerfanasTests
             new FakeTenantContext { TenantId = Tenant });
 
     private static AsignacionService Svc(VisalDbContext ctx) =>
-        new(ctx, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
+        new(new FakeTenantContext { TenantId = Tenant }, new NoopAudit(),
+            new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }));
 
     // Siembra 1 asignacion + 1 turno + 1 sesion + 1 HC (con el estado dado) + pivote.
     private static async Task<(Guid asigId, Guid turnoId, Guid hcId)> SembrarConHcAsync(

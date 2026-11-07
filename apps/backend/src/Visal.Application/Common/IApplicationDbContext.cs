@@ -9,7 +9,7 @@ namespace Visal.Application.Common;
 /// Abstraccion del DbContext para los casos de uso de Application, sin acoplar a la
 /// implementacion concreta de Infrastructure. Expone solo los conjuntos que la capa necesita.
 /// </summary>
-public interface IApplicationDbContext
+public interface IApplicationDbContext : System.IDisposable, System.IAsyncDisposable
 {
     DbSet<PlatformUser> PlatformUsers { get; }
     DbSet<TenantUser> TenantUsers { get; }

@@ -36,6 +36,10 @@ public sealed class PacienteContratosTests
             object? previousValue, object? newValue,
             Guid? tenantId = null, string? reason = null,
             AuditActorType actorType = AuditActorType.Human) { }
+        public void Write(IApplicationDbContext db, Guid actorUserId, string actionName, string entityName, Guid? entityId,
+            object? previousValue, object? newValue,
+            Guid? tenantId = null, string? reason = null,
+            AuditActorType actorType = AuditActorType.Human) { }
     }
 
     private static VisalDbContext NewCtx(string dbName)
@@ -183,7 +187,8 @@ public sealed class PacienteContratosTests
         var saved = await svc.SaveAsync(Req(null, "666", lista), Actor);
         Assert.NotNull(saved);
 
-        var asig = new AsignacionService(db, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
+        var asig = new AsignacionService(new FakeTenantContext { TenantId = Tenant }, new NoopAudit(),
+            new TestDbContextFactory(db, new FakeTenantContext { TenantId = Tenant }));
         var pAsig = await asig.GetPacienteAsync(saved!.Id);
 
         Assert.NotNull(pAsig);
@@ -203,7 +208,8 @@ public sealed class PacienteContratosTests
         var svc = new PacienteService(db, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
         var saved = await svc.SaveAsync(Req(null, "777", Array.Empty<PacienteContratoDto>()), Actor);
 
-        var asig = new AsignacionService(db, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
+        var asig = new AsignacionService(new FakeTenantContext { TenantId = Tenant }, new NoopAudit(),
+            new TestDbContextFactory(db, new FakeTenantContext { TenantId = Tenant }));
         var pAsig = await asig.GetPacienteAsync(saved!.Id);
 
         Assert.NotNull(pAsig);

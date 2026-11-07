@@ -22,8 +22,21 @@ public sealed class AuditWriter : IAuditWriter
         Guid? tenantId = null,
         string? reason = null,
         AuditActorType actorType = AuditActorType.Human)
+        => Write(_db, actorUserId, actionName, entityName, entityId, previousValue, newValue, tenantId, reason, actorType);
+
+    public void Write(
+        IApplicationDbContext db,
+        Guid actorUserId,
+        string actionName,
+        string entityName,
+        Guid? entityId,
+        object? previousValue,
+        object? newValue,
+        Guid? tenantId = null,
+        string? reason = null,
+        AuditActorType actorType = AuditActorType.Human)
     {
-        _db.SuperAdminAuditLogs.Add(new SuperAdminAuditLog
+        db.SuperAdminAuditLogs.Add(new SuperAdminAuditLog
         {
             ActorUserId = actorUserId,
             ActorType = actorType,

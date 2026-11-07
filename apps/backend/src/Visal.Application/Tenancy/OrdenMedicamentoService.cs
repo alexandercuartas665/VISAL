@@ -6,10 +6,14 @@ using Visal.Domain.Entities;
 namespace Visal.Application.Tenancy;
 
 public sealed class OrdenMedicamentoService(
-    IApplicationDbContext db,
     ITenantContext tenant,
-    IHistoriaPrefillService prefill) : IOrdenMedicamentoService
+    IHistoriaPrefillService prefill,
+    IApplicationDbContextFactory dbFactory) : IOrdenMedicamentoService
 {
+    // Ola 2 estabilizacion (P0): contexto CORTO por operacion (using var db = dbFactory.Create();)
+    // en vez del DbContext scoped del circuito; el helper RevocarEmisionMedActivaAsync recibe ese
+    // mismo `db` por parametro para que una operacion = un solo contexto. El prefill corre despues
+    // del SaveChanges y lee datos ya commiteados por su propio contexto (sin cambio).
     public async Task<IReadOnlyList<MedicamentoSugerenciaDto>> BuscarSugerenciasAsync(
         string termino, int take = 12, CancellationToken ct = default)
     {
@@ -22,6 +26,7 @@ public sealed class OrdenMedicamentoService(
         if (take <= 0) { take = 12; }
         if (take > 50) { take = 50; }
 
+        using var db = dbFactory.Create();
         return await db.Medicamentos.AsNoTracking()
             .Where(m =>
                 (m.Producto != null && m.Producto.ToLower().Contains(t)) ||
@@ -46,6 +51,7 @@ public sealed class OrdenMedicamentoService(
     public async Task<IReadOnlyList<OrdenMedicamentoItemDto>> ListarPorHistoriaAsync(
         Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.HistoriaClinicaMedicamentos.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == historiaId)
             .OrderBy(x => x.NumeroOrden)
@@ -61,6 +67,7 @@ public sealed class OrdenMedicamentoService(
     public async Task<OrdenMedicamentoItemDto> AgregarAsync(
         Guid historiaId, AgregarMedicamentoRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (string.IsNullOrWhiteSpace(req.NombreMedicamento))
         {
@@ -72,7 +79,7 @@ public sealed class OrdenMedicamentoService(
         // Si esa orden ya fue emitida (QR firmado), editar la anula: revocamos su
         // emision vigente para que la impresion anterior no quede desalineada. Al
         // reimprimir se re-emite un QR nuevo con los medicamentos actualizados.
-        await RevocarEmisionMedActivaAsync(historiaId, numeroOrden, actor, ct);
+        await RevocarEmisionMedActivaAsync(db, historiaId, numeroOrden, actor, ct);
 
         // Calcular siguiente posicion DENTRO de esa orden (grupo).
         var siguiente = 1 + await db.HistoriaClinicaMedicamentos
@@ -113,10 +120,11 @@ public sealed class OrdenMedicamentoService(
     public async Task<bool> ActualizarAsync(
         Guid itemId, ActualizarMedicamentoRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var entity = await db.HistoriaClinicaMedicamentos.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
         await db.EnsureAbiertaAsync(entity.HistoriaClinicaId, ct);
-        await RevocarEmisionMedActivaAsync(entity.HistoriaClinicaId, entity.NumeroOrden, actor, ct);
+        await RevocarEmisionMedActivaAsync(db, entity.HistoriaClinicaId, entity.NumeroOrden, actor, ct);
         entity.Cantidad = Trim(req.Cantidad);
         entity.Frecuencia = Trim(req.Frecuencia);
         entity.Dias = Trim(req.Dias);
@@ -131,11 +139,12 @@ public sealed class OrdenMedicamentoService(
 
     public async Task<bool> EliminarAsync(Guid itemId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var entity = await db.HistoriaClinicaMedicamentos.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
         var hcId = entity.HistoriaClinicaId;
         await db.EnsureAbiertaAsync(hcId, ct);
-        await RevocarEmisionMedActivaAsync(hcId, entity.NumeroOrden, actor, ct);
+        await RevocarEmisionMedActivaAsync(db, hcId, entity.NumeroOrden, actor, ct);
         db.HistoriaClinicaMedicamentos.Remove(entity);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(hcId, ct);
@@ -144,12 +153,13 @@ public sealed class OrdenMedicamentoService(
 
     public async Task<bool> EliminarOrdenAsync(Guid historiaId, int numeroOrden, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         await db.EnsureAbiertaAsync(historiaId, ct);
         var items = await db.HistoriaClinicaMedicamentos
             .Where(x => x.HistoriaClinicaId == historiaId && x.NumeroOrden == numeroOrden)
             .ToListAsync(ct);
         if (items.Count == 0) { return false; }
-        await RevocarEmisionMedActivaAsync(historiaId, numeroOrden, actor, ct);
+        await RevocarEmisionMedActivaAsync(db, historiaId, numeroOrden, actor, ct);
         db.HistoriaClinicaMedicamentos.RemoveRange(items);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(historiaId, ct);
@@ -158,6 +168,7 @@ public sealed class OrdenMedicamentoService(
 
     public async Task<int> ContarPorHistoriaAsync(Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.HistoriaClinicaMedicamentos
             .CountAsync(x => x.HistoriaClinicaId == historiaId, ct);
     }
@@ -172,7 +183,7 @@ public sealed class OrdenMedicamentoService(
     /// documento firmado y no se editan sus items). No hace SaveChanges: el metodo
     /// llamador persiste la revocacion junto con la edicion en el mismo scope.
     /// </summary>
-    private async Task RevocarEmisionMedActivaAsync(Guid historiaId, int numeroOrden, Guid actor, CancellationToken ct)
+    private async Task RevocarEmisionMedActivaAsync(IApplicationDbContext db, Guid historiaId, int numeroOrden, Guid actor, CancellationToken ct)
     {
         var emisiones = await db.OrdenesMedicamentosPublicas
             .Where(o => o.HistoriaClinicaId == historiaId && o.TipoOrden == "MED"

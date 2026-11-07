@@ -2033,12 +2033,12 @@ else if (_tabSel == "Cierre de periodos")
             var sedeFiltro = _puedeElegirSede
                 ? (string.IsNullOrWhiteSpace(_sedeSel) ? null : _sedeSel)
                 : _miSucursalNombre;
-            _pendientes = (await Visal.SuperAdmin.Common.DbConcurrencia.ReintentarAsync(
-                () => Svc.ListarPendientesAsync(modulos, _estado, _anio, mesFiltro,
-                    string.IsNullOrWhiteSpace(_noOrden) ? null : _noOrden,
-                    string.IsNullOrWhiteSpace(_doc) ? null : _doc,
-                    sedeFiltro,
-                    string.IsNullOrWhiteSpace(_epsSel) ? null : _epsSel))).ToList();
+            // Ola 3 (P0): ListarPendientesAsync (AsignacionService) ya usa contexto corto (factory); retry Ola 1 redundante.
+            _pendientes = (await Svc.ListarPendientesAsync(modulos, _estado, _anio, mesFiltro,
+                string.IsNullOrWhiteSpace(_noOrden) ? null : _noOrden,
+                string.IsNullOrWhiteSpace(_doc) ? null : _doc,
+                sedeFiltro,
+                string.IsNullOrWhiteSpace(_epsSel) ? null : _epsSel)).ToList();
             _solicitudSel = null;
             _especialistas = new();
             if (_pendientes.Count == 0) { _ok = "Sin servicios para esta combinacion."; }
@@ -2475,8 +2475,8 @@ else if (_tabSel == "Cierre de periodos")
         _cargandoHistorial = true;
         try
         {
-            _eliminaciones = (await Visal.SuperAdmin.Common.DbConcurrencia.ReintentarAsync(
-                () => Svc.ListarEliminacionesCoordinacionAsync())).ToList();
+            // Ola 3 (P0): ListarEliminacionesCoordinacionAsync (AsignacionService) ya usa contexto corto (factory); retry Ola 1 redundante.
+            _eliminaciones = (await Svc.ListarEliminacionesCoordinacionAsync()).ToList();
         }
         catch (Exception ex) { _error = "No se pudo cargar el historial: " + ex.Message; }
         finally { _cargandoHistorial = false; }

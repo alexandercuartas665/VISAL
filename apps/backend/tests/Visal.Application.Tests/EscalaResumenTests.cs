@@ -32,6 +32,9 @@ public sealed class EscalaResumenTests
         public void Write(Guid actorUserId, string actionName, string entityName, Guid? entityId,
             object? previousValue, object? newValue, Guid? tenantId = null, string? reason = null,
             AuditActorType actorType = AuditActorType.Human) { }
+        public void Write(IApplicationDbContext db, Guid actorUserId, string actionName, string entityName, Guid? entityId,
+            object? previousValue, object? newValue, Guid? tenantId = null, string? reason = null,
+            AuditActorType actorType = AuditActorType.Human) { }
     }
 
     private sealed class FakeTenantContext : ITenantContext

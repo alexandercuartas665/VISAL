@@ -32,19 +32,18 @@ public static class DependencyInjection
         services.AddScoped<AuditableTenantInterceptor>();
 
         services.AddDbContext<VisalDbContext>((sp, options) =>
-        {
-            options.UseNpgsql(connectionString)
-                   .UseSnakeCaseNamingConvention()
-                   .AddInterceptors(sp.GetRequiredService<AuditableTenantInterceptor>())
-                   // EF 9 lanza fatal PendingModelChangesWarning al iniciar MigrateAsync
-                   // cuando cree ver diferencias entre modelo compilado y snapshot. En
-                   // este repo las migraciones a veces se marcan a mano en la BD (ver
-                   // memoria "workflow_local") y el snapshot puede ir un paso atras de
-                   // la BD. Bajarlo a Warning para que no tumbe el arranque.
-                   .ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning));
-        });
+            Persistence.VisalDbContextOptionsSetup.Configure(
+                options, connectionString, sp.GetRequiredService<AuditableTenantInterceptor>()));
 
         services.AddScoped<IApplicationDbContext>(sp => sp.GetRequiredService<VisalDbContext>());
+
+        // Ola 2 estabilizacion (P0): factory por-operacion. Los servicios que se migren dejan de
+        // compartir el DbContext scoped del circuito y crean uno corto por metodo
+        // (using var db = _factory.Create()), eliminando el choque "second operation".
+        services.AddScoped<IApplicationDbContextFactory>(sp => new Persistence.ScopedApplicationDbContextFactory(
+            connectionString,
+            sp.GetRequiredService<AuditableTenantInterceptor>(),
+            sp.GetRequiredService<Application.Common.ITenantContext>()));
 
         services.AddSingleton<IPasswordHasher, Pbkdf2PasswordHasher>();
         services.AddSingleton<IJwtTokenService, JwtTokenService>();

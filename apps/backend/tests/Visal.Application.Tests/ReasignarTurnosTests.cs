@@ -33,6 +33,9 @@ public sealed class ReasignarTurnosTests
         public void Write(Guid actorUserId, string actionName, string entityName, Guid? entityId,
             object? previousValue, object? newValue, Guid? tenantId = null, string? reason = null,
             Visal.Domain.Enums.AuditActorType actorType = Visal.Domain.Enums.AuditActorType.Human) { }
+        public void Write(Visal.Application.Common.IApplicationDbContext db, Guid actorUserId, string actionName, string entityName, Guid? entityId,
+            object? previousValue, object? newValue, Guid? tenantId = null, string? reason = null,
+            Visal.Domain.Enums.AuditActorType actorType = Visal.Domain.Enums.AuditActorType.Human) { }
     }
 
     private static VisalDbContext NewCtx() =>
@@ -115,7 +118,8 @@ public sealed class ReasignarTurnosTests
         await using var ctx = NewCtx();
         var (_, turnoIds, origen, destino) = await SembrarAsync(ctx, cerrarPrimero: true);
 
-        var svc = new AsignacionService(ctx, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
+        var svc = new AsignacionService(new FakeTenantContext { TenantId = Tenant }, new NoopAudit(),
+            new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }));
         var res = await svc.ReasignarTurnosAsync(
             new ReasignarTurnosRequest(turnoIds, destino), Guid.NewGuid());
 
@@ -135,7 +139,8 @@ public sealed class ReasignarTurnosTests
         await using var ctx = NewCtx();
         var (_, turnoIds, _, destino) = await SembrarAsync(ctx, cerrarPrimero: false);
 
-        var svc = new AsignacionService(ctx, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
+        var svc = new AsignacionService(new FakeTenantContext { TenantId = Tenant }, new NoopAudit(),
+            new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }));
         var res = await svc.ReasignarTurnosAsync(
             new ReasignarTurnosRequest(turnoIds, destino), Guid.NewGuid());
 
@@ -151,7 +156,8 @@ public sealed class ReasignarTurnosTests
         // Destino es TERAPIA, el servicio es ENFERMERIA -> no elegible.
         var (_, turnoIds, _, destino) = await SembrarAsync(ctx, cerrarPrimero: false, tipoDestino: "TERAPIA");
 
-        var svc = new AsignacionService(ctx, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
+        var svc = new AsignacionService(new FakeTenantContext { TenantId = Tenant }, new NoopAudit(),
+            new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }));
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             svc.ReasignarTurnosAsync(new ReasignarTurnosRequest(turnoIds, destino), Guid.NewGuid()));
     }
@@ -162,7 +168,8 @@ public sealed class ReasignarTurnosTests
         await using var ctx = NewCtx();
         var (asigId, turnoIds, _, _) = await SembrarAsync(ctx, cerrarPrimero: true);
 
-        var svc = new AsignacionService(ctx, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
+        var svc = new AsignacionService(new FakeTenantContext { TenantId = Tenant }, new NoopAudit(),
+            new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }));
         var lista = await svc.ListarTurnosReasignablesAsync(asigId);
 
         Assert.Equal(3, lista.Count);

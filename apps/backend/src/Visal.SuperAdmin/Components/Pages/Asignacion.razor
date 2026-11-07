@@ -1472,6 +1472,8 @@ else
     protected override async Task OnInitializedAsync()
     {
         // Carga la lista global de contratos activos (la dropdown CONTRATOS muestra TODOS, no solo los del paciente).
+        // Ola 3 (P0): ListContratosDisponiblesAsync ya usa contexto corto por operacion (factory);
+        // el retry de contencion de Ola 1 es redundante aqui.
         _todosContratos = (await Svc.ListContratosDisponiblesAsync()).ToList();
         // TS5: catalogo de tipos de servicio del tenant activo. Silencioso en
         // errores para no bloquear la carga del wizard.

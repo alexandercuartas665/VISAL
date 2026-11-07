@@ -1,3 +1,4 @@
+using Visal.Application.Common;
 using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
@@ -59,5 +60,16 @@ public interface IAutorizacionTokenService
     /// </summary>
     Task<UsarTokenResult> ValidarYMarcarUsoAsync(
         string codigo, Guid historiaClinicaId, Guid? asignacionId,
+        string? usadoPorNombre, Guid actor, string? motivo, CancellationToken ct = default);
+
+    /// <summary>
+    /// Igual que el overload sin <paramref name="db"/>, pero marca el token (y su auditoria) en el
+    /// contexto CORTO que pasa el orquestador. Lo usa HistoriaClinicaService.AutorizarFechaConTokenAsync
+    /// (Ola 4): abre su propio `using var db = factory.Create()` y debe marcar el token en ESE contexto
+    /// para que su unico SaveChanges persista token + HC atomicamente. Con el overload clasico el token
+    /// quedaria en el contexto scoped del servicio (otro contexto) y no se guardaria con la HC.
+    /// </summary>
+    Task<UsarTokenResult> ValidarYMarcarUsoAsync(
+        IApplicationDbContext db, string codigo, Guid historiaClinicaId, Guid? asignacionId,
         string? usadoPorNombre, Guid actor, string? motivo, CancellationToken ct = default);
 }

@@ -741,6 +741,8 @@ else
         await LoadLista();
     }
 
+    // Ola 3 (P0): ListProfesionalesAsync ya usa contexto corto por operacion (factory);
+    // el retry de contencion de Ola 1 es redundante aqui.
     private async Task LoadLista() => _lista = (await Svc.ListProfesionalesAsync(string.IsNullOrWhiteSpace(_filtro) ? null : _filtro)).ToList();
     private async Task OnFiltro(ChangeEventArgs e) { _filtro = e.Value?.ToString() ?? ""; await LoadLista(); }
 
@@ -978,6 +980,7 @@ else
             var tipos = await Svc.ListTiposAsync(false);
             var subs = await Svc.ListSubcategoriasAsync(false);
             // Listado actual de profesionales para detectar upserts por documento.
+            // Ola 3 (P0): ListProfesionalesAsync ya usa contexto corto por operacion (factory).
             var existentes = await Svc.ListProfesionalesAsync(null);
             var byDoc = new Dictionary<string, ProfesionalDto>(StringComparer.OrdinalIgnoreCase);
             foreach (var p in existentes) { byDoc[p.NumeroDocumento.Trim()] = p; }

@@ -222,5 +222,9 @@ public sealed class FormDefinitionSnapshotTests : IAsyncLifetime
             object? previousValue, object? newValue, Guid? tenantId = null, string? reason = null,
             Visal.Domain.Enums.AuditActorType actorType = Visal.Domain.Enums.AuditActorType.Human)
         { /* test: no-op */ }
+        public void Write(Visal.Application.Common.IApplicationDbContext db, Guid actorUserId, string actionName, string entityName, Guid? entityId,
+            object? previousValue, object? newValue, Guid? tenantId = null, string? reason = null,
+            Visal.Domain.Enums.AuditActorType actorType = Visal.Domain.Enums.AuditActorType.Human)
+        { /* test: no-op */ }
     }
 }

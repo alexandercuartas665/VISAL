@@ -51,7 +51,9 @@ public sealed class PlatformBrandingService : IPlatformBrandingService
 
     public async Task<PlatformBrandingDto> GetAsync(CancellationToken cancellationToken = default)
     {
-        var row = await _db.PlatformBrandings.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        // OrderBy determinista: PlatformBranding es singleton global, pero sin OrderBy EF emite
+        // FirstWithoutOrderByAndFilterWarning; fija el orden para que el resultado sea estable.
+        var row = await _db.PlatformBrandings.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(cancellationToken);
         if (row is null) { return PlatformBrandingDto.Default; }
         return new PlatformBrandingDto(row.PlatformName, row.Tagline, row.LoginLogoUrl, row.LoginHeadline, row.LoginSubtext);
     }
@@ -60,7 +62,7 @@ public sealed class PlatformBrandingService : IPlatformBrandingService
     {
         var name = string.IsNullOrWhiteSpace(request.PlatformName) ? "Visal" : request.PlatformName.Trim();
 
-        var row = await _db.PlatformBrandings.FirstOrDefaultAsync(cancellationToken);
+        var row = await _db.PlatformBrandings.OrderBy(x => x.Id).FirstOrDefaultAsync(cancellationToken);
         if (row is null)
         {
             row = new PlatformBranding();

@@ -39,13 +39,13 @@ public sealed class GoogleAuthConfigService : IGoogleAuthConfigService
 
     public async Task<GoogleAuthConfigDto?> GetAsync(CancellationToken cancellationToken = default)
     {
-        var cfg = await _db.GoogleAuthConfigs.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        var cfg = await _db.GoogleAuthConfigs.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(cancellationToken);
         return cfg is null ? null : new GoogleAuthConfigDto(cfg.ClientId, !string.IsNullOrEmpty(cfg.ClientSecretEncrypted), cfg.IsEnabled);
     }
 
     public async Task SaveAsync(SaveGoogleAuthConfigRequest request, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var cfg = await _db.GoogleAuthConfigs.FirstOrDefaultAsync(cancellationToken);
+        var cfg = await _db.GoogleAuthConfigs.OrderBy(x => x.Id).FirstOrDefaultAsync(cancellationToken);
         var isNew = cfg is null;
         if (cfg is null)
         {
@@ -68,7 +68,7 @@ public sealed class GoogleAuthConfigService : IGoogleAuthConfigService
 
     public async Task<GoogleAuthCredentials?> GetCredentialsAsync(CancellationToken cancellationToken = default)
     {
-        var cfg = await _db.GoogleAuthConfigs.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        var cfg = await _db.GoogleAuthConfigs.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(cancellationToken);
         if (cfg is null || !cfg.IsEnabled || string.IsNullOrWhiteSpace(cfg.ClientId) || string.IsNullOrEmpty(cfg.ClientSecretEncrypted))
         {
             return null;

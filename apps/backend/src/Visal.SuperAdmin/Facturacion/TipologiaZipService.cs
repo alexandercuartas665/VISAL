@@ -144,12 +144,17 @@ public sealed class TipologiaZipService : ITipologiaZipService
 
         var pacientes = await _snaps.ListarPacientesSnapshotAsync(snapshotId, ct);
 
+        // HCs que estan en el DETALLE de este snapshot: acota los anexos externos a esas
+        // historias (los anexos sin HC se conservan), para no colar listados de firmas de
+        // historias de otros periodos/snapshots. Set vacio => no se acota por HC.
+        var hcSnapshot = await CargarHcIdsDelSnapshotAsync(db, snapshotId, ct);
+
         // --- MODO "un archivo por autorizacion": un PDF por CADA autorizacion del
         // paciente (no uno fusionado por paciente), nombrado con su numero de autorizacion.
         // Pensado para archivos de solo autorizaciones; ignora otros contenidos. ---
         if (archivo.UnoPorAutorizacion)
         {
-            return await GenerarZipPorAutorizacionAsync(db, archivo, cfg, detalle, pacientes, patron, nitIps, logoRotulo, progreso, ct);
+            return await GenerarZipPorAutorizacionAsync(db, archivo, cfg, detalle, pacientes, hcSnapshot, patron, nitIps, logoRotulo, progreso, ct);
         }
 
         // --- Pase 1: plan por paciente + junta TODAS las URLs de formularios-por-tipo.
@@ -165,7 +170,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         foreach (var pac in pacientes)
         {
             ct.ThrowIfCancellationRequested();
-            var partes = await ConstruirPlanPacienteAsync(db, archivo, pac, allUrls, pDesde, pHasta, ct);
+            var partes = await ConstruirPlanPacienteAsync(db, archivo, pac, allUrls, pDesde, pHasta, hcSnapshot, ct);
             if (partes is null) { continue; } // paciente no existe en el sistema
             planes.Add((pac, partes));
         }
@@ -259,6 +264,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     private async Task<ArchivoExportado?> GenerarZipPorAutorizacionAsync(
         IApplicationDbContext db, InformeItemDto archivo, CuentaMedicaConfigDto cfg,
         FacturacionSnapshotDetalleDto detalle, IReadOnlyList<PacienteSnapshotDto> pacientes,
+        IReadOnlySet<Guid> hcSnapshot,
         string patron, string nitIps, byte[]? logoRotulo, IProgress<ZipProgreso>? progreso, CancellationToken ct)
     {
         _ = cfg;
@@ -296,7 +302,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 .ToList();
             foreach (var codigo in codigos)
             {
-                var partes = await ConstruirPlanAutorizacionAsync(db, archivo, pacienteId, codigo, hcAut, docsRender, allUrls, pDesde, pHasta, ct);
+                var partes = await ConstruirPlanAutorizacionAsync(db, archivo, pacienteId, codigo, hcAut, docsRender, allUrls, pDesde, pHasta, hcSnapshot, ct);
                 if (partes.Count == 0) { continue; }
                 unidades.Add((pac, codigo, partes));
             }
@@ -523,6 +529,8 @@ public sealed class TipologiaZipService : ITipologiaZipService
 
         var pacientes = await _snaps.ListarPacientesSnapshotAsync(snapshotId, ct);
         var (pDesde, pHasta) = PeriodoDe(detalle.FiltrosJson);
+        // Mismo recorte que el ZIP real: anexos acotados a las HCs del detalle del snapshot.
+        var hcSnapshot = await CargarHcIdsDelSnapshotAsync(db, snapshotId, ct);
 
         // doc -> pacienteId (los del snapshot que existen en el sistema).
         var docs = pacientes.Select(p => p.Documento).Distinct().ToList();
@@ -572,7 +580,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 foreach (var codigo in codigos)
                 {
                     var partes = await ConstruirPlanAutorizacionAsync(
-                        db, archivo, pacienteId, codigo, hcAut, docsRender, allUrls, pDesde, pHasta, ct);
+                        db, archivo, pacienteId, codigo, hcAut, docsRender, allUrls, pDesde, pHasta, hcSnapshot, ct);
 
                     if (partes.Count == 0)
                     {
@@ -599,7 +607,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
             foreach (var pac in pacientes)
             {
                 ct.ThrowIfCancellationRequested();
-                var partes = await ConstruirPlanPacienteAsync(db, archivo, pac, allUrls, pDesde, pHasta, ct);
+                var partes = await ConstruirPlanPacienteAsync(db, archivo, pac, allUrls, pDesde, pHasta, hcSnapshot, ct);
                 if (partes is null)
                 {
                     filas.Add(new SimFila("(no se genera)", pac.Nombre ?? "", pac.TipoDocumento ?? "",
@@ -1020,6 +1028,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
         var docsExternos = new Dictionary<Guid, List<(string? Cat, bool Hc, bool Nota)>>();
         if (idSet.Count > 0 && usaDocExterno)
         {
+            // Mismo recorte que el ZIP real: los anexos colgados de una HC que NO esta en el
+            // detalle del snapshot no cuentan; los anexos SIN HC (libres) si. Asi el numero
+            // "CON CONTENIDO" cuadra con lo que el ZIP realmente incluye.
+            var hcSnapshot = await CargarHcIdsDelSnapshotAsync(db, snapshotId, ct);
             var rows = await db.NotaMedicaDocumentos.AsNoTracking()
                 .Where(d => idSet.Contains(d.PacienteId))
                 .Select(d => new
@@ -1027,7 +1039,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     d.PacienteId,
                     d.Categoria,
                     d.RutaArchivo,
-                    Hc = d.HistoriaClinicaId != null,
+                    d.HistoriaClinicaId,
                     Nota = d.NotaMedicaId != null
                 })
                 .ToListAsync(ct);
@@ -1036,8 +1048,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 if (string.IsNullOrWhiteSpace(r.RutaArchivo)
                     || !EsDocRenderable(r.RutaArchivo)
                     || !ArchivoExisteEnDisco(r.RutaArchivo)) { continue; }
+                // Anexo colgado de una HC fuera del snapshot -> no cuenta (los sin HC se conservan).
+                if (hcSnapshot.Count > 0 && r.HistoriaClinicaId is Guid hid && !hcSnapshot.Contains(hid)) { continue; }
                 if (!docsExternos.TryGetValue(r.PacienteId, out var list)) { docsExternos[r.PacienteId] = list = new(); }
-                list.Add((r.Categoria, r.Hc, r.Nota));
+                list.Add((r.Categoria, r.HistoriaClinicaId != null, r.Nota));
             }
         }
 
@@ -1065,7 +1079,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// Devuelve null si el paciente no existe en el sistema.</summary>
     private async Task<List<PartePlan>?> ConstruirPlanPacienteAsync(
         IApplicationDbContext db, InformeItemDto archivo, PacienteSnapshotDto pac, List<string> allUrls,
-        DateOnly? desde, DateOnly? hasta, CancellationToken ct)
+        DateOnly? desde, DateOnly? hasta, IReadOnlySet<Guid> hcSnapshot, CancellationToken ct)
     {
         var pid = await db.Pacientes.AsNoTracking()
             .Where(p => p.NumeroDocumento == pac.Documento)
@@ -1108,7 +1122,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 case OrigenInformeItem.DocumentoHc:
                 case OrigenInformeItem.DocumentoPacienteLibre:
                 case OrigenInformeItem.DocumentoNota:
-                    foreach (var d in await CargarDocumentosExternosAsync(db, pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct, membrete: archivo.MembreteHcCup, rotuloPorCup: archivo.RotuloSeparadorCup))
+                    foreach (var d in await CargarDocumentosExternosAsync(db, pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct, membrete: archivo.MembreteHcCup, rotuloPorCup: archivo.RotuloSeparadorCup, hcSnapshot: hcSnapshot))
                     {
                         partes.Add(new PartePlan(d.Bytes, -1, Cup: d.Cup, CupNombre: d.CupNombre, Etiqueta: "[ANEXO]"));
                     }
@@ -1275,6 +1289,49 @@ public sealed class TipologiaZipService : ITipologiaZipService
         return map;
     }
 
+    /// <summary>Conjunto de <c>HistoriaClinicaId</c> que aparecen en el DETALLE del snapshot:
+    /// lee cada fila persistida (<c>facturacion_snapshot_filas</c>), toma la columna "HC N&#176;"
+    /// (codigo publico HC-xxxxxx), la convierte a consecutivo y lo resuelve a su Id. Sirve para
+    /// acotar los anexos externos a las historias del snapshot (los anexos SIN HC se conservan).
+    /// Una sola consulta por snapshot. Si el snapshot no tiene filas con "HC N&#176;" (p. ej.
+    /// solo cabeceras de paquete) devuelve vacio -> el llamador no acota por HC.</summary>
+    private async Task<HashSet<Guid>> CargarHcIdsDelSnapshotAsync(
+        IApplicationDbContext db, Guid snapshotId, CancellationToken ct)
+    {
+        var datos = await db.FacturacionSnapshotFilas.AsNoTracking()
+            .Where(f => f.SnapshotId == snapshotId)
+            .Select(f => f.DatosJson)
+            .ToListAsync(ct);
+
+        // Clave exacta que emite el builder (SnapshotRelacionFacturasBuilder): "HC N" + el
+        // signo de grado (U+00B0). Se arma con (char)0xB0 para no meter un byte no-ASCII en
+        // este archivo; en runtime es identica a la cabecera "HC N" persistida en datos_json.
+        var hcKey = "HC N" + (char)0xB0;
+        var consecutivos = new HashSet<long>();
+        foreach (var json in datos)
+        {
+            if (string.IsNullOrWhiteSpace(json)) { continue; }
+            try
+            {
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty(hcKey, out var hcEl)
+                    && hcEl.ValueKind == JsonValueKind.String
+                    && CodigoPublico.ParseNumero(hcEl.GetString()) is long c)
+                {
+                    consecutivos.Add(c);
+                }
+            }
+            catch { /* fila sin JSON valido: se ignora */ }
+        }
+        if (consecutivos.Count == 0) { return new HashSet<Guid>(); }
+
+        var ids = await db.HistoriasClinicas.AsNoTracking()
+            .Where(h => consecutivos.Contains(h.Consecutivo))
+            .Select(h => h.Id)
+            .ToListAsync(ct);
+        return ids.ToHashSet();
+    }
+
     /// <summary>Pase 1 del modo "un archivo por autorizacion": arma el plan de partes de
     /// UNA autorizacion de un paciente, recorriendo los contenidos configurados del archivo
     /// pero filtrando cada origen a lo que pertenece a esa autorizacion. Las URLs de
@@ -1282,7 +1339,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     private async Task<List<PartePlan>> ConstruirPlanAutorizacionAsync(
         IApplicationDbContext db, InformeItemDto archivo, Guid pacienteId, string codigo,
         IReadOnlyDictionary<Guid, HashSet<string>> hcAut, string docsRender,
-        List<string> allUrls, DateOnly? desde, DateOnly? hasta, CancellationToken ct)
+        List<string> allUrls, DateOnly? desde, DateOnly? hasta, IReadOnlySet<Guid> hcSnapshot, CancellationToken ct)
     {
         var unoCodigo = new[] { codigo };
         var partes = new List<PartePlan>();
@@ -1318,7 +1375,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 case OrigenInformeItem.DocumentoPacienteLibre:
                 case OrigenInformeItem.DocumentoNota:
                     foreach (var d in await CargarDocumentosExternosAsync(
-                        db, pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct, codigo, hcAut, archivo.MembreteHcCup, archivo.RotuloSeparadorCup))
+                        db, pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct, codigo, hcAut, archivo.MembreteHcCup, archivo.RotuloSeparadorCup, hcSnapshot))
                     {
                         partes.Add(new PartePlan(d.Bytes, -1, Cup: d.Cup, CupNombre: d.CupNombre, Etiqueta: "[ANEXO]"));
                     }
@@ -1339,7 +1396,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     private async Task<List<(byte[] Bytes, string? Cup, string? CupNombre)>> CargarDocumentosExternosAsync(
         IApplicationDbContext db, Guid pacienteId, OrigenInformeItem origen, string? tipologiaNombre, bool soloUltimo, CancellationToken ct,
         string? filtroAutorizacion = null, IReadOnlyDictionary<Guid, HashSet<string>>? hcAut = null,
-        bool membrete = false, bool rotuloPorCup = false)
+        bool membrete = false, bool rotuloPorCup = false, IReadOnlySet<Guid>? hcSnapshot = null)
     {
         var q = db.NotaMedicaDocumentos.AsNoTracking()
             .Where(d => d.PacienteId == pacienteId);
@@ -1375,6 +1432,14 @@ public sealed class TipologiaZipService : ITipologiaZipService
             rows = rows.Where(r => r.HistoriaClinicaId is Guid hid
                                    && hcAut.TryGetValue(hid, out var set) && set.Contains(fa)).ToList();
         }
+
+        // Acota a las historias del DETALLE del snapshot: los anexos colgados de una HC que NO
+        // aparece en el snapshot se descartan; los anexos SIN HC (libres del paciente) se
+        // conservan. Set vacio => no se acota (snapshot sin "HC N" o llamador que no filtra).
+        if (hcSnapshot is { Count: > 0 })
+        {
+            rows = rows.Where(r => r.HistoriaClinicaId is not Guid hid || hcSnapshot.Contains(hid)).ToList();
+        }
         if (rows.Count == 0) { return new(); }
 
         // SoloUltimo = el mas reciente; si no, todos en orden cronologico ascendente.
@@ -1387,7 +1452,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
             ? await ResolverMembretePorHcAsync(db,
                 seleccion.Where(r => r.HistoriaClinicaId is Guid)
                          .Select(r => r.HistoriaClinicaId!.Value).Distinct().ToList(), ct)
-            : new Dictionary<Guid, (string Hc, string Cup, string Serv)>();
+            : new Dictionary<Guid, (string Hc, string Cup, string Serv, DateTimeOffset? Fecha)>();
 
         string? CupDe(Guid? hid) => hid is Guid id && info.TryGetValue(id, out var m) && !string.IsNullOrWhiteSpace(m.Cup) ? m.Cup : null;
         string? ServDe(Guid? hid) => hid is Guid id && info.TryGetValue(id, out var m) && !string.IsNullOrWhiteSpace(m.Serv) ? m.Serv : null;
@@ -1425,17 +1490,18 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// primera asignacion via cadena de sesiones) y el nombre del servicio, con el mismo
     /// fallback que RelacionFacturas (si la asignacion no estampo CodigoRips, se deriva del
     /// ServicioContrato vivo: codigo base sin sufijo d/f). Una sola consulta por lote de HC.</summary>
-    private async Task<Dictionary<Guid, (string Hc, string Cup, string Serv)>> ResolverMembretePorHcAsync(
+    private async Task<Dictionary<Guid, (string Hc, string Cup, string Serv, DateTimeOffset? Fecha)>> ResolverMembretePorHcAsync(
         IApplicationDbContext db, List<Guid> hcIds, CancellationToken ct)
     {
-        var res = new Dictionary<Guid, (string Hc, string Cup, string Serv)>();
+        var res = new Dictionary<Guid, (string Hc, string Cup, string Serv, DateTimeOffset? Fecha)>();
         if (hcIds.Count == 0) { return res; }
 
         var consec = await db.HistoriasClinicas.AsNoTracking()
             .Where(h => hcIds.Contains(h.Id))
-            .Select(h => new { h.Id, h.Consecutivo })
+            .Select(h => new { h.Id, h.Consecutivo, h.FechaAtencion })
             .ToListAsync(ct);
         var hcCode = consec.ToDictionary(x => x.Id, x => CodigoPublico.Hc(x.Consecutivo));
+        var hcFecha = consec.ToDictionary(x => x.Id, x => x.FechaAtencion);
 
         // Primera asignacion por HC (via pivote sesion->turno->asignacion), con su servicio.
         var cups = await (
@@ -1483,15 +1549,17 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     if (string.IsNullOrWhiteSpace(serv)) { serv = sc.Item2?.Trim() ?? ""; }
                 }
             }
-            res[id] = (hc, cup, serv);
+            res[id] = (hc, cup, serv, hcFecha.TryGetValue(id, out var f) ? f : null);
         }
         return res;
     }
 
-    /// <summary>Texto del membrete de un anexo: "HC-xxxxxx  |  CUP {codigo} - {servicio}".
-    /// Sin HC resoluble -> "(documento sin historia clinica)"; sin CUP -> solo el HC-.</summary>
+    /// <summary>Texto del membrete de un anexo: "HC-xxxxxx  |  CUP {codigo} - {servicio}  |
+    /// Atendido: dd/MM/yyyy". Sin HC resoluble -> "(documento sin historia clinica)"; sin CUP
+    /// -> solo HC (+ fecha); sin fecha de atencion -> se omite ese tramo. La fecha se muestra
+    /// en el dia local Bogota (UTC-5), misma frontera que el resto del modulo.</summary>
     private static string ConstruirTextoMembrete(
-        Guid? hcId, IReadOnlyDictionary<Guid, (string Hc, string Cup, string Serv)> map)
+        Guid? hcId, IReadOnlyDictionary<Guid, (string Hc, string Cup, string Serv, DateTimeOffset? Fecha)> map)
     {
         if (hcId is not Guid id || !map.TryGetValue(id, out var m) || string.IsNullOrWhiteSpace(m.Hc))
         {
@@ -1502,6 +1570,11 @@ public sealed class TipologiaZipService : ITipologiaZipService
         {
             sb.Append("   |   CUP ").Append(m.Cup);
             if (!string.IsNullOrWhiteSpace(m.Serv)) { sb.Append(" - ").Append(m.Serv); }
+        }
+        if (m.Fecha is DateTimeOffset fa)
+        {
+            var dia = fa.ToOffset(TimeSpan.FromHours(-5)).ToString("dd/MM/yyyy", System.Globalization.CultureInfo.InvariantCulture);
+            sb.Append("   |   Atendido: ").Append(dia);
         }
         return sb.ToString();
     }

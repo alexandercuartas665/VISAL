@@ -5,13 +5,15 @@ using Visal.Domain.Enums;
 
 namespace Visal.Application.Facturacion;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class SnapshotColumnaConfigService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     IEnumerable<ISnapshotBuilder> builders) : ISnapshotColumnaConfigService
 {
     public async Task<IReadOnlyList<ColumnaConfigItemDto>> ListarAsync(TipoSnapshot tipo, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var canonicas = ColumnasCanonicas(tipo);
         if (canonicas.Count == 0) { return Array.Empty<ColumnaConfigItemDto>(); }
 
@@ -54,6 +56,7 @@ public sealed class SnapshotColumnaConfigService(
 
     public async Task GuardarAsync(TipoSnapshot tipo, IReadOnlyList<ColumnaConfigItemDto> items, Guid actorUserId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tenantId) { return; }
 
         var canonicas = ColumnasCanonicas(tipo).ToHashSet();
@@ -114,6 +117,7 @@ public sealed class SnapshotColumnaConfigService(
 
     public async Task ResetAsync(TipoSnapshot tipo, Guid actorUserId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var existentes = await db.FacturacionSnapshotColumnaConfigs
             .Where(c => c.Tipo == tipo)
             .ToListAsync(ct);
@@ -124,6 +128,7 @@ public sealed class SnapshotColumnaConfigService(
 
     public async Task<IReadOnlyList<ColumnaExportInfo>> ObtenerParaExportAsync(TipoSnapshot tipo, IReadOnlyList<string> columnasCanonicas, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (columnasCanonicas.Count == 0) { return Array.Empty<ColumnaExportInfo>(); }
 
         var overrides = await db.FacturacionSnapshotColumnaConfigs.AsNoTracking()
@@ -155,6 +160,7 @@ public sealed class SnapshotColumnaConfigService(
 
     public async Task<IReadOnlyList<string>> ObtenerOrdenAsync(TipoSnapshot tipo, IReadOnlyList<string> columnasCanonicas, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (columnasCanonicas.Count == 0) { return columnasCanonicas; }
 
         var overrides = await db.FacturacionSnapshotColumnaConfigs.AsNoTracking()

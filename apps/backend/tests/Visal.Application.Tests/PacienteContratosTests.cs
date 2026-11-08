@@ -103,7 +103,7 @@ public sealed class PacienteContratosTests
     {
         using var db = NewCtx(nameof(Save_persiste_lista_N_por_orden));
         var cs = await SembrarContratos(db, 3);
-        var svc = new PacienteService(db, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
+        var svc = new PacienteService(new TestDbContextFactory(db, new FakeTenantContext { TenantId = Tenant }), new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
 
         // Envio los contratos en orden 3, 1, 2 -> el DTO devuelve en ese mismo orden.
         var lista = new List<PacienteContratoDto>
@@ -126,7 +126,7 @@ public sealed class PacienteContratosTests
     {
         using var db = NewCtx(nameof(Save_lista_de_5_persiste_los_5));
         var cs = await SembrarContratos(db, 5);
-        var svc = new PacienteService(db, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
+        var svc = new PacienteService(new TestDbContextFactory(db, new FakeTenantContext { TenantId = Tenant }), new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
 
         var lista = cs.Select((cid, i) => new PacienteContratoDto(null, cid, null, null, null, i + 1)).ToList();
         var saved = await svc.SaveAsync(Req(null, "222", lista), Actor);
@@ -139,7 +139,7 @@ public sealed class PacienteContratosTests
     {
         using var db = NewCtx(nameof(Resave_con_lista_distinta_reemplaza_filas_previas));
         var cs = await SembrarContratos(db, 3);
-        var svc = new PacienteService(db, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
+        var svc = new PacienteService(new TestDbContextFactory(db, new FakeTenantContext { TenantId = Tenant }), new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
 
         var lista1 = new List<PacienteContratoDto> { new(null, cs[0], null, null, null, 1), new(null, cs[1], null, null, null, 2) };
         var saved1 = await svc.SaveAsync(Req(null, "333", lista1), Actor);
@@ -159,7 +159,7 @@ public sealed class PacienteContratosTests
     {
         using var db = NewCtx(nameof(Save_lista_vacia_limpia_todas_las_filas));
         var cs = await SembrarContratos(db, 2);
-        var svc = new PacienteService(db, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
+        var svc = new PacienteService(new TestDbContextFactory(db, new FakeTenantContext { TenantId = Tenant }), new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
 
         var saved1 = await svc.SaveAsync(Req(null, "444",
             new List<PacienteContratoDto> { new(null, cs[0], null, null, null, 1) }), Actor);
@@ -175,7 +175,7 @@ public sealed class PacienteContratosTests
     {
         using var db = NewCtx(nameof(Asignacion_lee_lista_N_por_orden));
         var cs = await SembrarContratos(db, 3);
-        var svc = new PacienteService(db, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
+        var svc = new PacienteService(new TestDbContextFactory(db, new FakeTenantContext { TenantId = Tenant }), new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
 
         // Orden: 2, 3, 1 -> asignacion debe verlos en ese mismo orden.
         var lista = new List<PacienteContratoDto>
@@ -205,7 +205,7 @@ public sealed class PacienteContratosTests
         // paciente_contratos aparece con Contratos vacio en /asignacion.
         using var db = NewCtx(nameof(Asignacion_paciente_sin_contratos_devuelve_lista_vacia));
         await SembrarContratos(db, 3); // creo contratos pero no los asocio al paciente.
-        var svc = new PacienteService(db, new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
+        var svc = new PacienteService(new TestDbContextFactory(db, new FakeTenantContext { TenantId = Tenant }), new FakeTenantContext { TenantId = Tenant }, new NoopAudit());
         var saved = await svc.SaveAsync(Req(null, "777", Array.Empty<PacienteContratoDto>()), Actor);
 
         var asig = new AsignacionService(new FakeTenantContext { TenantId = Tenant }, new NoopAudit(),

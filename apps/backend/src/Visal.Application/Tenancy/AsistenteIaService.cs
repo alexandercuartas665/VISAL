@@ -1,6 +1,5 @@
 using System.Text;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
 using Visal.Application.Common;
 using Visal.Domain.Entities;
 using Visal.Domain.Enums;
@@ -12,13 +11,14 @@ namespace Visal.Application.Tenancy;
 /// configurado en la regla de automatizacion activa y arma el contexto con la
 /// HC del paciente + nota en redaccion.
 ///
-/// IMPORTANTE: usa <see cref="IServiceScopeFactory"/> para crear un scope propio
-/// en cada operacion en lugar de compartir el <see cref="IApplicationDbContext"/>
+/// IMPORTANTE: usa <see cref="IApplicationDbContextFactory"/> para crear un contexto
+/// corto propio en cada operacion en lugar de compartir el <see cref="IApplicationDbContext"/>
 /// scoped del circuito Blazor. Esto evita el clasico "second operation was
 /// started on this context instance" cuando el chat lateral y el modulo de
 /// notas hacen consultas en paralelo durante la apertura del modal.
 /// </summary>
-public sealed class AsistenteIaService(IServiceScopeFactory scopes, ITenantContext tenant) : IAsistenteIaService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class AsistenteIaService(IApplicationDbContextFactory dbFactory, ITenantContext tenant) : IAsistenteIaService
 {
     public async Task<AsistenteContextoDto> ResolverContextoAsync(CancellationToken ct = default)
     {
@@ -27,8 +27,7 @@ public sealed class AsistenteIaService(IServiceScopeFactory scopes, ITenantConte
             return new(null, null, null, false, "No hay tenant activo.");
         }
 
-        using var scope = scopes.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        using var db = dbFactory.Create();
 
         var regla = await db.AutomationRules.AsNoTracking()
             .Where(r => r.IsActive
@@ -86,8 +85,7 @@ public sealed class AsistenteIaService(IServiceScopeFactory scopes, ITenantConte
             return new("Sin tenant activo.", ctx.AgenteNombre ?? "?", false, "Sin tenant.");
         }
 
-        using var scope = scopes.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        using var db = dbFactory.Create();
 
         var agente = await db.AiAgents.AsNoTracking()
             .FirstOrDefaultAsync(a => a.Id == agenteId, ct);
@@ -155,8 +153,7 @@ public sealed class AsistenteIaService(IServiceScopeFactory scopes, ITenantConte
     public async Task<IReadOnlyList<AsistenteMensajeDto>> ListarHistorialPorPacienteAsync(
         Guid pacienteId, int? limit = null, CancellationToken ct = default)
     {
-        using var scope = scopes.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        using var db = dbFactory.Create();
         var q = db.AsistenteChatMensajes.AsNoTracking()
             .Where(m => m.PacienteId == pacienteId)
             .OrderBy(m => m.Cuando)
@@ -176,8 +173,7 @@ public sealed class AsistenteIaService(IServiceScopeFactory scopes, ITenantConte
         CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
-        using var scope = scopes.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        using var db = dbFactory.Create();
         var entity = new AsistenteChatMensaje
         {
             TenantId = tid,
@@ -197,8 +193,7 @@ public sealed class AsistenteIaService(IServiceScopeFactory scopes, ITenantConte
 
     public async Task<int> LimpiarHistorialPorPacienteAsync(Guid pacienteId, CancellationToken ct = default)
     {
-        using var scope = scopes.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<IApplicationDbContext>();
+        using var db = dbFactory.Create();
         return await db.AsistenteChatMensajes
             .Where(m => m.PacienteId == pacienteId)
             .ExecuteDeleteAsync(ct);

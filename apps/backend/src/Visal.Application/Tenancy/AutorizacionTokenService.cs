@@ -5,8 +5,11 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = dbFactory.Create();) en vez del
+// IApplicationDbContext scoped. Mantiene el overload ValidarYMarcarUsoAsync(db, ...) para que
+// HistoriaClinicaService persista token + HC en su MISMO contexto corto (atomico).
 public sealed class AutorizacionTokenService(
-    IApplicationDbContext db, ITenantContext tenant, IAuditWriter audit, TimeProvider clock)
+    IApplicationDbContextFactory dbFactory, ITenantContext tenant, IAuditWriter audit, TimeProvider clock)
     : IAutorizacionTokenService
 {
     // Base32 sin caracteres ambiguos (sin 0/O/1/I/L), mismo alfabeto que
@@ -25,7 +28,7 @@ public sealed class AutorizacionTokenService(
         return new string(chars);
     }
 
-    private async Task<string> GenerarCodigoUnicoAsync(CancellationToken ct)
+    private static async Task<string> GenerarCodigoUnicoAsync(IApplicationDbContext db, CancellationToken ct)
     {
         for (var intento = 0; intento < 12; intento++)
         {
@@ -42,10 +45,11 @@ public sealed class AutorizacionTokenService(
         var obs = (observacion ?? "").Trim();
         if (obs.Length == 0) { throw new InvalidOperationException("La observacion es obligatoria."); }
 
+        using var db = dbFactory.Create();
         var token = new AutorizacionToken
         {
             TenantId = tid,
-            Codigo = await GenerarCodigoUnicoAsync(ct),
+            Codigo = await GenerarCodigoUnicoAsync(db, ct),
             ConceptoNombre = string.IsNullOrWhiteSpace(conceptoNombre) ? null : conceptoNombre.Trim(),
             Observacion = obs,
             GeneradoPorNombre = string.IsNullOrWhiteSpace(generadoPorNombre) ? null : generadoPorNombre.Trim(),
@@ -53,7 +57,7 @@ public sealed class AutorizacionTokenService(
             Estado = AutorizacionTokenEstado.Activo,
         };
         db.AutorizacionTokens.Add(token);
-        audit.Write(actor, "autorizacion-token.generar", nameof(AutorizacionToken), token.Id,
+        audit.Write(db, actor, "autorizacion-token.generar", nameof(AutorizacionToken), token.Id,
             previousValue: null,
             newValue: new { token.Codigo, token.ConceptoNombre, token.Observacion, token.ExpiresAt },
             tenantId: tid);
@@ -76,6 +80,7 @@ public sealed class AutorizacionTokenService(
     {
         if (tenant.TenantId is not Guid tid) { return Array.Empty<AutorizacionConceptoDto>(); }
 
+        using var db = dbFactory.Create();
         // Siembra idempotente de ejemplos la primera vez que el tenant no tiene conceptos.
         var hay = await db.AutorizacionConceptos.AsNoTracking().AnyAsync(ct);
         if (!hay)
@@ -103,6 +108,7 @@ public sealed class AutorizacionTokenService(
         var nom = (nombre ?? "").Trim();
         if (nom.Length == 0) { throw new InvalidOperationException("El nombre del concepto es obligatorio."); }
 
+        using var db = dbFactory.Create();
         AutorizacionConcepto? entity;
         if (id is Guid gid)
         {
@@ -125,6 +131,7 @@ public sealed class AutorizacionTokenService(
 
     public async Task<bool> EliminarConceptoAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.AutorizacionConceptos.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (e is null) { return false; }
         db.AutorizacionConceptos.Remove(e);
@@ -134,6 +141,7 @@ public sealed class AutorizacionTokenService(
 
     public async Task<IReadOnlyList<AutorizacionTokenDto>> ListarAsync(int max = 200, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var now = clock.GetUtcNow();
         var rows = await db.AutorizacionTokens.AsNoTracking()
             .OrderByDescending(t => t.CreatedAt)
@@ -163,10 +171,17 @@ public sealed class AutorizacionTokenService(
             r.MotivoUso)).ToList();
     }
 
-    public Task<UsarTokenResult> ValidarYMarcarUsoAsync(
+    public async Task<UsarTokenResult> ValidarYMarcarUsoAsync(
         string codigo, Guid historiaClinicaId, Guid? asignacionId,
         string? usadoPorNombre, Guid actor, string? motivo, CancellationToken ct = default)
-        => ValidarYMarcarUsoAsync(db, codigo, historiaClinicaId, asignacionId, usadoPorNombre, actor, motivo, ct);
+    {
+        // Ruta autonoma (sin orquestador): contexto corto propio y SaveChanges aqui.
+        // La variante con db la usa HistoriaClinicaService para persistir token + HC atomico.
+        using var db = dbFactory.Create();
+        var res = await ValidarYMarcarUsoAsync(db, codigo, historiaClinicaId, asignacionId, usadoPorNombre, actor, motivo, ct);
+        if (res.Ok) { await db.SaveChangesAsync(ct); }
+        return res;
+    }
 
     public async Task<UsarTokenResult> ValidarYMarcarUsoAsync(
         IApplicationDbContext db, string codigo, Guid historiaClinicaId, Guid? asignacionId,

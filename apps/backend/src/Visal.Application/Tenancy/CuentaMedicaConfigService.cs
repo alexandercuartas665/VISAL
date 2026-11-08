@@ -9,14 +9,15 @@ namespace Visal.Application.Tenancy;
 /// CRUD de la configuracion "Cuenta medica" por aseguradora. Fase 1: solo
 /// captura de datos; el generador de PDF/ZIP es fase 2.
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenant;
 
-    public CuentaMedicaConfigService(IApplicationDbContext db, ITenantContext tenant)
+    public CuentaMedicaConfigService(IApplicationDbContextFactory dbFactory, ITenantContext tenant)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenant = tenant;
     }
 
@@ -29,20 +30,23 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
     public async Task<CuentaMedicaConfigDto> GetOrCreateAsync(
         Guid aseguradoraId, CancellationToken ct = default)
     {
-        var cfg = await GetOrCreateEntityAsync(aseguradoraId, ct);
+        using var db = _dbFactory.Create();
+        var cfg = await GetOrCreateEntityAsync(db, aseguradoraId, ct);
         return MapConfig(cfg);
     }
 
+    // Peligro (a): helper privado que usa el contexto -> recibe el 'db' del llamador para que
+    // la entidad cargada/trackeada viva en el MISMO contexto que luego hace SaveChanges.
     private async Task<AseguradoraCuentaMedicaConfig> GetOrCreateEntityAsync(
-        Guid aseguradoraId, CancellationToken ct)
+        IApplicationDbContext db, Guid aseguradoraId, CancellationToken ct)
     {
         var tid = RequireTenant();
-        var cfg = await _db.AseguradoraCuentaMedicaConfigs
+        var cfg = await db.AseguradoraCuentaMedicaConfigs
             .FirstOrDefaultAsync(x => x.AseguradoraId == aseguradoraId, ct);
         if (cfg is not null) { return cfg; }
 
         // Verifica que la aseguradora exista en el tenant activo antes de crear.
-        var existe = await _db.Aseguradoras.AsNoTracking()
+        var existe = await db.Aseguradoras.AsNoTracking()
             .AnyAsync(a => a.Id == aseguradoraId, ct);
         if (!existe) { throw new InvalidOperationException("Aseguradora no encontrada."); }
 
@@ -53,15 +57,16 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
             PortadaHabilitada = false,
             IndiceHabilitado = false,
         };
-        _db.AseguradoraCuentaMedicaConfigs.Add(cfg);
-        await _db.SaveChangesAsync(ct);
+        db.AseguradoraCuentaMedicaConfigs.Add(cfg);
+        await db.SaveChangesAsync(ct);
         return cfg;
     }
 
     public async Task<CuentaMedicaConfigDto> GuardarPortadaAsync(
         GuardarPortadaRequest req, Guid actorUserId, CancellationToken ct = default)
     {
-        var cfg = await GetOrCreateEntityAsync(req.AseguradoraId, ct);
+        using var db = _dbFactory.Create();
+        var cfg = await GetOrCreateEntityAsync(db, req.AseguradoraId, ct);
         cfg.PortadaHabilitada = req.PortadaHabilitada;
         cfg.PortadaLogoUrl = string.IsNullOrWhiteSpace(req.PortadaLogoUrl) ? null : req.PortadaLogoUrl.Trim();
         cfg.PortadaTitulo = NullIfBlank(req.PortadaTitulo);
@@ -69,23 +74,24 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
         cfg.PortadaTextoLegal = NullIfBlank(req.PortadaTextoLegal);
         cfg.IndiceHabilitado = req.IndiceHabilitado;
         cfg.PatronNombreDefault = NullIfBlank(req.PatronNombreDefault);
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return MapConfig(cfg);
     }
 
     public async Task<IReadOnlyList<InformeItemDto>> ListarItemsAsync(
         Guid aseguradoraId, CancellationToken ct = default)
     {
-        var cfg = await GetOrCreateEntityAsync(aseguradoraId, ct);
+        using var db = _dbFactory.Create();
+        var cfg = await GetOrCreateEntityAsync(db, aseguradoraId, ct);
 
-        var items = await _db.AseguradoraInformeItems.AsNoTracking()
+        var items = await db.AseguradoraInformeItems.AsNoTracking()
             .Where(i => i.ConfigId == cfg.Id)
             .OrderBy(i => i.Orden).ThenBy(i => i.Alias)
             .ToListAsync(ct);
         if (items.Count == 0) { return Array.Empty<InformeItemDto>(); }
 
         var itemIds = items.Select(i => i.Id).ToList();
-        var contenidos = await _db.AseguradoraInformeContenidos.AsNoTracking()
+        var contenidos = await db.AseguradoraInformeContenidos.AsNoTracking()
             .Where(c => itemIds.Contains(c.ItemId))
             .OrderBy(c => c.Orden)
             .ToListAsync(ct);
@@ -95,7 +101,7 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
             .Select(c => c.TipologiaArchivoId!.Value).Distinct().ToList();
         var tipNombres = tipIds.Count == 0
             ? new Dictionary<Guid, string>()
-            : await _db.TipologiaArchivos.AsNoTracking()
+            : await db.TipologiaArchivos.AsNoTracking()
                 .Where(t => tipIds.Contains(t.Id))
                 .ToDictionaryAsync(t => t.Id, t => t.Nombre, ct);
 
@@ -156,6 +162,7 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
     public async Task<InformeItemDto> GuardarItemAsync(
         GuardarItemRequest req, Guid actorUserId, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         var alias = (req.Alias ?? string.Empty).Trim().ToUpperInvariant();
         if (string.IsNullOrWhiteSpace(alias)) { throw new InvalidOperationException("El codigo/alias es obligatorio."); }
         if (alias.Length > 20) { throw new InvalidOperationException("Codigo muy largo (max 20)."); }
@@ -166,25 +173,25 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
             throw new InvalidOperationException("El archivo debe tener al menos un contenido.");
         }
 
-        var cfg = await GetOrCreateEntityAsync(req.AseguradoraId, ct);
+        var cfg = await GetOrCreateEntityAsync(db, req.AseguradoraId, ct);
         var tid = RequireTenant();
 
         AseguradoraInformeItem item;
         if (req.Id is Guid iid)
         {
-            var existente = await _db.AseguradoraInformeItems
+            var existente = await db.AseguradoraInformeItems
                 .FirstOrDefaultAsync(x => x.Id == iid && x.ConfigId == cfg.Id, ct);
             if (existente is null) { throw new InvalidOperationException("Archivo no encontrado."); }
             item = existente;
 
             // Reemplaza los contenidos existentes (borrar + insertar).
-            var viejos = await _db.AseguradoraInformeContenidos
+            var viejos = await db.AseguradoraInformeContenidos
                 .Where(c => c.ItemId == item.Id).ToListAsync(ct);
-            if (viejos.Count > 0) { _db.AseguradoraInformeContenidos.RemoveRange(viejos); }
+            if (viejos.Count > 0) { db.AseguradoraInformeContenidos.RemoveRange(viejos); }
         }
         else
         {
-            var maxOrden = await _db.AseguradoraInformeItems
+            var maxOrden = await db.AseguradoraInformeItems
                 .Where(x => x.ConfigId == cfg.Id)
                 .Select(x => (int?)x.Orden)
                 .MaxAsync(ct) ?? -1;
@@ -194,7 +201,7 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
                 TenantId = tid,
                 Orden = maxOrden + 1,
             };
-            _db.AseguradoraInformeItems.Add(item);
+            db.AseguradoraInformeItems.Add(item);
         }
 
         item.Seccion = NullIfBlank(req.Seccion);
@@ -217,7 +224,7 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
         var orden = 0;
         foreach (var c in contenidos)
         {
-            _db.AseguradoraInformeContenidos.Add(new AseguradoraInformeContenido
+            db.AseguradoraInformeContenidos.Add(new AseguradoraInformeContenido
             {
                 Item = item,
                 TenantId = tid,
@@ -231,7 +238,7 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
             });
         }
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
 
         // Relee para devolver el DTO enriquecido con nombres de tipologia.
         var recargado = (await ListarItemsAsync(req.AseguradoraId, ct))
@@ -249,10 +256,11 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
     public async Task<bool> EliminarItemAsync(
         Guid itemId, Guid actorUserId, CancellationToken ct = default)
     {
-        var e = await _db.AseguradoraInformeItems.FirstOrDefaultAsync(x => x.Id == itemId, ct);
+        using var db = _dbFactory.Create();
+        var e = await db.AseguradoraInformeItems.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (e is null) { return false; }
-        _db.AseguradoraInformeItems.Remove(e);
-        await _db.SaveChangesAsync(ct);
+        db.AseguradoraInformeItems.Remove(e);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 
@@ -261,8 +269,9 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
         Guid actorUserId, CancellationToken ct = default)
     {
         if (itemIdsEnOrden is null || itemIdsEnOrden.Count == 0) { return; }
-        var cfg = await GetOrCreateEntityAsync(aseguradoraId, ct);
-        var items = await _db.AseguradoraInformeItems
+        using var db = _dbFactory.Create();
+        var cfg = await GetOrCreateEntityAsync(db, aseguradoraId, ct);
+        var items = await db.AseguradoraInformeItems
             .Where(x => x.ConfigId == cfg.Id).ToListAsync(ct);
         var idx = 0;
         foreach (var id in itemIdsEnOrden)
@@ -270,18 +279,19 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
             var it = items.FirstOrDefault(x => x.Id == id);
             if (it is not null) { it.Orden = idx++; }
         }
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task<IReadOnlyList<AseguradoraConConfigDto>> ListarAseguradorasConConfigAsync(
         Guid excluirAseguradoraId, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         // Aseguradoras que tienen config + al menos 1 item, ordenadas por nombre.
-        var q = from a in _db.Aseguradoras.AsNoTracking()
-                join c in _db.AseguradoraCuentaMedicaConfigs.AsNoTracking()
+        var q = from a in db.Aseguradoras.AsNoTracking()
+                join c in db.AseguradoraCuentaMedicaConfigs.AsNoTracking()
                     on a.Id equals c.AseguradoraId
                 where a.Id != excluirAseguradoraId
-                let count = _db.AseguradoraInformeItems.Count(i => i.ConfigId == c.Id)
+                let count = db.AseguradoraInformeItems.Count(i => i.ConfigId == c.Id)
                 where count > 0
                 orderby a.Nombre
                 select new AseguradoraConConfigDto(a.Id, a.Nombre, count);
@@ -292,15 +302,16 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
         Guid origenAseguradoraId, Guid destinoAseguradoraId,
         Guid actorUserId, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         if (origenAseguradoraId == destinoAseguradoraId)
         {
             throw new InvalidOperationException("Origen y destino no pueden ser la misma aseguradora.");
         }
-        var origen = await _db.AseguradoraCuentaMedicaConfigs
+        var origen = await db.AseguradoraCuentaMedicaConfigs
             .FirstOrDefaultAsync(x => x.AseguradoraId == origenAseguradoraId, ct);
         if (origen is null) { throw new InvalidOperationException("La aseguradora origen no tiene configuracion."); }
 
-        var destino = await GetOrCreateEntityAsync(destinoAseguradoraId, ct);
+        var destino = await GetOrCreateEntityAsync(db, destinoAseguradoraId, ct);
         var tid = RequireTenant();
 
         // Portada: sobreescribe todos los campos.
@@ -314,16 +325,16 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
 
         // Items: borra los del destino (cascade borra sus contenidos), clona los
         // del origen con sus contenidos preservando orden.
-        var destinoItems = await _db.AseguradoraInformeItems
+        var destinoItems = await db.AseguradoraInformeItems
             .Where(x => x.ConfigId == destino.Id).ToListAsync(ct);
-        if (destinoItems.Count > 0) { _db.AseguradoraInformeItems.RemoveRange(destinoItems); }
+        if (destinoItems.Count > 0) { db.AseguradoraInformeItems.RemoveRange(destinoItems); }
 
-        var origenItems = await _db.AseguradoraInformeItems.AsNoTracking()
+        var origenItems = await db.AseguradoraInformeItems.AsNoTracking()
             .Where(x => x.ConfigId == origen.Id).OrderBy(x => x.Orden).ToListAsync(ct);
         var origenItemIds = origenItems.Select(x => x.Id).ToList();
         var origenContenidos = origenItemIds.Count == 0
             ? new List<AseguradoraInformeContenido>()
-            : await _db.AseguradoraInformeContenidos.AsNoTracking()
+            : await db.AseguradoraInformeContenidos.AsNoTracking()
                 .Where(c => origenItemIds.Contains(c.ItemId))
                 .OrderBy(c => c.Orden).ToListAsync(ct);
         var contPorItem = origenContenidos.GroupBy(c => c.ItemId)
@@ -368,9 +379,9 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
                     });
                 }
             }
-            _db.AseguradoraInformeItems.Add(nuevo);
+            db.AseguradoraInformeItems.Add(nuevo);
         }
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return MapConfig(destino);
     }
 

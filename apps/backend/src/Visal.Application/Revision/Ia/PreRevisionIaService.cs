@@ -11,9 +11,10 @@ using Visal.Domain.Enums;
 
 namespace Visal.Application.Revision.Ia;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class PreRevisionIaService : IPreRevisionIaService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly IAiProviderClient _client;
     private readonly IAiUsageService _usage;
     private readonly ISecretProtector _secretProtector;
@@ -27,7 +28,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
     private const string AllowedToolsPromptName = "revision.allowed_tools";
 
     public PreRevisionIaService(
-        IApplicationDbContext db,
+        IApplicationDbContextFactory dbFactory,
         IAiProviderClient client,
         IAiUsageService usage,
         ISecretProtector secretProtector,
@@ -35,7 +36,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         IRevisionClinicaService revision,
         IRevisionPolicyService policy)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _client = client;
         _usage = usage;
         _secretProtector = secretProtector;
@@ -46,7 +47,8 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
 
     public async Task<PreRevisionIaResult> EjecutarAsync(Guid revisionClinicaId, Guid? agenteId = null, CancellationToken ct = default)
     {
-        var revision = await _db.RevisionesClinica.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var revision = await db.RevisionesClinica.AsNoTracking()
             .FirstOrDefaultAsync(r => r.Id == revisionClinicaId, ct);
         if (revision is null) { return Err("El ciclo de revision no existe."); }
 
@@ -59,19 +61,19 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         AiAgent? agent;
         if (agenteId is Guid aid)
         {
-            agent = await _db.AiAgents.AsNoTracking().FirstOrDefaultAsync(a => a.Id == aid, ct);
+            agent = await db.AiAgents.AsNoTracking().FirstOrDefaultAsync(a => a.Id == aid, ct);
             if (agent is null) { return Err("El agente seleccionado no existe o no pertenece a este tenant."); }
             if (!agent.IsActive) { return Err($"El agente '{agent.Name}' esta apagado."); }
         }
         else
         {
-            agent = await _db.AiAgents.AsNoTracking()
+            agent = await db.AiAgents.AsNoTracking()
                 .FirstOrDefaultAsync(a => a.Name == IPreRevisionIaService.AgenteNombre, ct);
             if (agent is null) { return Err($"No hay agente '{IPreRevisionIaService.AgenteNombre}' configurado para este tenant."); }
             if (!agent.IsActive) { return Err($"El agente '{IPreRevisionIaService.AgenteNombre}' esta apagado."); }
         }
 
-        var providerCfg = await _db.AiProviderConfigs.AsNoTracking()
+        var providerCfg = await db.AiProviderConfigs.AsNoTracking()
             .FirstOrDefaultAsync(c => c.Provider == agent.Provider, ct);
         if (providerCfg is null || !providerCfg.IsEnabled || string.IsNullOrWhiteSpace(providerCfg.ApiKeyEncrypted))
         {
@@ -93,7 +95,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             return Err($"Alcanzaste el limite de tokens de IA de tu plan este mes ({quota.MonthlyLimitTokens:N0}).");
         }
 
-        var allowed = await ResolveAllowedToolsAsync(agent.Id, ct);
+        var allowed = await ResolveAllowedToolsAsync(db, agent.Id, ct);
         if (allowed.Count == 0) { return Err("El agente no tiene tools permitidas configuradas."); }
 
         var policy = await _policy.GetAsync(ct);
@@ -119,7 +121,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
 
         if (!result.Ok || string.IsNullOrWhiteSpace(result.Text))
         {
-            await GuardarAgenteLogAsync(revision, agent, model, systemPrompt, contextoJson, contexto,
+            await GuardarAgenteLogAsync(db, revision, agent, model, systemPrompt, contextoJson, contexto,
                 ok: false, error: result.Error ?? "El proveedor no devolvio texto.", resultado: null, confianza: null,
                 result.InputTokens, result.OutputTokens, result.Text, ct);
             return Err(result.Error ?? "El proveedor no devolvio texto.") with { InputTokens = result.InputTokens, OutputTokens = result.OutputTokens };
@@ -129,7 +131,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         try { parsed = ParseVeredicto(result.Text!); }
         catch (Exception ex)
         {
-            await GuardarAgenteLogAsync(revision, agent, model, systemPrompt, contextoJson, contexto,
+            await GuardarAgenteLogAsync(db, revision, agent, model, systemPrompt, contextoJson, contexto,
                 ok: false, error: "No se pudo interpretar la respuesta del agente: " + ex.Message, resultado: null, confianza: null,
                 result.InputTokens, result.OutputTokens, result.Text, ct);
             return new PreRevisionIaResult(false, null, 0m, null, null, "No se pudo interpretar la respuesta del agente: " + ex.Message, result.InputTokens, result.OutputTokens);
@@ -154,7 +156,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
 
         // Log completo del agente (que recibio, que proceso hizo, que respondio) para el
         // panel "Log del agente". Best-effort: nunca rompe la revision ya registrada.
-        await GuardarAgenteLogAsync(revision, agent, model, systemPrompt, contextoJson, contexto,
+        await GuardarAgenteLogAsync(db, revision, agent, model, systemPrompt, contextoJson, contexto,
             ok: true, error: null, resultado: parsed.Resultado.ToString(), confianza: parsed.Confianza,
             result.InputTokens, result.OutputTokens, result.Text, ct,
             nota: parsed.Nota, hallazgos: parsed.Hallazgos);
@@ -241,14 +243,14 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             || low.Contains("transient") || low.Contains("temporarily");
     }
 
-    private async Task<IReadOnlyList<string>> ResolveAllowedToolsAsync(Guid agentId, CancellationToken ct)
+    private static async Task<IReadOnlyList<string>> ResolveAllowedToolsAsync(IApplicationDbContext db, Guid agentId, CancellationToken ct)
     {
         // Ola 8 RC8a — solo columna dedicada `AiAgent.AllowedToolsCsv`.
         // El fallback legacy a `AiAgentPrompt` name=revision.allowed_tools fue eliminado.
         // La migracion `MigrateAllowedToolsSeedsToColumn` (Ola 8) trasladó los datos
         // seedeados por Ola 5c a la columna dedicada. Si `AllowedToolsCsv` esta null
         // o vacio, se usan las 9 tools por defecto.
-        var csv = await _db.AiAgents.AsNoTracking()
+        var csv = await db.AiAgents.AsNoTracking()
             .Where(a => a.Id == agentId)
             .Select(a => a.AllowedToolsCsv)
             .FirstOrDefaultAsync(ct);
@@ -338,6 +340,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
 
     /// <summary>Persiste el log completo de una corrida del agente (best-effort). Nunca lanza.</summary>
     private async Task GuardarAgenteLogAsync(
+        IApplicationDbContext db,
         RevisionClinica revision, AiAgent agent, string model,
         string? systemPrompt, string? contextoEnviado, HistoriaClinicaContextoIa? contexto,
         bool ok, string? error, string? resultado, decimal? confianza,
@@ -346,7 +349,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
     {
         try
         {
-            var camposJson = await BuildCamposLegiblesAsync(revision.HistoriaClinicaId, ct);
+            var camposJson = await BuildCamposLegiblesAsync(db, revision.HistoriaClinicaId, ct);
             string? toolsJson = null;
             if (contexto is not null)
             {
@@ -357,7 +360,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
                     .ToList();
                 toolsJson = JsonSerializer.Serialize(tools, new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
             }
-            _db.RevisionAgenteLogs.Add(new RevisionAgenteLog
+            db.RevisionAgenteLogs.Add(new RevisionAgenteLog
             {
                 TenantId = revision.TenantId,
                 RevisionClinicaId = revision.Id,
@@ -381,21 +384,21 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
                 ToolsJson = toolsJson,
                 RespuestaCruda = respuestaCruda,
             });
-            await _db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct);
         }
         catch { /* el log es best-effort; nunca romper la revision */ }
     }
 
     /// <summary>HC legible como JSON { "label del campo": "contenido" } cruzando ValoresJson con el
     /// esquema del formato. Solo para mostrar en el log (no es lo que se le envia al agente).</summary>
-    private async Task<string?> BuildCamposLegiblesAsync(Guid hcId, CancellationToken ct)
+    private static async Task<string?> BuildCamposLegiblesAsync(IApplicationDbContext db, Guid hcId, CancellationToken ct)
     {
-        var hc = await _db.HistoriasClinicas.AsNoTracking()
+        var hc = await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.Id == hcId)
             .Select(h => new { h.ValoresJson, h.FormDefinitionId })
             .FirstOrDefaultAsync(ct);
         if (hc is null || string.IsNullOrWhiteSpace(hc.ValoresJson)) { return null; }
-        var schemaJson = await _db.FormDefinitions.AsNoTracking()
+        var schemaJson = await db.FormDefinitions.AsNoTracking()
             .Where(f => f.Id == hc.FormDefinitionId)
             .Select(f => f.SchemaJson)
             .FirstOrDefaultAsync(ct);

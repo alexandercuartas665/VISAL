@@ -15,20 +15,21 @@ namespace Visal.Application.Tenancy.WhatsApp;
 /// Los envios de prueba SI van por el connector (reusa auditoria y humaniza
 /// errores igual que texto/media).
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = _dbFactory.Create();) en vez del IApplicationDbContext scoped.
 internal sealed class HsmTemplateService : IHsmTemplateService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ISecretProtector _secretProtector;
     private readonly IGupshupApiClient _client;
     private readonly IAuditWriter _audit;
 
     public HsmTemplateService(
-        IApplicationDbContext db,
+        IApplicationDbContextFactory dbFactory,
         ISecretProtector secretProtector,
         IGupshupApiClient client,
         IAuditWriter audit)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _secretProtector = secretProtector;
         _client = client;
         _audit = audit;
@@ -36,7 +37,8 @@ internal sealed class HsmTemplateService : IHsmTemplateService
 
     public async Task<HsmTemplateListResult> ListByLineAsync(Guid lineId, CancellationToken ct = default)
     {
-        var creds = await ResolveAsync(lineId, ct);
+        using var db = _dbFactory.Create();
+        var creds = await ResolveAsync(db, lineId, ct);
         if (creds is null) { return NotConfigured(); }
         var r = await _client.ListTemplatesAsync(
             creds.Value.ApiKey, creds.Value.AppName, creds.Value.GupshupAppId,
@@ -46,7 +48,8 @@ internal sealed class HsmTemplateService : IHsmTemplateService
 
     public async Task<HsmCreateResult> CreateByLineAsync(Guid lineId, HsmCreateRequest req, Guid actorUserId, CancellationToken ct = default)
     {
-        var creds = await ResolveAsync(lineId, ct);
+        using var db = _dbFactory.Create();
+        var creds = await ResolveAsync(db, lineId, ct);
         if (creds is null) { return new HsmCreateResult(false, "Linea sin App Gupshup configurada.", null, null); }
         var payload = new GupshupCreateTemplateRequest(
             req.ElementName, req.LanguageCode, req.Category,
@@ -55,10 +58,11 @@ internal sealed class HsmTemplateService : IHsmTemplateService
         var r = await _client.CreateTemplateAsync(
             creds.Value.ApiKey, creds.Value.AppName, creds.Value.GupshupAppId,
             creds.Value.PartnerToken, payload, ct);
-        _audit.Write(actorUserId, "gupshup.template.create", "TenantGupshupConfig", creds.Value.ConfigId,
+        _audit.Write(db, actorUserId, "gupshup.template.create", "TenantGupshupConfig", creds.Value.ConfigId,
             previousValue: null,
             newValue: new { req.ElementName, req.LanguageCode, req.Category, ok = r.Ok, id = r.Id },
             tenantId: creds.Value.TenantId);
+        await db.SaveChangesAsync(ct);
         return new HsmCreateResult(r.Ok, r.Error, r.Id, r.Status);
     }
 
@@ -66,29 +70,31 @@ internal sealed class HsmTemplateService : IHsmTemplateService
         IReadOnlyList<string> parameters, Guid actorUserId,
         string? headerMediaUrl = null, string? headerMediaType = null, CancellationToken ct = default)
     {
-        var creds = await ResolveAsync(lineId, ct);
+        using var db = _dbFactory.Create();
+        var creds = await ResolveAsync(db, lineId, ct);
         if (creds is null) { return new HsmSendResult(false, "Linea sin App Gupshup configurada."); }
         var digits = new string(phone.Where(char.IsDigit).ToArray());
         if (string.IsNullOrEmpty(digits)) { return new HsmSendResult(false, "Indica el numero destino."); }
         var r = await _client.SendTemplateAsync(creds.Value.ApiKey, creds.Value.Source, digits, templateId, parameters,
             creds.Value.AppName, headerMediaUrl, headerMediaType, ct);
-        _audit.Write(actorUserId, "gupshup.template.send-test", "WhatsAppLine", lineId,
+        _audit.Write(db, actorUserId, "gupshup.template.send-test", "WhatsAppLine", lineId,
             previousValue: null,
             newValue: new { to = digits, templateId, ok = r.Ok, messageId = r.MessageId },
             tenantId: creds.Value.TenantId);
+        await db.SaveChangesAsync(ct);
         return new HsmSendResult(r.Ok, r.Error);
     }
 
     /// <summary>Devuelve credenciales listas para invocar Gupshup o null si
     /// falta configuracion. Todas las lecturas ignoran query filters porque
     /// algunas llamadas vienen sin tenant scope activo (webhook, jobs).</summary>
-    private async Task<(Guid TenantId, Guid ConfigId, string AppName, Guid GupshupAppId, string ApiKey, string? PartnerToken, string Source)?> ResolveAsync(Guid lineId, CancellationToken ct)
+    private async Task<(Guid TenantId, Guid ConfigId, string AppName, Guid GupshupAppId, string ApiKey, string? PartnerToken, string Source)?> ResolveAsync(IApplicationDbContext db, Guid lineId, CancellationToken ct)
     {
-        var line = await _db.WhatsAppLines
+        var line = await db.WhatsAppLines
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(l => l.Id == lineId, ct);
         if (line is null || line.Provider != WhatsAppProvider.Gupshup || line.GupshupAppId is not Guid appPk) { return null; }
-        var cfg = await _db.TenantGupshupConfigs
+        var cfg = await db.TenantGupshupConfigs
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(c => c.Id == appPk, ct);
         if (cfg is null || !cfg.IsActive || string.IsNullOrWhiteSpace(cfg.PhoneNumber)) { return null; }

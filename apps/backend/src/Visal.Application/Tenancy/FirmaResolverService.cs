@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class FirmaResolverService : IFirmaResolverService
 {
     /// <summary>Categoria de los documentos externos que cuentan como "firma del paciente".
@@ -11,14 +12,15 @@ public sealed class FirmaResolverService : IFirmaResolverService
     /// /cfg-tipologia-archivos.</summary>
     private const string CategoriaFirmaPaciente = "Firma del Paciente";
 
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
 
-    public FirmaResolverService(IApplicationDbContext db) { _db = db; }
+    public FirmaResolverService(IApplicationDbContextFactory dbFactory) { _dbFactory = dbFactory; }
 
     public async Task<string?> ResolverFirmaPacienteAsync(Guid pacienteId, CancellationToken ct = default)
     {
         if (pacienteId == Guid.Empty) { return null; }
-        return await _db.NotaMedicaDocumentos.AsNoTracking()
+        using var db = _dbFactory.Create();
+        return await db.NotaMedicaDocumentos.AsNoTracking()
             .Where(d => d.PacienteId == pacienteId && d.Categoria == CategoriaFirmaPaciente)
             .OrderByDescending(d => d.CreatedAt)
             .Select(d => d.RutaArchivo)
@@ -28,14 +30,15 @@ public sealed class FirmaResolverService : IFirmaResolverService
     public async Task<string?> ResolverFirmaProfesionalAsync(Guid tenantUserId, CancellationToken ct = default)
     {
         if (tenantUserId == Guid.Empty) { return null; }
+        using var db = _dbFactory.Create();
         // TenantUser -> ProfesionalId -> Profesional.FirmaUrl. Si cualquier eslabon
         // es null, devolvemos null silenciosamente.
-        var profesionalId = await _db.TenantUsers.AsNoTracking()
+        var profesionalId = await db.TenantUsers.AsNoTracking()
             .Where(u => u.Id == tenantUserId)
             .Select(u => u.ProfesionalId)
             .FirstOrDefaultAsync(ct);
         if (profesionalId is not Guid pid || pid == Guid.Empty) { return null; }
-        return await _db.Profesionales.AsNoTracking()
+        return await db.Profesionales.AsNoTracking()
             .Where(p => p.Id == pid)
             .Select(p => p.FirmaUrl)
             .FirstOrDefaultAsync(ct);
@@ -44,7 +47,8 @@ public sealed class FirmaResolverService : IFirmaResolverService
     public async Task<string?> ResolverFirmaPorProfesionalAsync(Guid profesionalId, CancellationToken ct = default)
     {
         if (profesionalId == Guid.Empty) { return null; }
-        return await _db.Profesionales.AsNoTracking()
+        using var db = _dbFactory.Create();
+        return await db.Profesionales.AsNoTracking()
             .Where(p => p.Id == profesionalId)
             .Select(p => p.FirmaUrl)
             .FirstOrDefaultAsync(ct);
@@ -53,15 +57,16 @@ public sealed class FirmaResolverService : IFirmaResolverService
     public async Task<string?> ResolverFirmaProfesionalPorPlatformUserAsync(Guid platformUserId, Guid tenantId, CancellationToken ct = default)
     {
         if (platformUserId == Guid.Empty || tenantId == Guid.Empty) { return null; }
+        using var db = _dbFactory.Create();
         // Buscar TenantUser por (platform_user_id, tenant_id) y devolver
         // su Profesional.FirmaUrl. Util para usuarios admin que no llevan
         // claim profesional_id pero igual tienen profesional vinculado.
-        var profesionalId = await _db.TenantUsers.AsNoTracking()
+        var profesionalId = await db.TenantUsers.AsNoTracking()
             .Where(u => u.PlatformUserId == platformUserId && u.TenantId == tenantId)
             .Select(u => u.ProfesionalId)
             .FirstOrDefaultAsync(ct);
         if (profesionalId is not Guid pid || pid == Guid.Empty) { return null; }
-        return await _db.Profesionales.AsNoTracking()
+        return await db.Profesionales.AsNoTracking()
             .Where(p => p.Id == pid)
             .Select(p => p.FirmaUrl)
             .FirstOrDefaultAsync(ct);
@@ -70,6 +75,7 @@ public sealed class FirmaResolverService : IFirmaResolverService
     public async Task<PrefillProfesionalDatosDto?> ResolverDatosProfesionalAsync(
         Guid? profesionalId, Guid? platformUserId, Guid? tenantId, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         // Camino directo: si el caller ya trae profesional_id del claim, evitar el
         // join a tenant_users. Es el caso comun para usuarios de campo.
         Guid? pid = profesionalId is Guid p1 && p1 != Guid.Empty ? p1 : null;
@@ -78,13 +84,13 @@ public sealed class FirmaResolverService : IFirmaResolverService
         if (pid is null && platformUserId is Guid puid && puid != Guid.Empty
             && tenantId is Guid tid && tid != Guid.Empty)
         {
-            pid = await _db.TenantUsers.AsNoTracking()
+            pid = await db.TenantUsers.AsNoTracking()
                 .Where(u => u.PlatformUserId == puid && u.TenantId == tid)
                 .Select(u => u.ProfesionalId)
                 .FirstOrDefaultAsync(ct);
         }
         if (pid is not Guid gid || gid == Guid.Empty) { return null; }
-        return await _db.Profesionales.AsNoTracking()
+        return await db.Profesionales.AsNoTracking()
             .Where(pp => pp.Id == gid)
             .Select(pp => new PrefillProfesionalDatosDto(
                 pp.NombreCompleto, pp.NumeroDocumento, pp.RegistroMedico, pp.FirmaUrl,
@@ -93,7 +99,7 @@ public sealed class FirmaResolverService : IFirmaResolverService
                 pp.TipoDocumento,
                 // "Primera subcategoria asignada": la mas antigua por fecha de asignacion
                 // (CreatedAt del vinculo N:M), desempate por el orden del catalogo.
-                _db.ProfesionalSubCategorias.AsNoTracking()
+                db.ProfesionalSubCategorias.AsNoTracking()
                     .Where(ps => ps.ProfesionalId == pp.Id && ps.SubCategoria != null)
                     .OrderBy(ps => ps.CreatedAt).ThenBy(ps => ps.SubCategoria!.Orden)
                     .Select(ps => ps.SubCategoria!.Nombre)
@@ -104,23 +110,25 @@ public sealed class FirmaResolverService : IFirmaResolverService
     public async Task<bool> PersistirFirmaUrlSiFaltaAsync(Guid profesionalId, string firmaUrl, CancellationToken ct = default)
     {
         if (profesionalId == Guid.Empty || string.IsNullOrWhiteSpace(firmaUrl)) { return false; }
+        using var db = _dbFactory.Create();
         // Se necesita seguimiento (sin AsNoTracking) para actualizar. El query
         // filter por tenant asegura que solo alcanzamos profesionales del tenant.
-        var prof = await _db.Profesionales
+        var prof = await db.Profesionales
             .FirstOrDefaultAsync(p => p.Id == profesionalId, ct);
         if (prof is null) { return false; }
         // Auto-sanar SOLO cuando la ficha no tiene firma. Nunca sobrescribir una
         // firma ya cargada del catalogo (esa es la fuente de verdad deliberada).
         if (!string.IsNullOrWhiteSpace(prof.FirmaUrl)) { return false; }
         prof.FirmaUrl = firmaUrl;
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 
     public async Task<(string? Url, string? Nombre, string? Parentesco)> ResolverAcompananteAsync(Guid pacienteId, int indice1Based, CancellationToken ct = default)
     {
         if (pacienteId == Guid.Empty || indice1Based < 1) { return (null, null, null); }
-        var contactos = await _db.PacienteContactosEmergencia.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var contactos = await db.PacienteContactosEmergencia.AsNoTracking()
             .Where(c => c.PacienteId == pacienteId)
             .OrderBy(c => c.Orden).ThenBy(c => c.Nombre)
             .Select(c => new { c.FirmaUrl, c.Nombre, c.Parentesco })
@@ -133,7 +141,8 @@ public sealed class FirmaResolverService : IFirmaResolverService
     public async Task<(string? Url, string? Nombre, string? Parentesco)> ResolverAcompanantePorOrdenAsync(Guid pacienteId, int orden, CancellationToken ct = default)
     {
         if (pacienteId == Guid.Empty) { return (null, null, null); }
-        var c = await _db.PacienteContactosEmergencia.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var c = await db.PacienteContactosEmergencia.AsNoTracking()
             .Where(x => x.PacienteId == pacienteId && x.Orden == orden)
             .Select(x => new { x.FirmaUrl, x.Nombre, x.Parentesco })
             .FirstOrDefaultAsync(ct);

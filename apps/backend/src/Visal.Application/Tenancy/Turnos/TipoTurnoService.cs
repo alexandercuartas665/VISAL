@@ -5,13 +5,15 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy.Turnos;
 
-public sealed class TipoTurnoService(IApplicationDbContext db, ITenantContext tenant) : ITipoTurnoService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class TipoTurnoService(IApplicationDbContextFactory dbFactory, ITenantContext tenant) : ITipoTurnoService
 {
     // #RRGGBB o #RRGGBBAA. Se valida antes de persistir para no ensuciar el catalogo.
     private static readonly Regex HexColor = new("^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$", RegexOptions.Compiled);
 
     public async Task<IReadOnlyList<TipoTurnoDto>> ListarAsync(bool incluirInactivos = false, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var q = db.TiposTurno.AsNoTracking();
         if (!incluirInactivos) { q = q.Where(t => t.Activo); }
         var rows = await q.OrderBy(t => t.Orden).ThenBy(t => t.Codigo).ToListAsync(ct);
@@ -20,6 +22,7 @@ public sealed class TipoTurnoService(IApplicationDbContext db, ITenantContext te
 
     public async Task<TipoTurnoDto> GuardarAsync(GuardarTipoTurnoCmd cmd, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         Validar(cmd);
 
@@ -68,6 +71,7 @@ public sealed class TipoTurnoService(IApplicationDbContext db, ITenantContext te
 
     public async Task<bool> EliminarAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var entity = await db.TiposTurno.FirstOrDefaultAsync(t => t.Id == id, ct);
         if (entity is null) { return false; }
         db.TiposTurno.Remove(entity);

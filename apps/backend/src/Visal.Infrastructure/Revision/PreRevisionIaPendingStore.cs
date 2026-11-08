@@ -14,17 +14,21 @@ namespace Visal.Infrastructure.Revision;
 /// simples INSERT/DELETE/SELECT sin filtros por tenant — el worker recorre lo
 /// que haya y ata el tenant a cada job via <see cref="PreRevisionIaJob.TenantId"/>.
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = _dbFactory.Create();) en vez del
+// IApplicationDbContext scoped. El store se inyecta en HistoriaClinicaService (circuito) y en el
+// worker (scope propio); con contexto corto deja de compartir el DbContext del circuito.
 public sealed class PreRevisionIaPendingStore : IPreRevisionIaPendingStore
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
 
-    public PreRevisionIaPendingStore(IApplicationDbContext db)
+    public PreRevisionIaPendingStore(IApplicationDbContextFactory dbFactory)
     {
-        _db = db;
+        _dbFactory = dbFactory;
     }
 
     public async Task<Guid> InsertAsync(PreRevisionIaJob job, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         var row = new PreRevisionIaPending
         {
             TenantId = job.TenantId,
@@ -32,23 +36,25 @@ public sealed class PreRevisionIaPendingStore : IPreRevisionIaPendingStore
             ActorUserId = job.ActorUserId,
             EnqueuedAt = DateTimeOffset.UtcNow,
         };
-        _db.PreRevisionIaPendings.Add(row);
-        await _db.SaveChangesAsync(ct);
+        db.PreRevisionIaPendings.Add(row);
+        await db.SaveChangesAsync(ct);
         return row.Id;
     }
 
     public async Task DeleteAsync(Guid pendingId, CancellationToken ct = default)
     {
         if (pendingId == Guid.Empty) { return; }
-        var row = await _db.PreRevisionIaPendings.FirstOrDefaultAsync(p => p.Id == pendingId, ct);
+        using var db = _dbFactory.Create();
+        var row = await db.PreRevisionIaPendings.FirstOrDefaultAsync(p => p.Id == pendingId, ct);
         if (row is null) { return; }
-        _db.PreRevisionIaPendings.Remove(row);
-        await _db.SaveChangesAsync(ct);
+        db.PreRevisionIaPendings.Remove(row);
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task<IReadOnlyList<PreRevisionIaJob>> LoadAllAsync(CancellationToken ct = default)
     {
-        var rows = await _db.PreRevisionIaPendings.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var rows = await db.PreRevisionIaPendings.AsNoTracking()
             .OrderBy(p => p.EnqueuedAt)
             .Select(p => new PreRevisionIaJob(p.TenantId, p.RevisionClinicaId, p.ActorUserId, p.Id))
             .ToListAsync(ct);

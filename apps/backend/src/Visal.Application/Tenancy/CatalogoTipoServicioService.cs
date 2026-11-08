@@ -4,7 +4,8 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class CatalogoTipoServicioService(IApplicationDbContext db, ITenantContext tenant)
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class CatalogoTipoServicioService(IApplicationDbContextFactory dbFactory, ITenantContext tenant)
     : ICatalogoTipoServicioService
 {
     private static string NormalizarCodigo(string? c)
@@ -15,6 +16,7 @@ public sealed class CatalogoTipoServicioService(IApplicationDbContext db, ITenan
 
     public async Task<IReadOnlyList<CatalogoTipoServicioDto>> ListarAsync(bool incluirInactivos = false, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var q = db.CatalogosTipoServicio.AsNoTracking();
         if (!incluirInactivos) { q = q.Where(x => x.Activo); }
         var rows = await q.ToListAsync(ct);
@@ -27,6 +29,7 @@ public sealed class CatalogoTipoServicioService(IApplicationDbContext db, ITenan
 
     public async Task<CatalogoTipoServicioDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var r = await db.CatalogosTipoServicio.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         return r is null ? null : new CatalogoTipoServicioDto(r.Id, r.Codigo, r.Nombre, r.Orden, r.Activo, r.TipoArchivoRips,
             r.LimiteDiasPrimeraSesion, r.LimiteHorasSesionesSiguientes);
@@ -34,6 +37,7 @@ public sealed class CatalogoTipoServicioService(IApplicationDbContext db, ITenan
 
     public async Task<CatalogoTipoServicioDto> GuardarAsync(GuardarTipoServicioRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         var codigo = NormalizarCodigo(req.Codigo);
         var nombre = (req.Nombre ?? "").Trim();
@@ -69,6 +73,7 @@ public sealed class CatalogoTipoServicioService(IApplicationDbContext db, ITenan
 
     public async Task<bool> EliminarAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.CatalogosTipoServicio.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (e is null) { return false; }
         // Verificar que no este referenciado en servicios_contrato ni asignaciones.

@@ -91,7 +91,7 @@ public sealed class ModoEvolucionTests
         await using var ctx = NewCtx();
         var userId = await SembrarAsync(ctx, evolucionCodigo: "EVOL-14");
 
-        var svc = new AtencionProfesionalService(ctx, new FakeTenantContext { TenantId = Tenant }, null!);
+        var svc = new AtencionProfesionalService(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }), new FakeTenantContext { TenantId = Tenant }, null!);
         var filas = await svc.GetMisServiciosAsync(userId);
 
         Assert.Equal(2, filas.Count);
@@ -107,7 +107,7 @@ public sealed class ModoEvolucionTests
         await using var ctx = NewCtx();
         var userId = await SembrarAsync(ctx, evolucionCodigo: null);
 
-        var svc = new AtencionProfesionalService(ctx, new FakeTenantContext { TenantId = Tenant }, null!);
+        var svc = new AtencionProfesionalService(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }), new FakeTenantContext { TenantId = Tenant }, null!);
         var filas = await svc.GetMisServiciosAsync(userId);
 
         Assert.Equal(2, filas.Count);
@@ -173,7 +173,7 @@ public sealed class ModoEvolucionTests
         ctx.AsignacionTurnos.AddRange(tA1, tB1, tA2, tB2);
         await ctx.SaveChangesAsync();
 
-        var svc = new AtencionProfesionalService(ctx, new FakeTenantContext { TenantId = Tenant }, null!);
+        var svc = new AtencionProfesionalService(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }), new FakeTenantContext { TenantId = Tenant }, null!);
         var filas = (await svc.GetMisServiciosAsync(platformUserId)).ToList();
 
         string Fmt(Guid turnoId) => filas.Single(f => f.AsignacionTurnoId == turnoId).FormatoHistoria!;

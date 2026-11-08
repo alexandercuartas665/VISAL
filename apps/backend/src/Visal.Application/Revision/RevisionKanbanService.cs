@@ -13,19 +13,20 @@ namespace Visal.Application.Revision;
 ///   - Traducir la columna destino del drag&amp;drop a la accion apropiada.
 ///   - Enriquecer las cards con el ultimo motivo/veredicto para tooltips.
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class RevisionKanbanService : IRevisionKanbanService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly IRevisionClinicaService _revisiones;
     private readonly TimeProvider _clock;
     private readonly IRevisionRechazoNotifier? _notifier;
 
     public RevisionKanbanService(
-        IApplicationDbContext db,
+        IApplicationDbContextFactory dbFactory,
         IRevisionClinicaService revisiones,
         TimeProvider clock)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _revisiones = revisiones;
         _clock = clock;
     }
@@ -37,23 +38,24 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
     /// registrado en la misma capa.
     /// </summary>
     public RevisionKanbanService(
-        IApplicationDbContext db,
+        IApplicationDbContextFactory dbFactory,
         IRevisionClinicaService revisiones,
         TimeProvider clock,
         IRevisionRechazoNotifier notifier)
-        : this(db, revisiones, clock)
+        : this(dbFactory, revisiones, clock)
     {
         _notifier = notifier;
     }
 
     public async Task<RevisionKanbanBoardDto> GetBoardAsync(RevisionKanbanFiltro? filtro = null, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         // Trae todas las HCs no-inactivas + su revision (LEFT JOIN). Excluye HCs
         // clinicamente Inactivas y revisiones terminales (ArchivadaOk / Inactivada).
         // El Kanban muestra: HCs abiertas (sin revision), HCs cerradas con revision
         // en estado no-terminal, y HCs cerradas sin revision (aparecen en Cerradas
         // como candidatas a "Enviar a revision"). Tope 500 igual que el grid Lista.
-        var q = _db.HistoriasClinicas.AsNoTracking()
+        var q = db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.Estado != HistoriaClinicaEstado.Inactiva);
 
         // Ola 7 RC7d — filtros del toolbar del Kanban (todos opcionales, AND).
@@ -80,16 +82,16 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
         }
 
         var raw = await q
-            .GroupJoin(_db.RevisionesClinica.AsNoTracking(),
+            .GroupJoin(db.RevisionesClinica.AsNoTracking(),
                 h => h.Id, r => r.HistoriaClinicaId,
                 (h, rs) => new { h, rs })
             .SelectMany(x => x.rs.DefaultIfEmpty(), (x, r) => new { x.h, r })
             .Where(x => x.r == null
                      || (x.r.EstadoAgregado != RevisionEstadoAgregado.ArchivadaOk
                          && x.r.EstadoAgregado != RevisionEstadoAgregado.Inactivada))
-            .Join(_db.Pacientes.AsNoTracking(), x => x.h.PacienteId, p => p.Id,
+            .Join(db.Pacientes.AsNoTracking(), x => x.h.PacienteId, p => p.Id,
                 (x, p) => new { x.h, x.r, p })
-            .Join(_db.FormDefinitions.AsNoTracking(), x => x.h.FormDefinitionId, f => f.Id,
+            .Join(db.FormDefinitions.AsNoTracking(), x => x.h.FormDefinitionId, f => f.Id,
                 (x, f) => new { x.h, x.r, x.p, f })
             .OrderBy(x => x.p.NombreCompleto)
             .ThenByDescending(x => x.h.FechaCierre ?? x.h.FechaApertura)
@@ -116,7 +118,7 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
         var resumenAgente = new Dictionary<Guid, string?>();
         if (revisionIds.Count > 0)
         {
-            var rechazos = await _db.RevisionClinicaEventos.AsNoTracking()
+            var rechazos = await db.RevisionClinicaEventos.AsNoTracking()
                 .Where(e => revisionIds.Contains(e.RevisionClinicaId)
                             && e.Tipo == RevisionTipoEvento.Rechazado)
                 .GroupBy(e => e.RevisionClinicaId)
@@ -124,7 +126,7 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
                 .ToListAsync(ct);
             motivosRechazo = rechazos.ToDictionary(x => x.Rid, x => x.Ultimo.Motivo);
 
-            var agentes = await _db.RevisionClinicaEventos.AsNoTracking()
+            var agentes = await db.RevisionClinicaEventos.AsNoTracking()
                 .Where(e => revisionIds.Contains(e.RevisionClinicaId)
                             && e.Tipo == RevisionTipoEvento.PreRevisionAgente)
                 .GroupBy(e => e.RevisionClinicaId)
@@ -166,7 +168,8 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
                 "Se requiere permiso historias.revisar para mover cards.");
         }
 
-        var revision = await _db.RevisionesClinica.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var revision = await db.RevisionesClinica.AsNoTracking()
             .FirstOrDefaultAsync(r => r.Id == cmd.RevisionClinicaId, ct)
             ?? throw new InvalidOperationException(
                 $"Revision {cmd.RevisionClinicaId} no existe o pertenece a otro tenant.");
@@ -268,7 +271,8 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
     public async Task<IReadOnlyList<RevisionArchivoItemDto>> GetArchivoAsync(
         RevisionArchivoFiltro filtro, CancellationToken ct = default)
     {
-        var q = _db.RevisionesClinica.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var q = db.RevisionesClinica.AsNoTracking()
             .Where(r => r.EstadoAgregado == RevisionEstadoAgregado.ArchivadaOk
                      || r.EstadoAgregado == RevisionEstadoAgregado.Inactivada);
 
@@ -291,11 +295,11 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
         }
 
         var joined = q
-            .Join(_db.HistoriasClinicas.AsNoTracking(), r => r.HistoriaClinicaId, h => h.Id,
+            .Join(db.HistoriasClinicas.AsNoTracking(), r => r.HistoriaClinicaId, h => h.Id,
                 (r, h) => new { r, h })
-            .Join(_db.Pacientes.AsNoTracking(), x => x.h.PacienteId, p => p.Id,
+            .Join(db.Pacientes.AsNoTracking(), x => x.h.PacienteId, p => p.Id,
                 (x, p) => new { x.r, x.h, p })
-            .Join(_db.FormDefinitions.AsNoTracking(), x => x.h.FormDefinitionId, f => f.Id,
+            .Join(db.FormDefinitions.AsNoTracking(), x => x.h.FormDefinitionId, f => f.Id,
                 (x, f) => new { x.r, x.h, x.p, f });
 
         if (!string.IsNullOrWhiteSpace(filtro.PacienteTexto))
@@ -322,7 +326,7 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
 
         // Ultimo evento terminal por revision — trae actor + motivo para la card.
         var revisionIds = rows.Select(x => x.r.Id).ToList();
-        var terminales = await _db.RevisionClinicaEventos.AsNoTracking()
+        var terminales = await db.RevisionClinicaEventos.AsNoTracking()
             .Where(e => revisionIds.Contains(e.RevisionClinicaId)
                         && (e.Tipo == RevisionTipoEvento.ArchivadoOk
                             || e.Tipo == RevisionTipoEvento.Inactivacion))
@@ -373,11 +377,12 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
         // directo del cursor pgSQL sin materializar todo el resultset.
         yield return "Fecha archivo,Sabor,Paciente,Tipo doc,Documento,Formato,Especialista,Revisor,Iteraciones,Motivo";
 
+        using var db = _dbFactory.Create();
         // Reusamos la query base del archivo (misma tabla, mismos filtros de
         // Sabor/Fecha/Paciente). El filtro por revisor requiere JOIN al ultimo
         // evento terminal, no lo soportamos aca — el operador puede filtrar
         // en Excel despues del export.
-        var q = _db.RevisionesClinica.AsNoTracking()
+        var q = db.RevisionesClinica.AsNoTracking()
             .Where(r => r.EstadoAgregado == RevisionEstadoAgregado.ArchivadaOk
                      || r.EstadoAgregado == RevisionEstadoAgregado.Inactivada);
         if (filtro.Sabor is RevisionEstadoAgregado sabor)
@@ -399,11 +404,11 @@ public sealed class RevisionKanbanService : IRevisionKanbanService
         }
 
         var joined = q
-            .Join(_db.HistoriasClinicas.AsNoTracking(), r => r.HistoriaClinicaId, h => h.Id,
+            .Join(db.HistoriasClinicas.AsNoTracking(), r => r.HistoriaClinicaId, h => h.Id,
                 (r, h) => new { r, h })
-            .Join(_db.Pacientes.AsNoTracking(), x => x.h.PacienteId, p => p.Id,
+            .Join(db.Pacientes.AsNoTracking(), x => x.h.PacienteId, p => p.Id,
                 (x, p) => new { x.r, x.h, p })
-            .Join(_db.FormDefinitions.AsNoTracking(), x => x.h.FormDefinitionId, f => f.Id,
+            .Join(db.FormDefinitions.AsNoTracking(), x => x.h.FormDefinitionId, f => f.Id,
                 (x, f) => new { x.r, x.h, x.p, f });
 
         if (!string.IsNullOrWhiteSpace(filtro.PacienteTexto))

@@ -6,11 +6,13 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenant, IBarthelDenormalizador barthel, IAuditWriter audit) : IEscalaService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class EscalaService(IApplicationDbContextFactory dbFactory, ITenantContext tenant, IBarthelDenormalizador barthel, IAuditWriter audit) : IEscalaService
 {
     public async Task<IReadOnlyList<EscalaFormatoDto>> ListarFormatosDisponiblesAsync(
         Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Resolvemos el FormDefinitionId del formato de la HC padre; sin el no hay
         // forma de saber que escalas se sugieren para esta HC.
         var hc = await db.HistoriasClinicas.AsNoTracking()
@@ -41,6 +43,7 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
 
     public async Task<IReadOnlyList<EscalaItemDto>> ListarPorHistoriaAsync(Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // OrderBy se hace tras materializar porque EF Core 9 no traduce OrderBy
         // sobre propiedades de un record DTO proyectado desde joins.
         var rows = await db.HistoriaClinicaEscalas.AsNoTracking()
@@ -64,6 +67,7 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
 
     public async Task<EscalaDetailDto> IniciarAsync(IniciarEscalaRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         await db.EnsureAbiertaAsync(req.HistoriaClinicaId, ct);
 
@@ -111,6 +115,7 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
 
     public async Task<EscalaDetailDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Misma tactica: proyectar a anonimo, materializar, mapear al record.
         var r = await db.HistoriaClinicaEscalas.AsNoTracking()
             .Where(e => e.Id == id)
@@ -132,6 +137,7 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
 
     public async Task<bool> GuardarValoresAsync(Guid id, string valoresJson, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.HistoriaClinicaEscalas.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (e is null) { return false; }
         await db.EnsureAbiertaAsync(e.HistoriaClinicaId, ct);
@@ -142,6 +148,7 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
 
     public async Task<bool> CerrarAsync(Guid id, string valoresJson, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.HistoriaClinicaEscalas.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (e is null) { return false; }
         await db.EnsureAbiertaAsync(e.HistoriaClinicaId, ct);
@@ -152,18 +159,20 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
         // Al cerrar, vuelca un resumen automatico de la escala al campo de la HC
         // que el admin haya mapeado en Rutas de prefill (origen "escalas.resumen").
         // Modifica la entidad HC (tracked); el SaveChanges de abajo persiste ambas.
-        await VolcarResumenAAnalisisAsync(e, ct);
+        await VolcarResumenAAnalisisAsync(db, e, ct);
 
         await db.SaveChangesAsync(ct);
 
         // Si es una escala Barthel, vuelca su puntaje/datos al paciente (denormalizado) para
         // el CENSO y la ficha. No-op silencioso si no es Barthel o si no es la mas reciente.
+        // El denormalizador abre su propio contexto corto; la escala ya quedo persistida arriba.
         await barthel.AplicarDesdeEscalaAsync(e.Id, ct);
         return true;
     }
 
     public async Task<bool> ReabrirAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.HistoriaClinicaEscalas.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (e is null) { return false; }
         if (e.Estado != HistoriaClinicaEstado.Cerrada)
@@ -176,7 +185,7 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
         // Auditoria: reabrir una escala ya marcada como definitiva es una accion
         // administrativa que debe quedar trazada (quien, cuando, sobre que escala
         // y de que HC).
-        audit.Write(actor, "escala.reabrir", nameof(HistoriaClinicaEscala), e.Id,
+        audit.Write(db, actor, "escala.reabrir", nameof(HistoriaClinicaEscala), e.Id,
             previousValue: new { estado = HistoriaClinicaEstado.Cerrada.ToString(), fechaCierre = fechaCierrePrev },
             newValue: new { estado = e.Estado.ToString(), historiaClinicaId = e.HistoriaClinicaId },
             tenantId: e.TenantId);
@@ -191,7 +200,7 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
     /// (append) en ese campo de <c>HistoriaClinica.ValoresJson</c>. Sin ruta
     /// configurada, no hace nada (comportamiento historico intacto).
     /// </summary>
-    private async Task VolcarResumenAAnalisisAsync(HistoriaClinicaEscala e, CancellationToken ct)
+    private static async Task VolcarResumenAAnalisisAsync(IApplicationDbContext db, HistoriaClinicaEscala e, CancellationToken ct)
     {
         var hc = await db.HistoriasClinicas.FirstOrDefaultAsync(h => h.Id == e.HistoriaClinicaId, ct);
         if (hc is null) { return; }
@@ -239,6 +248,7 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
 
     public async Task<bool> EliminarAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.HistoriaClinicaEscalas.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (e is null) { return false; }
         await db.EnsureAbiertaAsync(e.HistoriaClinicaId, ct);
@@ -249,6 +259,7 @@ public sealed class EscalaService(IApplicationDbContext db, ITenantContext tenan
 
     public async Task<int> ContarPorHistoriaAsync(Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.HistoriaClinicaEscalas.CountAsync(e => e.HistoriaClinicaId == historiaId, ct);
     }
 }

@@ -25,8 +25,9 @@ namespace Visal.Application.Tenancy;
 /// - Organization usa perfil <c>CareDeliveryOrganizationRDA</c> con NamingSystem REPS.
 /// - No hay Encounter en este Bundle — la modalidad va en <c>Composition.event[]</c>.
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class RdaBuilderService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     ILogger<RdaBuilderService> log) : IRdaBuilderService
 {
@@ -42,6 +43,7 @@ public sealed class RdaBuilderService(
         {
             throw new InvalidOperationException("No hay tenant activo para construir el RDA.");
         }
+        using var db = dbFactory.Create();
         var advertencias = new List<string>();
 
         // ---------- 1. Cargar fuente de datos ----------

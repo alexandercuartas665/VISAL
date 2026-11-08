@@ -4,20 +4,21 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = _dbFactory.Create();) en vez del IApplicationDbContext scoped.
 public sealed class EvolutionConfigService : IEvolutionConfigService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenantContext;
     private readonly ISecretProtector _secretProtector;
     private readonly IAuditWriter _audit;
 
     public EvolutionConfigService(
-        IApplicationDbContext db,
+        IApplicationDbContextFactory dbFactory,
         ITenantContext tenantContext,
         ISecretProtector secretProtector,
         IAuditWriter audit)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenantContext = tenantContext;
         _secretProtector = secretProtector;
         _audit = audit;
@@ -25,7 +26,8 @@ public sealed class EvolutionConfigService : IEvolutionConfigService
 
     public async Task<EvolutionConfigDto?> GetAsync(CancellationToken cancellationToken = default)
     {
-        var config = await _db.TenantEvolutionConfigs.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        using var db = _dbFactory.Create();
+        var config = await db.TenantEvolutionConfigs.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
         return config is null ? null : Map(config);
     }
 
@@ -36,7 +38,8 @@ public sealed class EvolutionConfigService : IEvolutionConfigService
             return null;
         }
 
-        var config = await _db.TenantEvolutionConfigs.FirstOrDefaultAsync(cancellationToken);
+        using var db = _dbFactory.Create();
+        var config = await db.TenantEvolutionConfigs.FirstOrDefaultAsync(cancellationToken);
         var isNew = config is null;
 
         if (config is null)
@@ -51,7 +54,7 @@ public sealed class EvolutionConfigService : IEvolutionConfigService
                 TenantId = tenantId,
                 ApiTokenEncrypted = _secretProtector.Protect(request.ApiToken)
             };
-            _db.TenantEvolutionConfigs.Add(config);
+            db.TenantEvolutionConfigs.Add(config);
         }
         else if (!string.IsNullOrWhiteSpace(request.ApiToken))
         {
@@ -66,13 +69,13 @@ public sealed class EvolutionConfigService : IEvolutionConfigService
         config.UseMasterServer = false; // configurar URL/token propios implica servidor propio
 
         // Auditoria SIN el token (nunca se loggea el secreto).
-        _audit.Write(actorUserId, isNew ? "evolution.config.create" : "evolution.config.update",
+        _audit.Write(db, actorUserId, isNew ? "evolution.config.create" : "evolution.config.update",
             nameof(TenantEvolutionConfig), config.Id,
             previousValue: null,
             newValue: new { config.BaseUrl, config.InstanceName, config.WebhookUrl },
             tenantId: tenantId);
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return Map(config);
     }
 

@@ -4,8 +4,9 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class SeguimientoService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant) : ISeguimientoService
 {
     private static readonly string[] EstadosValidos = ["Pendiente", "Realizada", "NoContactado"];
@@ -14,6 +15,7 @@ public sealed class SeguimientoService(
     {
         if (tenant.TenantId is not Guid tid) { return []; }
 
+        using var db = dbFactory.Create();
         // Auto-materializar: cualquier paciente con HC creada en el mes recibe un registro Pendiente
         // si no existe. Regla simple para primer roll-out.
         var (desde, hasta) = MesToRango(mes);
@@ -69,7 +71,7 @@ public sealed class SeguimientoService(
             .OrderBy(x => x.Estado == "Pendiente" ? 0 : x.Estado == "NoContactado" ? 1 : 2)
             .ThenBy(x => x.PacienteNombre)
             .ToList();
-        return await EnriquecerAsync(tid, ordenadas, ct);
+        return await EnriquecerAsync(db, tid, ordenadas, ct);
     }
 
     public async Task<IReadOnlyList<SeguimientoEncuestaDto>> ListarPorRangoAsync(int desdeMes, int hastaMes, CancellationToken ct = default)
@@ -77,6 +79,7 @@ public sealed class SeguimientoService(
         if (tenant.TenantId is not Guid tid) { return []; }
         if (hastaMes < desdeMes) { (desdeMes, hastaMes) = (hastaMes, desdeMes); }
 
+        using var db = dbFactory.Create();
         var filas = await db.SeguimientoEncuestas.AsNoTracking()
             .Where(x => x.Mes >= desdeMes && x.Mes <= hastaMes)
             .Join(db.Pacientes.AsNoTracking(),
@@ -99,7 +102,7 @@ public sealed class SeguimientoService(
             .OrderBy(x => x.Estado == "Pendiente" ? 0 : x.Estado == "NoContactado" ? 1 : 2)
             .ThenBy(x => x.PacienteNombre)
             .ToList();
-        return await EnriquecerAsync(tid, ordenadas, ct);
+        return await EnriquecerAsync(db, tid, ordenadas, ct);
     }
 
     public async Task<(int Creados, int Existentes)> TraerPacientesAsync(
@@ -110,12 +113,13 @@ public sealed class SeguimientoService(
         if (tenant.TenantId is not Guid tid) { return (0, 0); }
         if (hasta < desde) { (desde, hasta) = (hasta, desde); }
 
+        using var db = dbFactory.Create();
         // Rango inclusivo por dia: [desde 00:00, (hasta+1) 00:00) en UTC.
         var desdeDt = new DateTimeOffset(desde.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
         var hastaDt = new DateTimeOffset(hasta.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc));
 
         // Actividad de HC cerradas en el rango (con sede/servicio/profesional).
-        var actividad = await CargarActividadAsync(tid, desdeDt, hastaDt, ct);
+        var actividad = await CargarActividadAsync(db, tid, desdeDt, hastaDt, ct);
         if (actividad.Count == 0) { return (0, 0); }
 
         // Filtros opcionales: sede (por nombre de la sucursal), servicio (contiene),
@@ -174,6 +178,7 @@ public sealed class SeguimientoService(
 
     public async Task<bool> GuardarEncuestaAsync(Guid id, GuardarEncuestaRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var entity = await db.SeguimientoEncuestas.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (entity is null) { return false; }
 
@@ -224,6 +229,7 @@ public sealed class SeguimientoService(
     public async Task<IReadOnlyList<SeguimientoEncuestaDto>> ListarHistorialRealizadasAsync(CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { return []; }
+        using var db = dbFactory.Create();
         var filas = await db.SeguimientoEncuestas.AsNoTracking()
             .Where(x => x.TenantId == tid && x.Estado == "Realizada")
             .Join(db.Pacientes.AsNoTracking(),
@@ -249,6 +255,7 @@ public sealed class SeguimientoService(
     public async Task<bool> CambiarEstadoAsync(Guid id, string estado, Guid actor, CancellationToken ct = default)
     {
         if (!EstadosValidos.Contains(estado)) { throw new InvalidOperationException($"Estado invalido: {estado}"); }
+        using var db = dbFactory.Create();
         var entity = await db.SeguimientoEncuestas.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (entity is null) { return false; }
         if (entity.Estado != estado) { entity.EstadoDesde = DateTimeOffset.UtcNow; }
@@ -275,7 +282,7 @@ public sealed class SeguimientoService(
     /// sede/servicio de su asignacion (via pivote), el profesional y la fecha de
     /// atencion. Una fila por HC. Base para filtrar (traer) y enriquecer (listar).</summary>
     private async Task<List<ActividadHc>> CargarActividadAsync(
-        Guid tid, DateTimeOffset desdeDt, DateTimeOffset hastaDt, CancellationToken ct)
+        IApplicationDbContext db, Guid tid, DateTimeOffset desdeDt, DateTimeOffset hastaDt, CancellationToken ct)
     {
         var hcs = await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.TenantId == tid
@@ -312,13 +319,13 @@ public sealed class SeguimientoService(
     /// actividad clinica del paciente en ese mes (distintos, unidos por coma; fecha de
     /// atencion = la mas reciente).</summary>
     private async Task<IReadOnlyList<SeguimientoEncuestaDto>> EnriquecerAsync(
-        Guid tid, List<SeguimientoEncuestaDto> dtos, CancellationToken ct)
+        IApplicationDbContext db, Guid tid, List<SeguimientoEncuestaDto> dtos, CancellationToken ct)
     {
         if (dtos.Count == 0) { return dtos; }
         var meses = dtos.Select(d => d.Mes).ToList();
         var (desdeDt, _) = MesToRango(meses.Min());
         var (_, hastaDt) = MesToRango(meses.Max());
-        var act = await CargarActividadAsync(tid,
+        var act = await CargarActividadAsync(db, tid,
             new DateTimeOffset(desdeDt, TimeSpan.Zero), new DateTimeOffset(hastaDt, TimeSpan.Zero), ct);
         if (act.Count == 0) { return dtos; }
 

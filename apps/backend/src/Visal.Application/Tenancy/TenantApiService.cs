@@ -51,16 +51,17 @@ public interface ITenantApiService
 /// cifrada para mostrarla en Mi cuenta) y un switch on/off. Permite crear un lead y llenar cualquier
 /// campo del embudo desde sistemas externos.
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class TenantApiService : ITenantApiService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ISecretProtector _secretProtector;
     private readonly TimeProvider _timeProvider;
     private readonly IAuditWriter _audit;
 
-    public TenantApiService(IApplicationDbContext db, ISecretProtector secretProtector, TimeProvider timeProvider, IAuditWriter audit)
+    public TenantApiService(IApplicationDbContextFactory dbFactory, ISecretProtector secretProtector, TimeProvider timeProvider, IAuditWriter audit)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _secretProtector = secretProtector;
         _timeProvider = timeProvider;
         _audit = audit;
@@ -68,16 +69,17 @@ public sealed class TenantApiService : ITenantApiService
 
     public async Task<TenantApiConfigDto?> GetAsync(Guid tenantId, CancellationToken cancellationToken = default)
     {
-        var fields = await LoadFieldsAsync(tenantId, cancellationToken);
-        var cfg = await _db.TenantApiConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var fields = await LoadFieldsAsync(db, tenantId, cancellationToken);
+        var cfg = await db.TenantApiConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken);
         if (cfg is null) { return new TenantApiConfigDto(tenantId, null, false, false, null, fields); }
         return new TenantApiConfigDto(tenantId, Decrypt(cfg.ApiKeyEncrypted), cfg.IsEnabled, !string.IsNullOrEmpty(cfg.ApiKeyEncrypted), cfg.LastUsedAt, fields);
     }
 
-    private async Task<IReadOnlyList<ApiFieldInfo>> LoadFieldsAsync(Guid tenantId, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<ApiFieldInfo>> LoadFieldsAsync(IApplicationDbContext db, Guid tenantId, CancellationToken cancellationToken)
     {
         // Los campos Total son calculados (solo lectura): no se exponen en la API para que no se envien.
-        var defs = await _db.PipelineFieldDefinitions.IgnoreQueryFilters()
+        var defs = await db.PipelineFieldDefinitions.IgnoreQueryFilters()
             .Where(f => f.TenantId == tenantId && f.FieldType != PipelineFieldType.Total)
             .OrderBy(f => f.SortOrder)
             .Select(f => new { f.FieldKey, f.Label, f.FieldType, f.AllowMultiple, f.RepeatWithFieldKey })
@@ -98,51 +100,55 @@ public sealed class TenantApiService : ITenantApiService
 
     public async Task<TenantApiConfigDto> RegenerateAsync(Guid tenantId, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var cfg = await _db.TenantApiConfigs.FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var cfg = await db.TenantApiConfigs.FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken);
         var isNew = cfg is null;
-        if (cfg is null) { cfg = new TenantApiConfig { TenantId = tenantId, IsEnabled = true }; _db.TenantApiConfigs.Add(cfg); }
+        if (cfg is null) { cfg = new TenantApiConfig { TenantId = tenantId, IsEnabled = true }; db.TenantApiConfigs.Add(cfg); }
 
         var key = "cbt_" + Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant();
         cfg.ApiKeyHash = Hash(key);
         cfg.ApiKeyEncrypted = _secretProtector.Protect(key);
 
-        _audit.Write(actorUserId, isNew ? "tenant-api.create" : "tenant-api.regenerate",
+        _audit.Write(db, actorUserId, isNew ? "tenant-api.create" : "tenant-api.regenerate",
             nameof(TenantApiConfig), cfg.Id, previousValue: null, newValue: new { cfg.IsEnabled }, tenantId: tenantId);
-        await _db.SaveChangesAsync(cancellationToken);
-        return new TenantApiConfigDto(tenantId, key, cfg.IsEnabled, true, cfg.LastUsedAt, await LoadFieldsAsync(tenantId, cancellationToken));
+        await db.SaveChangesAsync(cancellationToken);
+        return new TenantApiConfigDto(tenantId, key, cfg.IsEnabled, true, cfg.LastUsedAt, await LoadFieldsAsync(db, tenantId, cancellationToken));
     }
 
     public async Task<TenantApiConfigDto?> SetEnabledAsync(Guid tenantId, bool enabled, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var cfg = await _db.TenantApiConfigs.FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var cfg = await db.TenantApiConfigs.FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken);
         if (cfg is null) { return null; }
         cfg.IsEnabled = enabled;
-        _audit.Write(actorUserId, "tenant-api.toggle", nameof(TenantApiConfig), cfg.Id,
+        _audit.Write(db, actorUserId, "tenant-api.toggle", nameof(TenantApiConfig), cfg.Id,
             previousValue: null, newValue: new { enabled }, tenantId: tenantId);
-        await _db.SaveChangesAsync(cancellationToken);
-        return new TenantApiConfigDto(tenantId, Decrypt(cfg.ApiKeyEncrypted), cfg.IsEnabled, true, cfg.LastUsedAt, await LoadFieldsAsync(tenantId, cancellationToken));
+        await db.SaveChangesAsync(cancellationToken);
+        return new TenantApiConfigDto(tenantId, Decrypt(cfg.ApiKeyEncrypted), cfg.IsEnabled, true, cfg.LastUsedAt, await LoadFieldsAsync(db, tenantId, cancellationToken));
     }
 
     public async Task<Guid?> ResolveTenantAsync(string apiKey, CancellationToken cancellationToken = default)
     {
+        using var db = _dbFactory.Create();
         if (string.IsNullOrWhiteSpace(apiKey)) { return null; }
         var hash = Hash(apiKey.Trim());
-        var cfg = await _db.TenantApiConfigs.FirstOrDefaultAsync(c => c.ApiKeyHash == hash, cancellationToken);
+        var cfg = await db.TenantApiConfigs.FirstOrDefaultAsync(c => c.ApiKeyHash == hash, cancellationToken);
         if (cfg is null || !cfg.IsEnabled) { return null; }
         cfg.LastUsedAt = _timeProvider.GetUtcNow();
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return cfg.TenantId;
     }
 
     public async Task<ApiLeadResult> CreateLeadAsync(Guid tenantId, ApiCreateLeadRequest request, CancellationToken cancellationToken = default)
     {
+        using var db = _dbFactory.Create();
         if (string.IsNullOrWhiteSpace(request.ContactName))
         {
             return new ApiLeadResult(false, null, "contactName es obligatorio.");
         }
 
         // Sin contexto de sesion: se ignora el filtro global y se busca por tenant explicito.
-        var stagesForTenant = _db.PipelineStages.IgnoreQueryFilters().Where(s => s.TenantId == tenantId);
+        var stagesForTenant = db.PipelineStages.IgnoreQueryFilters().Where(s => s.TenantId == tenantId);
         PipelineStage? stage;
         if (!string.IsNullOrWhiteSpace(request.StageName))
         {
@@ -182,7 +188,7 @@ public sealed class TenantApiService : ITenantApiService
         };
 
         // Definiciones del embudo del tenant: para convertir valores segun el tipo y calcular los Total.
-        var fieldDefs = await _db.PipelineFieldDefinitions.IgnoreQueryFilters()
+        var fieldDefs = await db.PipelineFieldDefinitions.IgnoreQueryFilters()
             .Where(f => f.TenantId == tenantId)
             .Select(f => new { f.FieldKey, f.FieldType, f.AllowMultiple, f.MultiWithDetail, f.TotalSourceKeys })
             .ToListAsync(cancellationToken);
@@ -217,15 +223,15 @@ public sealed class TenantApiService : ITenantApiService
 
         if (clean.Count > 0) { lead.FieldValuesJson = JsonSerializer.Serialize(clean); }
 
-        _db.Leads.Add(lead);
-        _db.LeadActivities.Add(new LeadActivity
+        db.Leads.Add(lead);
+        db.LeadActivities.Add(new LeadActivity
         {
             TenantId = tenantId,
             LeadId = lead.Id,
             ActivityType = "lead.created",
             Description = $"Lead creado via API en etapa {stage.Name}"
         });
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return new ApiLeadResult(true, lead.Id);
     }
 

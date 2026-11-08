@@ -20,24 +20,29 @@ public interface ITemplateAssetService
 /// </summary>
 public sealed class TemplateAssetService : ITemplateAssetService
 {
-    private readonly IApplicationDbContext _db;
+    // Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenantContext;
 
-    public TemplateAssetService(IApplicationDbContext db, ITenantContext tenantContext)
+    public TemplateAssetService(IApplicationDbContextFactory dbFactory, ITenantContext tenantContext)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenantContext = tenantContext;
     }
 
     public async Task<IReadOnlyList<TemplateAssetDto>> ListAsync(CancellationToken cancellationToken = default)
-        => await _db.TemplateAssets
+    {
+        using var db = _dbFactory.Create();
+        return await db.TemplateAssets
             .AsNoTracking()
             .OrderByDescending(a => a.CreatedAt)
             .Select(a => new TemplateAssetDto(a.Id, a.FileName, a.Url, a.MimeType, a.SizeBytes, a.CreatedAt))
             .ToListAsync(cancellationToken);
+    }
 
     public async Task<TemplateAssetDto?> AddAsync(string fileName, string url, string? mimeType, long sizeBytes, CancellationToken cancellationToken = default)
     {
+        using var db = _dbFactory.Create();
         if (_tenantContext.TenantId is not Guid tenantId) { return null; }
         var entity = new TemplateAsset
         {
@@ -47,17 +52,18 @@ public sealed class TemplateAssetService : ITemplateAssetService
             MimeType = mimeType,
             SizeBytes = sizeBytes
         };
-        _db.TemplateAssets.Add(entity);
-        await _db.SaveChangesAsync(cancellationToken);
+        db.TemplateAssets.Add(entity);
+        await db.SaveChangesAsync(cancellationToken);
         return new TemplateAssetDto(entity.Id, entity.FileName, entity.Url, entity.MimeType, entity.SizeBytes, entity.CreatedAt);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var entity = await _db.TemplateAssets.FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
+        using var db = _dbFactory.Create();
+        var entity = await db.TemplateAssets.FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
         if (entity is null) { return false; }
-        _db.TemplateAssets.Remove(entity);
-        await _db.SaveChangesAsync(cancellationToken);
+        db.TemplateAssets.Remove(entity);
+        await db.SaveChangesAsync(cancellationToken);
         return true;
     }
 }

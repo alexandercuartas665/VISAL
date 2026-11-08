@@ -55,9 +55,10 @@ public interface IAutorizacionExtractorService
     Task GuardarMetadatoAsync(Guid asignacionId, GuardarAutorizacionMetadatoInput input, CancellationToken ct = default);
 }
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class AutorizacionExtractorService : IAutorizacionExtractorService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly IAiInferenceService _inference;
     private readonly IPdfTextExtractor _pdfText;
 
@@ -65,9 +66,9 @@ public sealed class AutorizacionExtractorService : IAutorizacionExtractorService
     // (por debajo de esto asumimos escaneado y avisamos).
     private const int MinTextoUtil = 40;
 
-    public AutorizacionExtractorService(IApplicationDbContext db, IAiInferenceService inference, IPdfTextExtractor pdfText)
+    public AutorizacionExtractorService(IApplicationDbContextFactory dbFactory, IAiInferenceService inference, IPdfTextExtractor pdfText)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _inference = inference;
         _pdfText = pdfText;
     }
@@ -88,7 +89,11 @@ public sealed class AutorizacionExtractorService : IAutorizacionExtractorService
                 "No se pudo leer texto del PDF (parece escaneado o solo imagen). La extraccion con DeepSeek necesita un PDF con capa de texto.");
         }
 
-        var agentId = await ResolverOCrearAgenteAsync(ct);
+        Guid agentId;
+        using (var db = _dbFactory.Create())
+        {
+            agentId = await ResolverOCrearAgenteAsync(db, ct);
+        }
 
         var turns = new List<AiChatTurn>
         {
@@ -108,7 +113,8 @@ public sealed class AutorizacionExtractorService : IAutorizacionExtractorService
 
     public async Task<AutorizacionMetadatoDto?> GetMetadatoAsync(Guid asignacionId, CancellationToken ct = default)
     {
-        var m = await _db.AsignacionAutorizacionDatos.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var m = await db.AsignacionAutorizacionDatos.AsNoTracking()
             .FirstOrDefaultAsync(x => x.AsignacionId == asignacionId, ct);
         if (m is null) { return null; }
         return new AutorizacionMetadatoDto(
@@ -118,7 +124,8 @@ public sealed class AutorizacionExtractorService : IAutorizacionExtractorService
 
     public async Task GuardarMetadatoAsync(Guid asignacionId, GuardarAutorizacionMetadatoInput input, CancellationToken ct = default)
     {
-        var m = await _db.AsignacionAutorizacionDatos.FirstOrDefaultAsync(x => x.AsignacionId == asignacionId, ct);
+        using var db = _dbFactory.Create();
+        var m = await db.AsignacionAutorizacionDatos.FirstOrDefaultAsync(x => x.AsignacionId == asignacionId, ct);
         var nuevo = m is null;
         m ??= new AsignacionAutorizacionDato { AsignacionId = asignacionId };
 
@@ -134,8 +141,8 @@ public sealed class AutorizacionExtractorService : IAutorizacionExtractorService
         m.RawJson = input.RawJson;
         m.ExtraidoEn = DateTimeOffset.UtcNow;
 
-        if (nuevo) { _db.AsignacionAutorizacionDatos.Add(m); }
-        await _db.SaveChangesAsync(ct);
+        if (nuevo) { db.AsignacionAutorizacionDatos.Add(m); }
+        await db.SaveChangesAsync(ct);
     }
 
     private static string? Limpio(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
@@ -147,9 +154,9 @@ public sealed class AutorizacionExtractorService : IAutorizacionExtractorService
 
     // Busca el agente por nombre en el tenant; si no existe, lo crea con el prompt por defecto
     // (Provider=Gemini) para que el usuario pueda editarlo en el modulo Agentes.
-    private async Task<Guid> ResolverOCrearAgenteAsync(CancellationToken ct)
+    private async Task<Guid> ResolverOCrearAgenteAsync(IApplicationDbContext db, CancellationToken ct)
     {
-        var existente = await _db.AiAgents
+        var existente = await db.AiAgents
             .FirstOrDefaultAsync(a => a.Name == IAutorizacionExtractorService.AgenteNombre, ct);
         if (existente is not null)
         {
@@ -159,7 +166,7 @@ public sealed class AutorizacionExtractorService : IAutorizacionExtractorService
                 || !existente.SystemPrompt.Contains("apellidos", StringComparison.OrdinalIgnoreCase))
             {
                 existente.SystemPrompt = PromptPorDefecto;
-                await _db.SaveChangesAsync(ct);
+                await db.SaveChangesAsync(ct);
             }
             return existente.Id;
         }
@@ -174,8 +181,8 @@ public sealed class AutorizacionExtractorService : IAutorizacionExtractorService
             IsActive = true,
             SortOrder = 100
         };
-        _db.AiAgents.Add(agente);               // el interceptor estampa TenantId
-        await _db.SaveChangesAsync(ct);
+        db.AiAgents.Add(agente);               // el interceptor estampa TenantId
+        await db.SaveChangesAsync(ct);
         return agente.Id;
     }
 

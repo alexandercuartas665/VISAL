@@ -4,13 +4,15 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy.Agendas;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class CalendarioService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     IFestivosColombiaService festivos) : ICalendarioService
 {
     public async Task<MesCalendarioDto> ObtenerMesAsync(Guid sucursalId, int anio, int mes, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var primero = new DateOnly(anio, mes, 1);
         var ultimo = primero.AddMonths(1).AddDays(-1);
 
@@ -35,6 +37,7 @@ public sealed class CalendarioService(
 
     public async Task<Guid> MarcarInactivoAsync(Guid sucursalId, DateOnly fecha, string? motivo, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (sucursalId == Guid.Empty) { throw new InvalidOperationException("Selecciona una sede."); }
 
@@ -63,6 +66,7 @@ public sealed class CalendarioService(
 
     public async Task<bool> QuitarInactivoAsync(Guid diaInactivoId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var entity = await db.DiasInactivosSede.FirstOrDefaultAsync(d => d.Id == diaInactivoId, ct);
         if (entity is null) { return false; }
         db.DiasInactivosSede.Remove(entity);

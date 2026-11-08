@@ -5,14 +5,16 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class CertificacionService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     IHistoriaPrefillService prefill) : ICertificacionService
 {
     public async Task<IReadOnlyList<CertificacionItemDto>> ListarPorHistoriaAsync(
         Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.HistoriaClinicaCertificaciones.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == historiaId)
             .OrderBy(x => x.Orden)
@@ -25,6 +27,7 @@ public sealed class CertificacionService(
     public async Task<CertificacionItemDto> AgregarAsync(
         Guid historiaId, AgregarCertificacionRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (string.IsNullOrWhiteSpace(req.Titulo))
         {
@@ -55,6 +58,7 @@ public sealed class CertificacionService(
     public async Task<bool> ActualizarAsync(
         Guid itemId, ActualizarCertificacionRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var entity = await db.HistoriaClinicaCertificaciones.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
         await db.EnsureAbiertaAsync(entity.HistoriaClinicaId, ct);
@@ -71,6 +75,7 @@ public sealed class CertificacionService(
 
     public async Task<bool> EliminarAsync(Guid itemId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var entity = await db.HistoriaClinicaCertificaciones.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
         var hcId = entity.HistoriaClinicaId;
@@ -83,6 +88,7 @@ public sealed class CertificacionService(
 
     public async Task<int> ContarPorHistoriaAsync(Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.HistoriaClinicaCertificaciones
             .CountAsync(x => x.HistoriaClinicaId == historiaId, ct);
     }

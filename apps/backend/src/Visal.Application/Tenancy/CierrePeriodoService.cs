@@ -64,18 +64,20 @@ public interface ICierrePeriodoService
     Task<IReadOnlyList<CierrePeriodoFilaDto>> GetDetalleAsync(Guid cierreId, CancellationToken ct = default);
 }
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class CierrePeriodoService : ICierrePeriodoService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
 
-    public CierrePeriodoService(IApplicationDbContext db) => _db = db;
+    public CierrePeriodoService(IApplicationDbContextFactory dbFactory) => _dbFactory = dbFactory;
 
     public async Task<CierrePeriodoPreviewDto> PrevisualizarAsync(int anio, int mes, Guid? pacienteId = null, string? sede = null, CancellationToken ct = default)
     {
-        var yaCerrado = await _db.CierrePeriodos.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var yaCerrado = await db.CierrePeriodos.AsNoTracking()
             .AnyAsync(c => c.Anio == anio && c.Mes == mes, ct);
 
-        var filas = await ResumirAsync(await TurnosPendientesAsync(anio, mes, pacienteId, sede, ct), ct);
+        var filas = await ResumirAsync(db, await TurnosPendientesAsync(db, anio, mes, pacienteId, sede, ct), ct);
         return new CierrePeriodoPreviewDto(
             anio, mes, yaCerrado, filas,
             filas.Count, filas.Sum(f => f.CantidadPendiente));
@@ -83,7 +85,8 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
 
     public async Task<IReadOnlyList<PacienteCierreBusquedaDto>> BuscarPacientesAsync(string? texto, CancellationToken ct = default)
     {
-        var q = _db.Pacientes.AsNoTracking();
+        using var db = _dbFactory.Create();
+        var q = db.Pacientes.AsNoTracking();
         var f = (texto ?? "").Trim().ToLower();
         if (!string.IsNullOrEmpty(f))
         {
@@ -98,11 +101,12 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
 
     public async Task<CierrePeriodoDto> CerrarAsync(int anio, int mes, Guid? pacienteId, string? sede, Guid actor, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         sede = string.IsNullOrWhiteSpace(sede) ? null : sede.Trim();
         // Turnos pendientes en el periodo (acotados al paciente y/o sede si vienen). Cerrar es
         // idempotente: los turnos ya anulados por un cierre previo salen del calculo de pendientes,
         // asi que un cierre parcial no choca con otros del mismo periodo (indice no unico).
-        var turnosPend = await TurnosPendientesAsync(anio, mes, pacienteId, sede, ct);
+        var turnosPend = await TurnosPendientesAsync(db, anio, mes, pacienteId, sede, ct);
         if (turnosPend.Count == 0)
         {
             var quien = (pacienteId, sede) switch
@@ -115,13 +119,13 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
             throw new InvalidOperationException(
                 $"No hay sesiones pendientes que cerrar en {mes:00}/{anio}{quien}.");
         }
-        var filas = await ResumirAsync(turnosPend, ct);
+        var filas = await ResumirAsync(db, turnosPend, ct);
 
         // Nombre del paciente (denormalizado) cuando el cierre es parcial.
         string? pacNombre = null;
         if (pacienteId is Guid pid)
         {
-            pacNombre = await _db.Pacientes.AsNoTracking()
+            pacNombre = await db.Pacientes.AsNoTracking()
                 .Where(p => p.Id == pid)
                 .Select(p => ((p.PrimerNombre ?? "") + " " + (p.PrimerApellido ?? "")).Trim())
                 .FirstOrDefaultAsync(ct);
@@ -147,16 +151,16 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
                 CantidadPendiente = f.CantidadPendiente
             }).ToList()
         };
-        _db.CierrePeriodos.Add(cierre);           // el interceptor estampa TenantId/audit
-        await _db.SaveChangesAsync(ct);           // necesitamos el Id para marcar los turnos
+        db.CierrePeriodos.Add(cierre);           // el interceptor estampa TenantId/audit
+        await db.SaveChangesAsync(ct);           // necesitamos el Id para marcar los turnos
 
         // Marcar los turnos pendientes como anulados por este cierre (salen de Atencion).
         var turnoIds = turnosPend.Select(t => t.TurnoId).ToList();
         if (turnoIds.Count > 0)
         {
-            var turnos = await _db.AsignacionTurnos.Where(t => turnoIds.Contains(t.Id)).ToListAsync(ct);
+            var turnos = await db.AsignacionTurnos.Where(t => turnoIds.Contains(t.Id)).ToListAsync(ct);
             foreach (var t in turnos) { t.CierrePeriodoId = cierre.Id; }
-            await _db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct);
         }
 
         return new CierrePeriodoDto(cierre.Id, cierre.Anio, cierre.Mes, cierre.CerradoEn,
@@ -166,21 +170,23 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
 
     public async Task<bool> ReabrirAsync(Guid cierreId, Guid actor, CancellationToken ct = default)
     {
-        var cierre = await _db.CierrePeriodos.FirstOrDefaultAsync(c => c.Id == cierreId, ct);
+        using var db = _dbFactory.Create();
+        var cierre = await db.CierrePeriodos.FirstOrDefaultAsync(c => c.Id == cierreId, ct);
         if (cierre is null) { return false; }
 
         // Devolver las sesiones a pendientes.
-        var turnos = await _db.AsignacionTurnos.Where(t => t.CierrePeriodoId == cierreId).ToListAsync(ct);
+        var turnos = await db.AsignacionTurnos.Where(t => t.CierrePeriodoId == cierreId).ToListAsync(ct);
         foreach (var t in turnos) { t.CierrePeriodoId = null; }
 
-        _db.CierrePeriodos.Remove(cierre);        // cascade borra los detalles
-        await _db.SaveChangesAsync(ct);
+        db.CierrePeriodos.Remove(cierre);        // cascade borra los detalles
+        await db.SaveChangesAsync(ct);
         return true;
     }
 
     public async Task<IReadOnlyList<CierrePeriodoDto>> ListarCierresAsync(CancellationToken ct = default)
     {
-        var cierres = await _db.CierrePeriodos.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var cierres = await db.CierrePeriodos.AsNoTracking()
             .OrderByDescending(c => c.Anio).ThenByDescending(c => c.Mes).ThenByDescending(c => c.CerradoEn)
             .Select(c => new
             {
@@ -193,7 +199,7 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
         var ids = cierres.Select(c => c.Id).ToList();
 
         // Cantidad de pacientes DISTINTOS por cierre, desde el detalle guardado (nombre+documento).
-        var pacPorCierre = (await _db.CierrePeriodoDetalles.AsNoTracking()
+        var pacPorCierre = (await db.CierrePeriodoDetalles.AsNoTracking()
                 .Where(d => ids.Contains(d.CierrePeriodoId))
                 .Select(d => new { d.CierrePeriodoId, d.PacienteNombre, d.PacienteDocumento })
                 .ToListAsync(ct))
@@ -209,14 +215,14 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
         var nombres = new Dictionary<Guid, string>();
         if (userIds.Count > 0)
         {
-            var tus = await _db.TenantUsers.AsNoTracking()
+            var tus = await db.TenantUsers.AsNoTracking()
                 .Where(tu => userIds.Contains(tu.PlatformUserId))
                 .Select(tu => new { tu.PlatformUserId, tu.Email })
                 .ToListAsync(ct);
             foreach (var tu in tus) { emails[tu.PlatformUserId] = tu.Email; }
 
             // Nombre legible: DisplayName si existe, si no la concatenacion de nombres/apellidos.
-            var pus = await _db.PlatformUsers.AsNoTracking()
+            var pus = await db.PlatformUsers.AsNoTracking()
                 .Where(p => userIds.Contains(p.Id))
                 .Select(p => new { p.Id, p.DisplayName, p.PrimerNombre, p.SegundoNombre, p.PrimerApellido, p.SegundoApellido })
                 .ToListAsync(ct);
@@ -240,11 +246,14 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
     }
 
     public async Task<IReadOnlyList<CierrePeriodoFilaDto>> GetDetalleAsync(Guid cierreId, CancellationToken ct = default)
-        => await _db.CierrePeriodoDetalles.AsNoTracking()
+    {
+        using var db = _dbFactory.Create();
+        return await db.CierrePeriodoDetalles.AsNoTracking()
             .Where(d => d.CierrePeriodoId == cierreId)
             .OrderBy(d => d.PacienteNombre)
             .Select(d => new CierrePeriodoFilaDto(Guid.Empty, d.PacienteNombre, d.PacienteDocumento, d.ServicioNombre, d.CodigoServicio, d.CantidadPendiente))
             .ToListAsync(ct);
+    }
 
     // ── Internos ────────────────────────────────────────────────────────────
 
@@ -254,19 +263,19 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
     // [(MesFinal ?? MesVigencia) == mes && AnioServicio == anio], turnos no anulados por un
     // cierre previo, y SIN ninguna sesion completada (atendida y cerrada). Si viene pacienteId
     // y/o sede, acota a las asignaciones de ese paciente / esa sucursal (cierre parcial).
-    private async Task<List<TurnoPendiente>> TurnosPendientesAsync(int anio, int mes, Guid? pacienteId, string? sede, CancellationToken ct)
+    private async Task<List<TurnoPendiente>> TurnosPendientesAsync(IApplicationDbContext db, int anio, int mes, Guid? pacienteId, string? sede, CancellationToken ct)
     {
         short anioS = (short)anio, mesS = (short)mes;
         sede = string.IsNullOrWhiteSpace(sede) ? null : sede.Trim();
 
-        var asigQ = _db.Asignaciones.AsNoTracking()
+        var asigQ = db.Asignaciones.AsNoTracking()
             .Where(a => a.AnioServicio == anioS && (a.MesFinal ?? a.MesVigencia) == mesS);
         if (pacienteId is Guid pid) { asigQ = asigQ.Where(a => a.PacienteId == pid); }
         if (sede is not null) { asigQ = asigQ.Where(a => a.Sucursal == sede); }
         var asigIds = await asigQ.Select(a => a.Id).ToListAsync(ct);
         if (asigIds.Count == 0) { return new List<TurnoPendiente>(); }
 
-        var turnos = await _db.AsignacionTurnos.AsNoTracking()
+        var turnos = await db.AsignacionTurnos.AsNoTracking()
             .Where(t => asigIds.Contains(t.AsignacionId) && t.CierrePeriodoId == null)
             .Select(t => new { t.Id, t.AsignacionId, t.Cantidad })
             .ToListAsync(ct);
@@ -274,7 +283,7 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
 
         var turnoIds = turnos.Select(t => t.Id).ToList();
         // Turnos que YA tienen al menos una sesion completada (atendida) -> no son pendientes.
-        var turnosConCompletada = (await _db.AsignacionTurnoSesiones.AsNoTracking()
+        var turnosConCompletada = (await db.AsignacionTurnoSesiones.AsNoTracking()
                 .Where(s => turnoIds.Contains(s.AsignacionTurnoId) && s.Completado)
                 .Select(s => s.AsignacionTurnoId)
                 .ToListAsync(ct))
@@ -287,7 +296,7 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
     }
 
     // Agrupa los turnos pendientes por asignacion y resuelve paciente + servicio.
-    private async Task<IReadOnlyList<CierrePeriodoFilaDto>> ResumirAsync(List<TurnoPendiente> turnos, CancellationToken ct)
+    private async Task<IReadOnlyList<CierrePeriodoFilaDto>> ResumirAsync(IApplicationDbContext db, List<TurnoPendiente> turnos, CancellationToken ct)
     {
         if (turnos.Count == 0) { return Array.Empty<CierrePeriodoFilaDto>(); }
 
@@ -296,9 +305,9 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
         var asigIds = porAsig.Keys.ToList();
 
         var asigs = await (
-            from a in _db.Asignaciones.AsNoTracking()
+            from a in db.Asignaciones.AsNoTracking()
             where asigIds.Contains(a.Id)
-            join p in _db.Pacientes.AsNoTracking() on a.PacienteId equals p.Id
+            join p in db.Pacientes.AsNoTracking() on a.PacienteId equals p.Id
             select new
             {
                 a.Id, a.PacienteId, a.NombreServicio,
@@ -327,20 +336,21 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
 
     public async Task<ArchivoExportado?> GenerarExcelDetalleAsync(Guid cierreId, CancellationToken ct = default)
     {
-        var cierre = await _db.CierrePeriodos.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var cierre = await db.CierrePeriodos.AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == cierreId, ct);
         if (cierre is null) { return null; }
 
         // Detalle en vivo desde los turnos que ESTE cierre anulo (CierrePeriodoId == cierreId).
         // Join a asignacion/paciente/profesional/aseguradora para exponer todos los datos.
         var filas = await (
-            from t in _db.AsignacionTurnos.AsNoTracking()
+            from t in db.AsignacionTurnos.AsNoTracking()
             where t.CierrePeriodoId == cierreId
-            join a in _db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
-            join p in _db.Pacientes.AsNoTracking() on a.PacienteId equals p.Id
-            join prof in _db.Profesionales.AsNoTracking() on t.ProfesionalId equals prof.Id into pj
+            join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+            join p in db.Pacientes.AsNoTracking() on a.PacienteId equals p.Id
+            join prof in db.Profesionales.AsNoTracking() on t.ProfesionalId equals prof.Id into pj
             from prof in pj.DefaultIfEmpty()
-            join aseg in _db.Aseguradoras.AsNoTracking() on p.AseguradoraId equals aseg.Id into aj
+            join aseg in db.Aseguradoras.AsNoTracking() on p.AseguradoraId equals aseg.Id into aj
             from aseg in aj.DefaultIfEmpty()
             select new
             {
@@ -380,7 +390,7 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
         var catContrato = new Dictionary<Guid, string?>();
         if (servGuids.Count > 0)
         {
-            var scs = await _db.ServiciosContrato.AsNoTracking()
+            var scs = await db.ServiciosContrato.AsNoTracking()
                 .Where(sc => servGuids.Contains(sc.Id))
                 .Select(sc => new { sc.Id, sc.CodigoServicio, sc.ContratoId })
                 .ToListAsync(ct);
@@ -390,7 +400,7 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
                 .Select(sc => sc.ContratoId).Distinct().ToList();
             if (contratoIds.Count > 0)
             {
-                var cas = await _db.ContratosAseguradora.AsNoTracking()
+                var cas = await db.ContratosAseguradora.AsNoTracking()
                     .Where(ca => contratoIds.Contains(ca.Id))
                     .Select(ca => new { ca.Id, ca.CodigoContrato })
                     .ToListAsync(ct);

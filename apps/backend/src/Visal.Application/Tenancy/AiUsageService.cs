@@ -8,15 +8,18 @@ namespace Visal.Application.Tenancy;
 
 public sealed class AiUsageService : IAiUsageService
 {
-    private readonly IApplicationDbContext _db;
+    // Ola 4c estabilizacion (P0): contexto CORTO por operacion (using var db = _dbFactory.Create();)
+    // en vez del IApplicationDbContext scoped. El sumatorio de ai_usage_logs se lee en el banner de
+    // cupo y en cada pagina autenticada -> punto de alto solapamiento del circuito ("second operation").
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenantContext;
     private readonly IEmailSender? _email;
     private readonly IAuditWriter? _audit;
     private readonly ILogger<AiUsageService>? _log;
 
-    public AiUsageService(IApplicationDbContext db, ITenantContext tenantContext)
+    public AiUsageService(IApplicationDbContextFactory dbFactory, ITenantContext tenantContext)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenantContext = tenantContext;
     }
 
@@ -25,12 +28,12 @@ public sealed class AiUsageService : IAiUsageService
     /// Los tests que no usan alerta pueden seguir con el ctor de 2 args.
     /// </summary>
     public AiUsageService(
-        IApplicationDbContext db,
+        IApplicationDbContextFactory dbFactory,
         ITenantContext tenantContext,
         IEmailSender email,
         IAuditWriter audit,
         ILogger<AiUsageService> log)
-        : this(db, tenantContext)
+        : this(dbFactory, tenantContext)
     {
         _email = email;
         _audit = audit;
@@ -55,8 +58,11 @@ public sealed class AiUsageService : IAiUsageService
             Source = string.IsNullOrWhiteSpace(source) ? "chat" : source,
             Success = success
         };
-        _db.AiUsageLogs.Add(log);
-        await _db.SaveChangesAsync(cancellationToken);
+        using (var db = _dbFactory.Create())
+        {
+            db.AiUsageLogs.Add(log);
+            await db.SaveChangesAsync(cancellationToken);
+        }
 
         // Ola 9 RC9d — evalua alerta cupo IA y despacha email al Owner si
         // cruzo 90 o 100. Best-effort: cualquier fallo se loguea y el
@@ -80,10 +86,13 @@ public sealed class AiUsageService : IAiUsageService
             var now = DateTimeOffset.UtcNow;
             var monthStart = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
 
+            // Contexto corto propio: GetQuotaAsync ya corrio (y libero su contexto) antes de abrir este.
+            using var db = _dbFactory.Create();
+
             // Rate limit: max 1 alerta de este threshold por tenant por mes.
             // Reusamos SuperAdminAuditLog como fuente autoritativa; el AuditWriter
             // ya inserta filas con tenantId + actionName + createdAt.
-            var yaEnviada = await _db.SuperAdminAuditLogs.AsNoTracking()
+            var yaEnviada = await db.SuperAdminAuditLogs.AsNoTracking()
                 .Where(a => a.TenantId == tenantId
                          && a.ActionName == action
                          && a.CreatedAt >= monthStart)
@@ -91,9 +100,9 @@ public sealed class AiUsageService : IAiUsageService
             if (yaEnviada) { return; }
 
             // Emails de los Owners del tenant.
-            var emails = await _db.TenantUsers.AsNoTracking()
+            var emails = await db.TenantUsers.AsNoTracking()
                 .Where(tu => tu.TenantId == tenantId && tu.TenantRole == TenantRole.Owner)
-                .Join(_db.PlatformUsers.AsNoTracking(),
+                .Join(db.PlatformUsers.AsNoTracking(),
                     tu => tu.PlatformUserId,
                     pu => pu.Id,
                     (tu, pu) => pu.Email)
@@ -138,6 +147,7 @@ public sealed class AiUsageService : IAiUsageService
             // Registramos la alerta despachada para que el rate-limit no reenvie
             // en el mismo mes. Guid.Empty como actor porque es sistema.
             _audit.Write(
+                db,
                 actorUserId: Guid.Empty,
                 actionName: action,
                 entityName: "AiQuota",
@@ -146,7 +156,7 @@ public sealed class AiUsageService : IAiUsageService
                 newValue: new { threshold, usedPct = quota.UsedPct, emailsSent = envios, emailsAttempted = emails.Count },
                 tenantId: tenantId,
                 actorType: AuditActorType.System);
-            await _db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct);
         }
         catch (Exception ex)
         {
@@ -156,7 +166,8 @@ public sealed class AiUsageService : IAiUsageService
 
     public async Task<AiUsageSummaryDto> GetSummaryAsync(CancellationToken cancellationToken = default)
     {
-        var rows = await _db.AiUsageLogs.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var rows = await db.AiUsageLogs.AsNoTracking()
             .Select(l => new { l.AgentId, l.InputTokens, l.OutputTokens, l.TotalTokens, l.EstimatedCostUsd })
             .ToListAsync(cancellationToken);
 
@@ -184,15 +195,17 @@ public sealed class AiUsageService : IAiUsageService
     {
         if (_tenantContext.TenantId is not Guid tenantId) { return new AiQuotaDto(0, 0, true); }
 
+        using var db = _dbFactory.Create();
+
         // Consumo del mes en curso (UTC). AiUsageLogs ya esta filtrado por tenant.
         var now = DateTimeOffset.UtcNow;
         var monthStart = new DateTimeOffset(now.Year, now.Month, 1, 0, 0, 0, TimeSpan.Zero);
-        var used = await _db.AiUsageLogs.AsNoTracking()
+        var used = await db.AiUsageLogs.AsNoTracking()
             .Where(l => l.CreatedAt >= monthStart)
             .SumAsync(l => (long?)l.TotalTokens, cancellationToken) ?? 0;
 
         // Limite del plan vigente del tenant (TenantSubscription no es ITenantScoped: filtro explicito).
-        var planId = await _db.TenantSubscriptions.AsNoTracking()
+        var planId = await db.TenantSubscriptions.AsNoTracking()
             .Where(s => s.TenantId == tenantId && s.Status != SubscriptionStatus.Cancelled)
             .OrderByDescending(s => s.StartsAt)
             .Select(s => (Guid?)s.PlanId)
@@ -202,7 +215,7 @@ public sealed class AiUsageService : IAiUsageService
         var hard = true;
         if (planId is Guid pid)
         {
-            var lim = await _db.SaasPlanLimits.AsNoTracking()
+            var lim = await db.SaasPlanLimits.AsNoTracking()
                 .Where(l => l.PlanId == pid && l.LimitKey == IAiUsageService.MonthlyTokenLimitKey)
                 .Select(l => new { l.LimitValue, l.EnforcementMode })
                 .FirstOrDefaultAsync(cancellationToken);
@@ -221,7 +234,8 @@ public sealed class AiUsageService : IAiUsageService
         // Ola 9 RC9a — misma proyeccion del panel /admin/ai-usage con los
         // mismos filtros. Global query filter por tenant sigue aplicando via
         // IApplicationDbContext.
-        var q = _db.AiUsageLogs.AsNoTracking().AsQueryable();
+        using var db = _dbFactory.Create();
+        var q = db.AiUsageLogs.AsNoTracking().AsQueryable();
         if (filtro.AgentId is Guid aid)
         {
             q = q.Where(l => l.AgentId == aid);
@@ -249,7 +263,7 @@ public sealed class AiUsageService : IAiUsageService
         // no hay que hacer un segundo pass.
         var rows = await q
             .GroupJoin(
-                _db.AiAgents.AsNoTracking(),
+                db.AiAgents.AsNoTracking(),
                 l => l.AgentId,
                 a => (Guid?)a.Id,
                 (l, ags) => new { l, ags })

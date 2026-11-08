@@ -4,10 +4,12 @@ using Visal.Domain.Enums;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class TenantBrandingPublicoService(IApplicationDbContext db) : ITenantBrandingPublicoService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class TenantBrandingPublicoService(IApplicationDbContextFactory dbFactory) : ITenantBrandingPublicoService
 {
     public async Task<TenantBrandingPublicoDto?> GetDefaultAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // IgnoreQueryFilters: aqui no hay tenant context. Buscamos tenants Active/Trial.
         var tenants = await db.Tenants.IgnoreQueryFilters()
             .Where(t => t.Status == TenantStatus.Active || t.Status == TenantStatus.Trial)

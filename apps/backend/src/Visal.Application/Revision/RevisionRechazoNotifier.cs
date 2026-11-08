@@ -20,20 +20,21 @@ namespace Visal.Application.Revision;
 /// falla la trazabilidad va a Serilog y el revisor ve el rechazo confirmado en
 /// el kanban de todas formas. La notificacion es informativa, no bloqueante.
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class RevisionRechazoNotifier : IRevisionRechazoNotifier
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly IRevisionPolicyService _policy;
     private readonly IWhatsAppConnectorService _wa;
     private readonly ILogger<RevisionRechazoNotifier> _log;
 
     public RevisionRechazoNotifier(
-        IApplicationDbContext db,
+        IApplicationDbContextFactory dbFactory,
         IRevisionPolicyService policy,
         IWhatsAppConnectorService wa,
         ILogger<RevisionRechazoNotifier> log)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _policy = policy;
         _wa = wa;
         _log = log;
@@ -46,7 +47,8 @@ public sealed class RevisionRechazoNotifier : IRevisionRechazoNotifier
             var pol = await _policy.GetAsync(ct);
             if (!pol.NotificarRechazoWhatsApp) { return; }
 
-            var hc = await _db.HistoriasClinicas.AsNoTracking()
+            using var db = _dbFactory.Create();
+            var hc = await db.HistoriasClinicas.AsNoTracking()
                 .FirstOrDefaultAsync(h => h.Id == historiaClinicaId, ct);
             if (hc is null) { return; }
 
@@ -55,7 +57,7 @@ public sealed class RevisionRechazoNotifier : IRevisionRechazoNotifier
             // el EspecialistaNombre denormalizado sin FK).
             if (hc.ProfesionalId is not Guid profId) { return; }
 
-            var prof = await _db.Profesionales.AsNoTracking()
+            var prof = await db.Profesionales.AsNoTracking()
                 .FirstOrDefaultAsync(p => p.Id == profId, ct);
             if (prof is null || string.IsNullOrWhiteSpace(prof.Celular))
             {
@@ -64,7 +66,7 @@ public sealed class RevisionRechazoNotifier : IRevisionRechazoNotifier
                 return;
             }
 
-            var linea = await _db.WhatsAppLines.AsNoTracking()
+            var linea = await db.WhatsAppLines.AsNoTracking()
                 .Where(l => l.Status == WhatsAppLineStatus.Connected)
                 .OrderBy(l => l.CreatedAt)
                 .FirstOrDefaultAsync(ct);
@@ -75,7 +77,7 @@ public sealed class RevisionRechazoNotifier : IRevisionRechazoNotifier
                 return;
             }
 
-            var pacNombre = await _db.Pacientes.AsNoTracking()
+            var pacNombre = await db.Pacientes.AsNoTracking()
                 .Where(p => p.Id == hc.PacienteId)
                 .Select(p => p.PrimerNombre + " " + p.PrimerApellido)
                 .FirstOrDefaultAsync(ct);

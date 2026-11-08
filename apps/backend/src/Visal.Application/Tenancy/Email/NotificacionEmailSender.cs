@@ -6,25 +6,31 @@ namespace Visal.Application.Tenancy.Email;
 
 public sealed class NotificacionEmailSender : INotificacionEmailSender
 {
-    private readonly IApplicationDbContext _db;
+    // Ola 4c estabilizacion (P0): contexto CORTO por operacion (using var db = _dbFactory.Create();)
+    // en vez del IApplicationDbContext scoped.
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ISecretProtector _secret;
     private readonly IPqrEmailReplySender _sender;
 
-    public NotificacionEmailSender(IApplicationDbContext db, ISecretProtector secret, IPqrEmailReplySender sender)
+    public NotificacionEmailSender(IApplicationDbContextFactory dbFactory, ISecretProtector secret, IPqrEmailReplySender sender)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _secret = secret;
         _sender = sender;
     }
 
     public async Task<bool> TieneCuentaAsync(Guid tenantId, CancellationToken ct = default)
-        => await ResolverCuentaQuery(tenantId).AnyAsync(ct);
+    {
+        using var db = _dbFactory.Create();
+        return await ResolverCuentaQuery(db, tenantId).AnyAsync(ct);
+    }
 
     public async Task<EmailSendResult> SendAsync(Guid tenantId, string toEmail, string subject, string bodyText, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(toEmail)) { return new EmailSendResult(false, "Destinatario de correo vacio."); }
 
-        var cfg = await ResolverCuentaQuery(tenantId).FirstOrDefaultAsync(ct);
+        using var db = _dbFactory.Create();
+        var cfg = await ResolverCuentaQuery(db, tenantId).FirstOrDefaultAsync(ct);
         if (cfg is null)
         {
             return new EmailSendResult(false, "La agencia no tiene una cuenta de correo (PQR) con App Password para enviar notificaciones.");
@@ -56,8 +62,8 @@ public sealed class NotificacionEmailSender : INotificacionEmailSender
     }
 
     /// <summary>Cuentas del tenant con App Password, priorizando la habilitada.</summary>
-    private IQueryable<TenantEmailIngestConfig> ResolverCuentaQuery(Guid tenantId)
-        => _db.TenantEmailIngestConfigs.AsNoTracking().IgnoreQueryFilters()
+    private static IQueryable<TenantEmailIngestConfig> ResolverCuentaQuery(IApplicationDbContext db, Guid tenantId)
+        => db.TenantEmailIngestConfigs.AsNoTracking().IgnoreQueryFilters()
             .Where(c => c.TenantId == tenantId
                         && c.AppPasswordEncrypted != null && c.AppPasswordEncrypted != "")
             .OrderByDescending(c => c.IsEnabled)

@@ -7,8 +7,9 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class ReporteService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant) : IReporteService
 {
     // Palabras clave bloqueadas para prevenir escritura desde el editor de reportes.
@@ -33,6 +34,7 @@ public sealed class ReporteService(
 
     public async Task<IReadOnlyList<ReporteDto>> ListarMisReportesAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var userId = tenant.UserId ?? Guid.Empty;
         if (userId == Guid.Empty) { return []; }
 
@@ -54,6 +56,7 @@ public sealed class ReporteService(
 
     public async Task<IReadOnlyList<ReporteGaleriaDto>> ListarGaleriaAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var cats = await db.ReporteCatalogos.AsNoTracking()
             .Where(c => c.Habilitado)
             .OrderBy(c => c.Orden).ThenBy(c => c.Nombre)
@@ -72,6 +75,7 @@ public sealed class ReporteService(
 
     public async Task SetActivoAsync(Guid catalogoId, bool activo, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         // El catalogo debe existir y estar habilitado globalmente.
         var existe = await db.ReporteCatalogos.AsNoTracking().AnyAsync(c => c.Id == catalogoId && c.Habilitado, ct);
@@ -96,6 +100,7 @@ public sealed class ReporteService(
 
     public async Task SetUsuariosAsync(Guid catalogoId, IReadOnlyList<Guid> usuarios, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
 
         var actuales = await db.ReporteUsuarios.Where(u => u.ReporteCatalogoId == catalogoId).ToListAsync(ct);
@@ -122,6 +127,7 @@ public sealed class ReporteService(
 
     public async Task<IReadOnlyList<ReporteCatalogoDto>> ListarCatalogoAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.ReporteCatalogos.AsNoTracking()
             .OrderBy(x => x.Orden).ThenBy(x => x.Nombre)
             .Select(c => new ReporteCatalogoDto(c.Id, c.Nombre, c.Descripcion, c.Categoria,
@@ -131,6 +137,7 @@ public sealed class ReporteService(
 
     public async Task<ReporteCatalogoDetalleDto?> ObtenerCatalogoAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var c = await db.ReporteCatalogos.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (c is null) { return null; }
         return new ReporteCatalogoDetalleDto(c.Id, c.Nombre, c.Descripcion, c.Categoria, c.QuerySql,
@@ -139,6 +146,7 @@ public sealed class ReporteService(
 
     public async Task<Guid> CrearCatalogoAsync(GuardarCatalogoRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         ValidarSql(req.QuerySql);
         var c = new ReporteCatalogo
         {
@@ -158,6 +166,7 @@ public sealed class ReporteService(
 
     public async Task<bool> ActualizarCatalogoAsync(Guid id, GuardarCatalogoRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var c = await db.ReporteCatalogos.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (c is null) { return false; }
         ValidarSql(req.QuerySql);
@@ -175,6 +184,7 @@ public sealed class ReporteService(
 
     public async Task<bool> EliminarCatalogoAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var c = await db.ReporteCatalogos.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (c is null) { return false; }
         // Borra activaciones y asignaciones de TODOS los tenants (ignora el filtro de tenant).
@@ -193,6 +203,7 @@ public sealed class ReporteService(
 
     public async Task<ReporteResultado> EjecutarAsync(Guid catalogoId, EjecutarReporteRequest req, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         var userId = tenant.UserId ?? Guid.Empty;
 

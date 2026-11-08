@@ -84,10 +84,13 @@ public sealed class BarthelDenormalizadorTests
             cierre);
         await db.SaveChangesAsync();
 
-        var svc = new BarthelDenormalizador(db);
+        var svc = new BarthelDenormalizador(new TestDbContextFactory(db, new FakeTenantContext { TenantId = Tenant }));
         var aplico = await svc.AplicarDesdeEscalaAsync(escalaId);
 
         Assert.True(aplico);
+        // El servicio escribio en su propio contexto corto; el paciente sembrado sigue trackeado por
+        // `db`. Limpiamos el tracker para releer del store compartido (y no la instancia stale).
+        db.ChangeTracker.Clear();
         var pac = await db.Pacientes.SingleAsync(p => p.Id == pacId);
         Assert.Equal(85, pac.BarthelTotal);
         Assert.Equal("Dependencia leve", pac.BarthelClasificacion);
@@ -106,11 +109,12 @@ public sealed class BarthelDenormalizadorTests
         var nueva = SembrarEscalaCerrada(db, hcId, barthel, "{\"barthel_total\":\"90\"}",
             new DateTimeOffset(2026, 6, 1, 8, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
-        var svc = new BarthelDenormalizador(db);
+        var svc = new BarthelDenormalizador(new TestDbContextFactory(db, new FakeTenantContext { TenantId = Tenant }));
 
         Assert.True(await svc.AplicarDesdeEscalaAsync(nueva));
         Assert.False(await svc.AplicarDesdeEscalaAsync(vieja)); // mas antigua: no pisa
 
+        db.ChangeTracker.Clear();
         var pac = await db.Pacientes.SingleAsync(p => p.Id == pacId);
         Assert.Equal(90, pac.BarthelTotal);
     }
@@ -130,8 +134,9 @@ public sealed class BarthelDenormalizadorTests
             new DateTimeOffset(2026, 2, 2, 10, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
-        var svc = new BarthelDenormalizador(db);
+        var svc = new BarthelDenormalizador(new TestDbContextFactory(db, new FakeTenantContext { TenantId = Tenant }));
         Assert.False(await svc.AplicarDesdeEscalaAsync(escalaId));
+        db.ChangeTracker.Clear();
         var pac = await db.Pacientes.SingleAsync(p => p.Id == pacId);
         Assert.Null(pac.BarthelTotal);
     }
@@ -148,10 +153,11 @@ public sealed class BarthelDenormalizadorTests
             new DateTimeOffset(2026, 9, 1, 8, 0, 0, TimeSpan.Zero));
         await db.SaveChangesAsync();
 
-        var svc = new BarthelDenormalizador(db);
+        var svc = new BarthelDenormalizador(new TestDbContextFactory(db, new FakeTenantContext { TenantId = Tenant }));
         var n = await svc.RecalcularTodosAsync();
 
         Assert.Equal(1, n);
+        db.ChangeTracker.Clear();
         var pac = await db.Pacientes.SingleAsync(p => p.Id == pacId);
         Assert.Equal(75, pac.BarthelTotal);
         Assert.Equal("Moderada", pac.BarthelClasificacion);

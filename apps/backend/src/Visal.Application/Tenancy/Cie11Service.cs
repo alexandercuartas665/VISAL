@@ -18,13 +18,15 @@ namespace Visal.Application.Tenancy;
 /// - Detalle por entityId (extrae Code + Title.@value).
 /// Headers requeridos por WHO: API-Version=v2, Accept-Language=es, Accept=application/json.
 /// </summary>
-public sealed class Cie11Service(IApplicationDbContext db, ITenantContext tenant, IHttpClientFactory http, ILogger<Cie11Service> log) : ICie11Service
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class Cie11Service(IApplicationDbContextFactory dbFactory, ITenantContext tenant, IHttpClientFactory http, ILogger<Cie11Service> log) : ICie11Service
 {
     private static readonly Dictionary<Guid, (string token, DateTime exp)> _tokenCache = new();
     private static readonly SemaphoreSlim _tokenLock = new(1, 1);
 
     public async Task<Cie11ConfigDto?> GetConfigAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var c = await db.Cie11Configs.AsNoTracking().FirstOrDefaultAsync(ct);
         if (c is null) { return null; }
         return new Cie11ConfigDto(c.TokenUrl, c.ClientId, c.ClientSecret, c.SearchUrl, c.MmsUrlBase, c.Activo);
@@ -32,6 +34,7 @@ public sealed class Cie11Service(IApplicationDbContext db, ITenantContext tenant
 
     public async Task<Cie11ConfigDto?> SaveConfigAsync(Cie11ConfigDto req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { return null; }
         var c = await db.Cie11Configs.FirstOrDefaultAsync(ct);
         if (c is null)
@@ -53,6 +56,7 @@ public sealed class Cie11Service(IApplicationDbContext db, ITenantContext tenant
 
     public async Task<IReadOnlyList<Cie11SearchItem>> SearchAsync(string query, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var cfg = await db.Cie11Configs.AsNoTracking().FirstOrDefaultAsync(ct);
         if (cfg is null || !cfg.Activo || string.IsNullOrWhiteSpace(cfg.SearchUrl))
         {
@@ -95,6 +99,7 @@ public sealed class Cie11Service(IApplicationDbContext db, ITenantContext tenant
 
     public async Task<Cie11Detail?> GetDetailAsync(string entityIdOrUrl, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var cfg = await db.Cie11Configs.AsNoTracking().FirstOrDefaultAsync(ct);
         if (cfg is null || !cfg.Activo || string.IsNullOrWhiteSpace(cfg.MmsUrlBase))
         {

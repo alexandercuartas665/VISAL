@@ -5,14 +5,16 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class IncapacidadService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     IHistoriaPrefillService prefill) : IIncapacidadService
 {
     public async Task<IReadOnlyList<IncapacidadItemDto>> ListarPorHistoriaAsync(
         Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.HistoriaClinicaIncapacidades.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == historiaId)
             .OrderBy(x => x.Orden)
@@ -27,6 +29,7 @@ public sealed class IncapacidadService(
     public async Task<IncapacidadItemDto> AgregarAsync(
         Guid historiaId, AgregarIncapacidadRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (string.IsNullOrWhiteSpace(req.Motivo))
         {
@@ -64,6 +67,7 @@ public sealed class IncapacidadService(
     public async Task<bool> ActualizarAsync(
         Guid itemId, ActualizarIncapacidadRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var entity = await db.HistoriaClinicaIncapacidades.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
         await db.EnsureAbiertaAsync(entity.HistoriaClinicaId, ct);
@@ -85,6 +89,7 @@ public sealed class IncapacidadService(
 
     public async Task<bool> EliminarAsync(Guid itemId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var entity = await db.HistoriaClinicaIncapacidades.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
         var hcId = entity.HistoriaClinicaId;
@@ -97,6 +102,7 @@ public sealed class IncapacidadService(
 
     public async Task<int> ContarPorHistoriaAsync(Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.HistoriaClinicaIncapacidades
             .CountAsync(x => x.HistoriaClinicaId == historiaId, ct);
     }

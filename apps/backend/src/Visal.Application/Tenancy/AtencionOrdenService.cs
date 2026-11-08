@@ -3,7 +3,8 @@ using Visal.Application.Common;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class AtencionOrdenService(IApplicationDbContext db) : IAtencionOrdenService
+// Ola 4c (P0): contexto corto por operacion (using var db = dbFactory.Create();) en vez del IApplicationDbContext scoped.
+public sealed class AtencionOrdenService(IApplicationDbContextFactory dbFactory) : IAtencionOrdenService
 {
     // Nombre del permiso que exceptua del bloqueo por orden secuencial. Es el
     // mismo que aparece en ModuloCatalogo.Todos y se lee del claim "perms" en
@@ -12,7 +13,8 @@ public sealed class AtencionOrdenService(IApplicationDbContext db) : IAtencionOr
 
     public async Task<AtencionOrdenBloqueo?> ValidarAperturaAsync(Guid sesionId, Guid actorUserId, CancellationToken ct = default)
     {
-        if (await UsuarioPuedeSaltarOrdenAsync(actorUserId, ct))
+        using var db = dbFactory.Create();
+        if (await UsuarioPuedeSaltarOrdenAsync(db, actorUserId, ct))
         {
             return null;
         }
@@ -117,7 +119,7 @@ public sealed class AtencionOrdenService(IApplicationDbContext db) : IAtencionOr
     /// Si el usuario no tiene fila en tenant_users (super admin puro o servicio
     /// sistema) fail-open: no se bloquea; ese caso no proviene del flujo UI.
     /// </summary>
-    private async Task<bool> UsuarioPuedeSaltarOrdenAsync(Guid userId, CancellationToken ct)
+    private static async Task<bool> UsuarioPuedeSaltarOrdenAsync(IApplicationDbContext db, Guid userId, CancellationToken ct)
     {
         if (userId == Guid.Empty) { return true; }
 

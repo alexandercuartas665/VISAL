@@ -20,8 +20,9 @@ public interface IReportePackService
     byte[] ExportarExcel(ReportePackResultado resultado);
 }
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class ReportePackService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     IReporteSqlGenerator generador,
     IReporteCamposDinamicos dinamicos) : IReportePackService
@@ -39,6 +40,8 @@ public sealed class ReportePackService(
         // Precarga los campos dinamicos del tenant: el generador (sincrono) los lee del cache
         // al resolver refs de paciente que no estan en el catalogo estatico.
         await dinamicos.CargarAsync(ct);
+
+        using var db = dbFactory.Create();
 
         // Conexion DEDICADA (no la del DbContext scoped): el lector crudo mantiene la
         // conexion ocupada mientras transmite filas; reusar la del DbContext chocaria

@@ -4,10 +4,12 @@ using Visal.Domain.Enums;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class SedeCatalogoPublicoService(IApplicationDbContext db) : ISedeCatalogoPublicoService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class SedeCatalogoPublicoService(IApplicationDbContextFactory dbFactory) : ISedeCatalogoPublicoService
 {
     public async Task<IReadOnlyList<SedePublicaDto>> ListAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Sedes activas de tenants Active/Trial. IgnoreQueryFilters porque aqui no hay tenant context.
         var tenantsValidos = await db.Tenants.IgnoreQueryFilters()
             .Where(t => t.Status == TenantStatus.Active || t.Status == TenantStatus.Trial)
@@ -28,6 +30,7 @@ public sealed class SedeCatalogoPublicoService(IApplicationDbContext db) : ISede
         // Fallback anti-enumeracion: input vacio o desconocido -> devolvemos lo mismo que
         // ListAsync + MostrarGlobal=true. Un atacante que pruebe correos al azar recibe la
         // misma respuesta que un usuario global, evitando confirmar la existencia.
+        using var db = dbFactory.Create();
         var todas = await ListAsync(ct);
         var fallback = new SedesParaUsuarioDto(todas, MostrarGlobal: true);
 

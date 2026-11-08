@@ -5,20 +5,22 @@ using Visal.Domain.Enums;
 
 namespace Visal.Application.Tenancy.WhatsApp;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = _dbFactory.Create();) en vez del IApplicationDbContext scoped.
 internal sealed class WhatsAppTemplateBindingService : IWhatsAppTemplateBindingService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly IAuditWriter _audit;
 
-    public WhatsAppTemplateBindingService(IApplicationDbContext db, IAuditWriter audit)
+    public WhatsAppTemplateBindingService(IApplicationDbContextFactory dbFactory, IAuditWriter audit)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _audit = audit;
     }
 
     public async Task<WhatsAppTemplateBindingDto?> GetAsync(WhatsAppTemplateRole role, CancellationToken ct = default)
     {
-        var row = await _db.TenantWhatsAppTemplateBindings
+        using var db = _dbFactory.Create();
+        var row = await db.TenantWhatsAppTemplateBindings
             .Include(b => b.Line)
             .FirstOrDefaultAsync(b => b.Role == role, ct);
         return row is null ? null : ToDto(row);
@@ -26,7 +28,8 @@ internal sealed class WhatsAppTemplateBindingService : IWhatsAppTemplateBindingS
 
     public async Task<IReadOnlyList<WhatsAppTemplateBindingDto>> ListAsync(CancellationToken ct = default)
     {
-        var rows = await _db.TenantWhatsAppTemplateBindings
+        using var db = _dbFactory.Create();
+        var rows = await db.TenantWhatsAppTemplateBindings
             .Include(b => b.Line)
             .OrderBy(b => b.Role)
             .ToListAsync(ct);
@@ -39,11 +42,12 @@ internal sealed class WhatsAppTemplateBindingService : IWhatsAppTemplateBindingS
         if (string.IsNullOrWhiteSpace(req.TemplateId)) { throw new ArgumentException("TemplateId requerido", nameof(req)); }
         if (string.IsNullOrWhiteSpace(req.TemplateName)) { throw new ArgumentException("TemplateName requerido", nameof(req)); }
 
+        using var db = _dbFactory.Create();
         // La linea debe existir y pertenecer al tenant (query filter lo garantiza).
-        var line = await _db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == req.LineId, ct)
+        var line = await db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == req.LineId, ct)
             ?? throw new InvalidOperationException("La linea no existe en este tenant.");
 
-        var existing = await _db.TenantWhatsAppTemplateBindings.FirstOrDefaultAsync(b => b.Role == req.Role, ct);
+        var existing = await db.TenantWhatsAppTemplateBindings.FirstOrDefaultAsync(b => b.Role == req.Role, ct);
         object? prev = existing is null ? null : new
         {
             existing.LineId, existing.TemplateId, existing.TemplateName, existing.LanguageCode, existing.ParameterCount,
@@ -62,7 +66,7 @@ internal sealed class WhatsAppTemplateBindingService : IWhatsAppTemplateBindingS
                 CreatedAt = DateTimeOffset.UtcNow,
                 CreatedBy = actorUserId,
             };
-            _db.TenantWhatsAppTemplateBindings.Add(existing);
+            db.TenantWhatsAppTemplateBindings.Add(existing);
         }
         else
         {
@@ -74,14 +78,14 @@ internal sealed class WhatsAppTemplateBindingService : IWhatsAppTemplateBindingS
             existing.UpdatedAt = DateTimeOffset.UtcNow;
             existing.UpdatedBy = actorUserId;
         }
-        _audit.Write(actorUserId, "wa-template-binding.upsert", nameof(TenantWhatsAppTemplateBinding), existing.Id,
+        _audit.Write(db, actorUserId, "wa-template-binding.upsert", nameof(TenantWhatsAppTemplateBinding), existing.Id,
             previousValue: prev,
             newValue: new { existing.Role, existing.LineId, existing.TemplateId, existing.TemplateName, existing.ParameterCount },
             tenantId: line.TenantId);
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         // Reload con Include para tener el nombre de la linea en el DTO. Barato:
         // solo la fila que acabamos de guardar.
-        var full = await _db.TenantWhatsAppTemplateBindings
+        var full = await db.TenantWhatsAppTemplateBindings
             .Include(b => b.Line)
             .FirstAsync(b => b.Id == existing.Id, ct);
         return ToDto(full);
@@ -89,14 +93,15 @@ internal sealed class WhatsAppTemplateBindingService : IWhatsAppTemplateBindingS
 
     public async Task<bool> DeleteAsync(WhatsAppTemplateRole role, Guid actorUserId, CancellationToken ct = default)
     {
-        var row = await _db.TenantWhatsAppTemplateBindings.FirstOrDefaultAsync(b => b.Role == role, ct);
+        using var db = _dbFactory.Create();
+        var row = await db.TenantWhatsAppTemplateBindings.FirstOrDefaultAsync(b => b.Role == role, ct);
         if (row is null) { return false; }
-        _audit.Write(actorUserId, "wa-template-binding.delete", nameof(TenantWhatsAppTemplateBinding), row.Id,
+        _audit.Write(db, actorUserId, "wa-template-binding.delete", nameof(TenantWhatsAppTemplateBinding), row.Id,
             previousValue: new { row.Role, row.TemplateName },
             newValue: null,
             tenantId: row.TenantId);
-        _db.TenantWhatsAppTemplateBindings.Remove(row);
-        await _db.SaveChangesAsync(ct);
+        db.TenantWhatsAppTemplateBindings.Remove(row);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 

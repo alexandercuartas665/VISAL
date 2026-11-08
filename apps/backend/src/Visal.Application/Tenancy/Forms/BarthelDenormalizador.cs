@@ -13,13 +13,15 @@ namespace Visal.Application.Tenancy.Forms;
 /// campo <c>barthel_total</c> y la clasificacion de <c>barthel_clasificacion</c> dentro del
 /// diccionario plano de valores de la escala. Tenant-scoped via query filters de EF Core.
 /// </summary>
-public sealed class BarthelDenormalizador(IApplicationDbContext db) : IBarthelDenormalizador
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class BarthelDenormalizador(IApplicationDbContextFactory dbFactory) : IBarthelDenormalizador
 {
     public const string CampoTotal = "barthel_total";
     public const string CampoClasificacion = "barthel_clasificacion";
 
     public async Task<bool> AplicarDesdeEscalaAsync(Guid escalaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var row = await db.HistoriaClinicaEscalas.AsNoTracking()
             .Where(e => e.Id == escalaId)
             .Join(db.FormDefinitions.AsNoTracking(), e => e.FormDefinitionId, f => f.Id, (e, f) => new
@@ -52,6 +54,7 @@ public sealed class BarthelDenormalizador(IApplicationDbContext db) : IBarthelDe
 
     public async Task<int> RecalcularTodosAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var barthelFormIds = await db.FormDefinitions.AsNoTracking()
             .Where(f => (f.Codigo != null && f.Codigo.ToLower().Contains("barthel"))
                         || (f.Nombre != null && f.Nombre.ToLower().Contains("barthel")))

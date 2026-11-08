@@ -4,11 +4,13 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class TaskBoardColumnPrefService(IApplicationDbContext db, ITenantContext tenant)
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class TaskBoardColumnPrefService(IApplicationDbContextFactory dbFactory, ITenantContext tenant)
     : ITaskBoardColumnPrefService
 {
     public async Task<IReadOnlyList<TaskColumnPrefDto>> ListAsync(Guid boardId, Guid userId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.TaskBoardColumnPrefs.AsNoTracking()
             .Where(x => x.BoardId == boardId && x.PlatformUserId == userId)
             .OrderBy(x => x.Orden ?? int.MaxValue).ThenBy(x => x.ColumnKey)
@@ -21,6 +23,7 @@ public sealed class TaskBoardColumnPrefService(IApplicationDbContext db, ITenant
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (userId == Guid.Empty) { throw new InvalidOperationException("Sin usuario activo."); }
         if (items is null || items.Count == 0) { return; }
+        using var db = dbFactory.Create();
 
         // Merge por (usuario, tablero, columna_key). Fila con default puro (Visible=true,
         // Alias=null, Orden=null, Ancho=null) -> se borra: la UI cae al default sola.

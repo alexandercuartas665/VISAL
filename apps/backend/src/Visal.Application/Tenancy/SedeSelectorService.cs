@@ -4,10 +4,13 @@ using Visal.Domain.Enums;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class SedeSelectorService(IApplicationDbContext db) : ISedeSelectorService
+// Ola 4c (P0): contexto corto por operacion (using var db = _dbFactory.Create();) en vez del
+// IApplicationDbContext scoped. El selector de sede se usa en el circuito Blazor (barra superior).
+public sealed class SedeSelectorService(IApplicationDbContextFactory dbFactory) : ISedeSelectorService
 {
     public async Task<IReadOnlyList<SucursalDto>> GetSedesAsync(Guid platformUserId, Guid tenantId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var user = await db.PlatformUsers.IgnoreQueryFilters()
             .FirstOrDefaultAsync(u => u.Id == platformUserId, ct);
         if (user is null) { return Array.Empty<SucursalDto>(); }

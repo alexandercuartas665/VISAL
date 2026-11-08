@@ -15,9 +15,10 @@ namespace Visal.Application.Revision;
 /// cada `HistoriaClinicaService.CerrarAsync`. `SaveAsync` invalida la entrada
 /// del tenant en la misma request para no servir data stale.
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class RevisionPolicyService : IRevisionPolicyService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenant;
     private readonly IMemoryCache _cache;
 
@@ -34,9 +35,9 @@ public sealed class RevisionPolicyService : IRevisionPolicyService
         ConfirmarAprobado: false,
         MotivoInactivacionMinChars: 10);
 
-    public RevisionPolicyService(IApplicationDbContext db, ITenantContext tenant, IMemoryCache cache)
+    public RevisionPolicyService(IApplicationDbContextFactory dbFactory, ITenantContext tenant, IMemoryCache cache)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenant = tenant;
         _cache = cache;
     }
@@ -53,7 +54,8 @@ public sealed class RevisionPolicyService : IRevisionPolicyService
             return cached;
         }
 
-        var row = await _db.RevisionPolicies.AsNoTracking().FirstOrDefaultAsync(ct);
+        using var db = _dbFactory.Create();
+        var row = await db.RevisionPolicies.AsNoTracking().FirstOrDefaultAsync(ct);
         var dto = row is null ? Defaults : ToDto(row);
         _cache.Set(key, dto, CacheTtl);
         return dto;
@@ -78,11 +80,12 @@ public sealed class RevisionPolicyService : IRevisionPolicyService
             throw new ArgumentException("MotivoInactivacionMinChars no puede ser negativo.", nameof(policy));
         }
 
-        var row = await _db.RevisionPolicies.FirstOrDefaultAsync(ct);
+        using var db = _dbFactory.Create();
+        var row = await db.RevisionPolicies.FirstOrDefaultAsync(ct);
         if (row is null)
         {
             row = new RevisionPolicy { TenantId = tid };
-            _db.RevisionPolicies.Add(row);
+            db.RevisionPolicies.Add(row);
         }
         row.AutoTriggerCierre = policy.AutoTriggerCierre;
         row.PreRevisionIAAutoTrigger = policy.PreRevisionIAAutoTrigger;
@@ -94,7 +97,7 @@ public sealed class RevisionPolicyService : IRevisionPolicyService
         row.NotificarRechazoWhatsApp = policy.NotificarRechazoWhatsApp;
         row.UpdatedAt = DateTimeOffset.UtcNow;
         row.UpdatedBy = actor;
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
 
         // Invalidamos el cache del tenant. El proximo `GetAsync` releera la
         // fila fresca y volvera a poblar la entrada.

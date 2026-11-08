@@ -9,14 +9,16 @@ namespace Visal.Application.Tenancy;
 
 public sealed class ChatIngestService : IChatIngestService
 {
-    private readonly IApplicationDbContext _db;
+    // Ola 4c estabilizacion (P0): contexto CORTO por operacion (using var db = _dbFactory.Create();)
+    // en vez del IApplicationDbContext scoped.
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ISecretProtector _secretProtector;
     private readonly IChatBroadcaster _broadcaster;
     private readonly TimeProvider _timeProvider;
 
-    public ChatIngestService(IApplicationDbContext db, ISecretProtector secretProtector, IChatBroadcaster broadcaster, TimeProvider timeProvider)
+    public ChatIngestService(IApplicationDbContextFactory dbFactory, ISecretProtector secretProtector, IChatBroadcaster broadcaster, TimeProvider timeProvider)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _secretProtector = secretProtector;
         _broadcaster = broadcaster;
         _timeProvider = timeProvider;
@@ -24,8 +26,9 @@ public sealed class ChatIngestService : IChatIngestService
 
     public async Task<ChatIngestResult> IngestAsync(Guid tenantId, string? providedToken, IngestMessageRequest payload, CancellationToken cancellationToken = default)
     {
+        using var db = _dbFactory.Create();
         // Sin JWT: validamos el token del webhook contra la config Evolution del tenant.
-        var config = await _db.TenantEvolutionConfigs
+        var config = await db.TenantEvolutionConfigs
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(c => c.TenantId == tenantId, cancellationToken);
 
@@ -42,8 +45,9 @@ public sealed class ChatIngestService : IChatIngestService
     // con token global + instancia conocida). Mantiene idempotencia y difusion en tiempo real.
     public async Task<ChatIngestResult> IngestTrustedAsync(Guid tenantId, IngestMessageRequest payload, CancellationToken cancellationToken = default)
     {
+        using var db = _dbFactory.Create();
         // Idempotencia por id externo.
-        var duplicate = await _db.Messages
+        var duplicate = await db.Messages
             .IgnoreQueryFilters()
             .AnyAsync(m => m.TenantId == tenantId && m.ExternalId == payload.ExternalMessageId, cancellationToken);
         if (duplicate)
@@ -52,7 +56,7 @@ public sealed class ChatIngestService : IChatIngestService
         }
 
         var phone = payload.ContactPhone.Trim();
-        var conversation = await _db.Conversations
+        var conversation = await db.Conversations
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.ContactPhone == phone, cancellationToken);
 
@@ -68,7 +72,7 @@ public sealed class ChatIngestService : IChatIngestService
                 ContactName = payload.ContactName?.Trim(),
                 LastMessageAt = sentAt
             };
-            _db.Conversations.Add(conversation);
+            db.Conversations.Add(conversation);
         }
         else
         {
@@ -89,9 +93,9 @@ public sealed class ChatIngestService : IChatIngestService
             MessageType = string.IsNullOrWhiteSpace(payload.MessageType) ? "text" : payload.MessageType!.Trim(),
             SentAt = sentAt
         };
-        _db.Messages.Add(message);
+        db.Messages.Add(message);
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
 
         var dto = new MessageDto(message.Id, message.ConversationId, message.Direction, message.Body,
             message.MessageType, message.SentAt, message.MediaType, message.MediaUrl, message.MediaMimeType, message.SentByName);

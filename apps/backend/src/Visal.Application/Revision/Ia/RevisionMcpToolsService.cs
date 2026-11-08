@@ -16,6 +16,7 @@ namespace Visal.Application.Revision.Ia;
 /// Los payloads JSON son compactos y estables (no anidan objetos grandes de EF);
 /// el objetivo es alimentar el prompt del LLM sin ruido.
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
 {
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -24,9 +25,9 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
     };
 
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
 
-    public RevisionMcpToolsService(IApplicationDbContext db) => _db = db;
+    public RevisionMcpToolsService(IApplicationDbContextFactory dbFactory) => _dbFactory = dbFactory;
 
     public async Task<HistoriaClinicaContextoIa> ArmarContextoAsync(
         Guid historiaClinicaId,
@@ -35,17 +36,30 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
         int? ventanaAsignacionesDias,
         CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         var okList = new List<ToolInvocationResult>();
         var failList = new List<ToolInvocationResult>();
         foreach (var name in toolNames)
         {
-            var r = await EjecutarToolAsync(name, historiaClinicaId, allowedTools, ventanaAsignacionesDias, ct);
+            var r = await EjecutarToolCoreAsync(db, name, historiaClinicaId, allowedTools, ventanaAsignacionesDias, ct);
             (r.Ok ? okList : failList).Add(r);
         }
         return new HistoriaClinicaContextoIa(historiaClinicaId, okList, failList);
     }
 
     public async Task<ToolInvocationResult> EjecutarToolAsync(
+        string toolName,
+        Guid historiaClinicaId,
+        IReadOnlyCollection<string> allowedTools,
+        int? ventanaAsignacionesDias,
+        CancellationToken ct = default)
+    {
+        using var db = _dbFactory.Create();
+        return await EjecutarToolCoreAsync(db, toolName, historiaClinicaId, allowedTools, ventanaAsignacionesDias, ct);
+    }
+
+    private async Task<ToolInvocationResult> EjecutarToolCoreAsync(
+        IApplicationDbContext db,
         string toolName,
         Guid historiaClinicaId,
         IReadOnlyCollection<string> allowedTools,
@@ -62,17 +76,17 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
         {
             var payload = toolName switch
             {
-                RevisionMcpToolNames.GetHistoriaClinica => await GetHistoriaClinicaAsync(historiaClinicaId, ct),
-                RevisionMcpToolNames.GetPaciente => await GetPacienteAsync(historiaClinicaId, ct),
-                RevisionMcpToolNames.ListOrdenesHc => await ListOrdenesHcAsync(historiaClinicaId, ct),
-                RevisionMcpToolNames.ListNotasHc => await ListNotasHcAsync(historiaClinicaId, ct),
-                RevisionMcpToolNames.ListEscalasHc => await ListEscalasHcAsync(historiaClinicaId, ct),
-                RevisionMcpToolNames.ListEvolucionesHc => await ListEvolucionesHcAsync(historiaClinicaId, ct),
-                RevisionMcpToolNames.ListConsentimientosHc => await ListConsentimientosHcAsync(historiaClinicaId, ct),
+                RevisionMcpToolNames.GetHistoriaClinica => await GetHistoriaClinicaAsync(db, historiaClinicaId, ct),
+                RevisionMcpToolNames.GetPaciente => await GetPacienteAsync(db, historiaClinicaId, ct),
+                RevisionMcpToolNames.ListOrdenesHc => await ListOrdenesHcAsync(db, historiaClinicaId, ct),
+                RevisionMcpToolNames.ListNotasHc => await ListNotasHcAsync(db, historiaClinicaId, ct),
+                RevisionMcpToolNames.ListEscalasHc => await ListEscalasHcAsync(db, historiaClinicaId, ct),
+                RevisionMcpToolNames.ListEvolucionesHc => await ListEvolucionesHcAsync(db, historiaClinicaId, ct),
+                RevisionMcpToolNames.ListConsentimientosHc => await ListConsentimientosHcAsync(db, historiaClinicaId, ct),
                 RevisionMcpToolNames.ListAsignacionesRelacionadas => await ListAsignacionesRelacionadasAsync(
-                    historiaClinicaId, ventanaAsignacionesDias ?? 30, ct),
-                RevisionMcpToolNames.GetFormDefinition => await GetFormDefinitionAsync(historiaClinicaId, ct),
-                RevisionMcpToolNames.ListDocumentosHc => await ListDocumentosHcAsync(historiaClinicaId, ct),
+                    db, historiaClinicaId, ventanaAsignacionesDias ?? 30, ct),
+                RevisionMcpToolNames.GetFormDefinition => await GetFormDefinitionAsync(db, historiaClinicaId, ct),
+                RevisionMcpToolNames.ListDocumentosHc => await ListDocumentosHcAsync(db, historiaClinicaId, ct),
                 _ => null,
             };
             if (payload is null)
@@ -93,9 +107,9 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
 
     // ---- Tools ----
 
-    private async Task<string?> GetHistoriaClinicaAsync(Guid hcId, CancellationToken ct)
+    private static async Task<string?> GetHistoriaClinicaAsync(IApplicationDbContext db, Guid hcId, CancellationToken ct)
     {
-        var hc = await _db.HistoriasClinicas.AsNoTracking()
+        var hc = await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.Id == hcId)
             .Select(h => new
             {
@@ -147,12 +161,12 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
         return JsonSerializer.Serialize(payload, JsonOpts);
     }
 
-    private async Task<string?> GetPacienteAsync(Guid hcId, CancellationToken ct)
+    private static async Task<string?> GetPacienteAsync(IApplicationDbContext db, Guid hcId, CancellationToken ct)
     {
-        var pacId = await _db.HistoriasClinicas.AsNoTracking()
+        var pacId = await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.Id == hcId).Select(h => (Guid?)h.PacienteId).FirstOrDefaultAsync(ct);
         if (pacId is null) { return null; }
-        var pac = await _db.Pacientes.AsNoTracking()
+        var pac = await db.Pacientes.AsNoTracking()
             .Where(p => p.Id == pacId)
             .Select(p => new
             {
@@ -169,9 +183,9 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
         return pac is null ? null : JsonSerializer.Serialize(pac, JsonOpts);
     }
 
-    private async Task<string> ListOrdenesHcAsync(Guid hcId, CancellationToken ct)
+    private static async Task<string> ListOrdenesHcAsync(IApplicationDbContext db, Guid hcId, CancellationToken ct)
     {
-        var medicamentos = await _db.HistoriaClinicaMedicamentos.AsNoTracking()
+        var medicamentos = await db.HistoriaClinicaMedicamentos.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == hcId)
             .Select(x => new
             {
@@ -184,23 +198,23 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
                 x.Observacion,
             })
             .ToListAsync(ct);
-        var servicios = await _db.HistoriaClinicaOrdenesServicio.AsNoTracking()
+        var servicios = await db.HistoriaClinicaOrdenesServicio.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == hcId)
             .Select(x => new { x.CodigoServicio, x.Descripcion, x.Cantidad, x.Observaciones })
             .ToListAsync(ct);
-        var incapacidades = await _db.HistoriaClinicaIncapacidades.AsNoTracking()
+        var incapacidades = await db.HistoriaClinicaIncapacidades.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == hcId)
             .Select(x => new { x.Motivo, x.FechaDesde, x.FechaHasta, x.Dias, x.Tipo })
             .ToListAsync(ct);
-        var certificaciones = await _db.HistoriaClinicaCertificaciones.AsNoTracking()
+        var certificaciones = await db.HistoriaClinicaCertificaciones.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == hcId)
             .Select(x => new { x.Titulo, x.Contenido })
             .ToListAsync(ct);
-        var remisiones = await _db.HistoriaClinicaRemisiones.AsNoTracking()
+        var remisiones = await db.HistoriaClinicaRemisiones.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == hcId)
             .Select(x => new { x.Capitulo, x.EspecialidadCodigo, x.EspecialidadNombre, x.Cantidad, x.Motivo })
             .ToListAsync(ct);
-        var insumos = await _db.HistoriaClinicaInsumos.AsNoTracking()
+        var insumos = await db.HistoriaClinicaInsumos.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == hcId)
             .Select(x => new { x.Codigo, x.Descripcion, x.Cantidad, x.Observaciones })
             .ToListAsync(ct);
@@ -210,7 +224,7 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
         // en una sola query y particionamos en memoria para no repetir I/O.
         // Sin esto, el agente REVISOR CLINICO IA no ve nada de lo que se pide
         // por fuera de la propia IPS.
-        var externas = await _db.HistoriaClinicaOrdenesExternas.AsNoTracking()
+        var externas = await db.HistoriaClinicaOrdenesExternas.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == hcId)
             .Select(x => new { x.Tipo, x.Codigo, x.Descripcion, x.Cantidad, x.Observaciones })
             .ToListAsync(ct);
@@ -231,13 +245,13 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
         return JsonSerializer.Serialize(payload, JsonOpts);
     }
 
-    private async Task<string> ListNotasHcAsync(Guid hcId, CancellationToken ct)
+    private static async Task<string> ListNotasHcAsync(IApplicationDbContext db, Guid hcId, CancellationToken ct)
     {
         // Notas del paciente (no atadas a hcId directo, filtramos por PacienteId).
-        var pacId = await _db.HistoriasClinicas.AsNoTracking()
+        var pacId = await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.Id == hcId).Select(h => (Guid?)h.PacienteId).FirstOrDefaultAsync(ct);
         if (pacId is null) { return "[]"; }
-        var notas = await _db.NotasMedicas.AsNoTracking()
+        var notas = await db.NotasMedicas.AsNoTracking()
             .Where(n => n.PacienteId == pacId)
             .OrderByDescending(n => n.CreatedAt)
             .Take(30)
@@ -252,42 +266,42 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
         return JsonSerializer.Serialize(notas, JsonOpts);
     }
 
-    private async Task<string> ListEscalasHcAsync(Guid hcId, CancellationToken ct)
+    private static async Task<string> ListEscalasHcAsync(IApplicationDbContext db, Guid hcId, CancellationToken ct)
     {
-        var escalas = await _db.HistoriaClinicaEscalas.AsNoTracking()
+        var escalas = await db.HistoriaClinicaEscalas.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == hcId)
             .Select(x => new { x.Id, x.FormDefinitionId, x.FechaApertura, x.FechaCierre, x.EspecialistaNombre, x.ValoresJson })
             .ToListAsync(ct);
         return JsonSerializer.Serialize(escalas, JsonOpts);
     }
 
-    private async Task<string> ListEvolucionesHcAsync(Guid hcId, CancellationToken ct)
+    private static async Task<string> ListEvolucionesHcAsync(IApplicationDbContext db, Guid hcId, CancellationToken ct)
     {
-        var docs = await _db.HistoriaClinicaDocumentos.AsNoTracking()
+        var docs = await db.HistoriaClinicaDocumentos.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == hcId && x.Tipo == "EVOLUCION")
             .Select(x => new { x.Id, x.FormDefinitionId, x.FechaApertura, x.FechaCierre, x.EspecialistaNombre, x.ValoresJson })
             .ToListAsync(ct);
         return JsonSerializer.Serialize(docs, JsonOpts);
     }
 
-    private async Task<string> ListConsentimientosHcAsync(Guid hcId, CancellationToken ct)
+    private static async Task<string> ListConsentimientosHcAsync(IApplicationDbContext db, Guid hcId, CancellationToken ct)
     {
-        var docs = await _db.HistoriaClinicaDocumentos.AsNoTracking()
+        var docs = await db.HistoriaClinicaDocumentos.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == hcId && x.Tipo == "CONSENTIMIENTO")
             .Select(x => new { x.Id, x.FormDefinitionId, x.FechaApertura, x.FechaCierre, x.EspecialistaNombre, x.ValoresJson })
             .ToListAsync(ct);
         return JsonSerializer.Serialize(docs, JsonOpts);
     }
 
-    private async Task<string> ListAsignacionesRelacionadasAsync(Guid hcId, int ventanaDias, CancellationToken ct)
+    private static async Task<string> ListAsignacionesRelacionadasAsync(IApplicationDbContext db, Guid hcId, int ventanaDias, CancellationToken ct)
     {
-        var pacId = await _db.HistoriasClinicas.AsNoTracking()
+        var pacId = await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.Id == hcId).Select(h => (Guid?)h.PacienteId).FirstOrDefaultAsync(ct);
         if (pacId is null) { return "[]"; }
-        var hcFecha = await _db.HistoriasClinicas.AsNoTracking()
+        var hcFecha = await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.Id == hcId).Select(h => h.FechaCierre ?? h.FechaApertura).FirstOrDefaultAsync(ct);
         var desde = hcFecha.AddDays(-ventanaDias);
-        var asigs = await _db.Asignaciones.AsNoTracking()
+        var asigs = await db.Asignaciones.AsNoTracking()
             .Where(a => a.PacienteId == pacId && a.CreatedAt >= desde && a.CreatedAt <= hcFecha)
             .Select(a => new
             {
@@ -314,9 +328,9 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
     /// tipologia/categoria, tipo MIME, tamano, url servible) — nunca el binario.
     /// Sin esto el agente no ve resultados de laboratorio adjuntos, consentimientos
     /// escaneados, fotos de la valoracion, etc.</summary>
-    private async Task<string> ListDocumentosHcAsync(Guid hcId, CancellationToken ct)
+    private static async Task<string> ListDocumentosHcAsync(IApplicationDbContext db, Guid hcId, CancellationToken ct)
     {
-        var docs = await _db.NotaMedicaDocumentos.AsNoTracking()
+        var docs = await db.NotaMedicaDocumentos.AsNoTracking()
             .Where(d => d.HistoriaClinicaId == hcId)
             .OrderByDescending(d => d.CreatedAt)
             .Select(d => new
@@ -342,14 +356,14 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
     /// la auditoria de COMPLETITUD queda explicito y objetivo: estos y solo estos son los campos que
     /// el formato captura.
     /// </summary>
-    private async Task<string?> GetFormDefinitionAsync(Guid hcId, CancellationToken ct)
+    private static async Task<string?> GetFormDefinitionAsync(IApplicationDbContext db, Guid hcId, CancellationToken ct)
     {
-        var hc = await _db.HistoriasClinicas.AsNoTracking()
+        var hc = await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.Id == hcId)
             .Select(h => new { h.FormDefinitionId, h.ValoresJson })
             .FirstOrDefaultAsync(ct);
         if (hc is null) { return null; }
-        var fd = await _db.FormDefinitions.AsNoTracking()
+        var fd = await db.FormDefinitions.AsNoTracking()
             .Where(f => f.Id == hc.FormDefinitionId)
             .Select(f => new { f.Codigo, f.Nombre, f.Tipo, f.Version, f.SchemaJson })
             .FirstOrDefaultAsync(ct);

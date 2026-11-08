@@ -4,10 +4,12 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy.Agendas;
 
-public sealed class NovedadProfesionalService(IApplicationDbContext db, ITenantContext tenant) : INovedadProfesionalService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class NovedadProfesionalService(IApplicationDbContextFactory dbFactory, ITenantContext tenant) : INovedadProfesionalService
 {
     public async Task<IReadOnlyList<NovedadProfesionalDto>> ListarPorProfesionalAsync(Guid profesionalId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var rows = await db.NovedadesProfesional.AsNoTracking()
             .Where(n => n.ProfesionalId == profesionalId)
             .OrderByDescending(n => n.FechaDesde).ThenByDescending(n => n.FechaHasta)
@@ -17,6 +19,7 @@ public sealed class NovedadProfesionalService(IApplicationDbContext db, ITenantC
 
     public async Task<NovedadProfesionalDto> GuardarAsync(Guid profesionalId, GuardarNovedadProfesionalCmd cmd, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (profesionalId == Guid.Empty) { throw new InvalidOperationException("Selecciona un profesional."); }
         Validar(cmd);
@@ -55,6 +58,7 @@ public sealed class NovedadProfesionalService(IApplicationDbContext db, ITenantC
 
     public async Task<bool> EliminarAsync(Guid novedadId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var entity = await db.NovedadesProfesional.FirstOrDefaultAsync(n => n.Id == novedadId, ct);
         if (entity is null) { return false; }
         db.NovedadesProfesional.Remove(entity);

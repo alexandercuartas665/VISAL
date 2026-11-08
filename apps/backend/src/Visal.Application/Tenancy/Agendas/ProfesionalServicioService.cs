@@ -5,10 +5,12 @@ using Visal.Domain.Enums;
 
 namespace Visal.Application.Tenancy.Agendas;
 
-public sealed class ProfesionalServicioService(IApplicationDbContext db, ITenantContext tenant) : IProfesionalServicioService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class ProfesionalServicioService(IApplicationDbContextFactory dbFactory, ITenantContext tenant) : IProfesionalServicioService
 {
     public async Task<IReadOnlyList<ProfesionalServicioDto>> ListarPorProfesionalAsync(Guid profesionalId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var rows = await db.ProfesionalServicios.AsNoTracking()
             .Where(s => s.ProfesionalId == profesionalId)
             .OrderBy(s => s.Nombre)
@@ -18,6 +20,7 @@ public sealed class ProfesionalServicioService(IApplicationDbContext db, ITenant
 
     public async Task<IReadOnlyList<CatalogoServicioBusquedaDto>> BuscarCatalogoAsync(Guid profesionalId, string? termino, int take = 20, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var t = (termino ?? "").Trim().ToLowerInvariant();
         if (t.Length < 2) { return Array.Empty<CatalogoServicioBusquedaDto>(); }
 
@@ -40,6 +43,7 @@ public sealed class ProfesionalServicioService(IApplicationDbContext db, ITenant
 
     public async Task<ProfesionalServicioDto> AgregarAsync(Guid profesionalId, Guid catalogoServicioReferenciaId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         var cat = await db.CatalogosServicioReferencia.AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == catalogoServicioReferenciaId, ct)
@@ -68,6 +72,7 @@ public sealed class ProfesionalServicioService(IApplicationDbContext db, ITenant
 
     public async Task<bool> QuitarAsync(Guid profesionalServicioId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var entity = await db.ProfesionalServicios.FirstOrDefaultAsync(s => s.Id == profesionalServicioId, ct);
         if (entity is null) { return false; }
         db.ProfesionalServicios.Remove(entity);

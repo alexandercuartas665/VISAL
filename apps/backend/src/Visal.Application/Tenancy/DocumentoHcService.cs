@@ -4,7 +4,8 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext tenant, IAuditWriter audit) : IDocumentoHcService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class DocumentoHcService(IApplicationDbContextFactory dbFactory, ITenantContext tenant, IAuditWriter audit) : IDocumentoHcService
 {
     private static string NormalizarTipo(string? tipo)
     {
@@ -16,6 +17,7 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
     public async Task<IReadOnlyList<DocumentoHcFormatoDto>> ListarFormatosDisponiblesAsync(
         Guid historiaId, string tipo, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var t = NormalizarTipo(tipo);
 
         var hc = await db.HistoriasClinicas.AsNoTracking()
@@ -47,6 +49,7 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
     public async Task<IReadOnlyList<DocumentoHcFormatoDto>> ListarFormatosPorTipoFormularioAsync(
         string tipoFormulario, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var t = NormalizarTipo(tipoFormulario);
         // Todos los FormDefinition activos del tenant cuyo campo Tipo coincida
         // (case-insensitive). Sin filtro por relaciones_formulario. El query filter
@@ -64,6 +67,7 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
     public async Task<IReadOnlyList<DocumentoHcItemDto>> ListarPorHistoriaAsync(
         Guid historiaId, string tipo, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var t = NormalizarTipo(tipo);
         var rows = await db.HistoriaClinicaDocumentos.AsNoTracking()
             .Where(d => d.HistoriaClinicaId == historiaId && d.Tipo == t)
@@ -86,6 +90,7 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
 
     public async Task<DocumentoHcDetailDto> IniciarAsync(IniciarDocumentoHcRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         var t = NormalizarTipo(req.Tipo);
         await db.EnsureAbiertaAsync(req.HistoriaClinicaId, ct);
@@ -146,6 +151,7 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
 
     public async Task<DocumentoHcDetailDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var r = await db.HistoriaClinicaDocumentos.AsNoTracking()
             .Where(d => d.Id == id)
             .Join(db.FormDefinitions.AsNoTracking(), d => d.FormDefinitionId, f => f.Id, (d, f) => new
@@ -166,6 +172,7 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
 
     public async Task<bool> GuardarValoresAsync(Guid id, string valoresJson, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var d = await db.HistoriaClinicaDocumentos.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (d is null) { return false; }
         await db.EnsureAbiertaAsync(d.HistoriaClinicaId, ct);
@@ -176,6 +183,7 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
 
     public async Task<bool> CerrarAsync(Guid id, string valoresJson, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var d = await db.HistoriaClinicaDocumentos.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (d is null) { return false; }
         await db.EnsureAbiertaAsync(d.HistoriaClinicaId, ct);
@@ -188,6 +196,7 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
 
     public async Task<bool> ReabrirAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var d = await db.HistoriaClinicaDocumentos.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (d is null) { return false; }
         if (d.Estado != HistoriaClinicaEstado.Cerrada)
@@ -200,7 +209,7 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
         // Auditoria: reabrir un documento ya marcado como definitivo es una
         // accion administrativa que debe quedar trazada (quien, cuando, sobre
         // que documento, de que HC y de que tipo).
-        audit.Write(actor, "documento-hc.reabrir", nameof(HistoriaClinicaDocumento), d.Id,
+        audit.Write(db, actor, "documento-hc.reabrir", nameof(HistoriaClinicaDocumento), d.Id,
             previousValue: new { estado = HistoriaClinicaEstado.Cerrada.ToString(), fechaCierre = fechaCierrePrev },
             newValue: new { estado = d.Estado.ToString(), historiaClinicaId = d.HistoriaClinicaId, tipo = d.Tipo },
             tenantId: d.TenantId);
@@ -210,6 +219,7 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
 
     public async Task<bool> EliminarAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var d = await db.HistoriaClinicaDocumentos.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (d is null) { return false; }
         await db.EnsureAbiertaAsync(d.HistoriaClinicaId, ct);
@@ -220,6 +230,7 @@ public sealed class DocumentoHcService(IApplicationDbContext db, ITenantContext 
 
     public async Task<int> ContarPorHistoriaAsync(Guid historiaId, string tipo, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var t = NormalizarTipo(tipo);
         return await db.HistoriaClinicaDocumentos.CountAsync(d => d.HistoriaClinicaId == historiaId && d.Tipo == t, ct);
     }

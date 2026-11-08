@@ -8,10 +8,13 @@ namespace Visal.Application.Tenancy;
 /// Implementacion: si el usuario es global ve todos los tenants activos del SaaS;
 /// si no, solo aquellos donde tiene un TenantUser activo.
 /// </summary>
-public sealed class EmpresaSelectorService(IApplicationDbContext db) : IEmpresaSelectorService
+// Ola 4c (P0): contexto corto por operacion (using var db = dbFactory.Create();) en vez del
+// IApplicationDbContext scoped. El selector de empresa se usa en el circuito Blazor (barra superior).
+public sealed class EmpresaSelectorService(IApplicationDbContextFactory dbFactory) : IEmpresaSelectorService
 {
     public async Task<IReadOnlyList<EmpresaOpcionDto>> GetOpcionesAsync(Guid platformUserId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var user = await db.PlatformUsers.IgnoreQueryFilters()
             .FirstOrDefaultAsync(u => u.Id == platformUserId, ct);
         if (user is null) { return Array.Empty<EmpresaOpcionDto>(); }
@@ -39,6 +42,7 @@ public sealed class EmpresaSelectorService(IApplicationDbContext db) : IEmpresaS
 
     public async Task<EmpresaSeleccionResultado?> ResolverAsync(Guid platformUserId, Guid tenantId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var user = await db.PlatformUsers.IgnoreQueryFilters()
             .FirstOrDefaultAsync(u => u.Id == platformUserId, ct);
         if (user is null) { return null; }

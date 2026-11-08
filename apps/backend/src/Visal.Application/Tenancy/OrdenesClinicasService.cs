@@ -10,11 +10,13 @@ namespace Visal.Application.Tenancy;
 /// Consulta read-only del modulo "Ordenes Clinicas". No expone metodos de
 /// edicion porque el modulo es de consulta + reimpresion.
 /// </summary>
-public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesClinicasService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class OrdenesClinicasService(IApplicationDbContextFactory dbFactory) : IOrdenesClinicasService
 {
     public async Task<IReadOnlyList<OrdenClinicaItemDto>> BuscarAsync(
         OrdenesClinicasFiltro filtro, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var q = db.HistoriasClinicas.AsNoTracking().AsQueryable();
 
         if (filtro.SoloCerradas)
@@ -119,8 +121,8 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
             //  (a) HCs cuyo profesional no tiene firma registrada (imprimen sin firma),
             //  (b) formulas MEDICAS reparables (snapshot MED sin firma + profesional con
             //      firma hoy -> inyectables con "Reparar firma").
-            var profSet = await SetProfSinFirmaAsync(null, ct);
-            var medSet = await SetSinFirmaAsync(null, soloReparables: true, ct);
+            var profSet = await SetProfSinFirmaAsync(db, null, ct);
+            var medSet = await SetSinFirmaAsync(db, null, soloReparables: true, ct);
             var union = new HashSet<Guid>(profSet);
             union.UnionWith(medSet);
             q = union.Count == 0
@@ -438,8 +440,8 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
         //    la accion "Reparar firma".
         //  - profSinFirmaSet: la HC imprime sin firma porque el profesional no tiene firma
         //    (o no hay profesional) -> se marca, pero NO se repara por inyeccion.
-        var sinFirmaSet = await SetSinFirmaAsync(hcIds, soloReparables: true, ct);
-        var profSinFirmaSet = await SetProfSinFirmaAsync(hcIds, ct);
+        var sinFirmaSet = await SetSinFirmaAsync(db, hcIds, soloReparables: true, ct);
+        var profSinFirmaSet = await SetProfSinFirmaAsync(db, hcIds, ct);
 
         var result = rows.Select(r =>
         {
@@ -669,8 +671,8 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
     /// false, devuelve todas las MED sin firma (para el filtro "sin firma", sin ocultar las
     /// que aun no son reparables porque el profesional no tiene firma).
     /// Si <paramref name="hcIds"/> es null revisa todo el tenant; si no, solo esas HCs.</summary>
-    private async Task<HashSet<Guid>> SetSinFirmaAsync(
-        IReadOnlyCollection<Guid>? hcIds, bool soloReparables, CancellationToken ct)
+    private static async Task<HashSet<Guid>> SetSinFirmaAsync(
+        IApplicationDbContext db, IReadOnlyCollection<Guid>? hcIds, bool soloReparables, CancellationToken ct)
     {
         var baseQ = db.OrdenesMedicamentosPublicas.AsNoTracking()
             .Where(o => o.RevocadaAt == null && o.TipoOrden == "MED");
@@ -716,7 +718,7 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
     /// profesionales.firma_url; si esa firma no existe, nada imprime firmado. No es
     /// reparable por inyeccion: se corrige registrando la firma del profesional.
     /// Si <paramref name="hcIds"/> es null revisa todo el tenant; si no, solo esas HCs.</summary>
-    private async Task<HashSet<Guid>> SetProfSinFirmaAsync(IReadOnlyCollection<Guid>? hcIds, CancellationToken ct)
+    private static async Task<HashSet<Guid>> SetProfSinFirmaAsync(IApplicationDbContext db, IReadOnlyCollection<Guid>? hcIds, CancellationToken ct)
     {
         var q = db.HistoriasClinicas.AsNoTracking().AsQueryable();
         if (hcIds is not null)
@@ -760,6 +762,7 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
 
     public async Task<int> RepararFirmasPorHistoriaAsync(Guid historiaClinicaId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var firmaUrl = await (from h in db.HistoriasClinicas.AsNoTracking()
                               where h.Id == historiaClinicaId && h.ProfesionalId != null
                               join pr in db.Profesionales.AsNoTracking() on h.ProfesionalId equals (Guid?)pr.Id
@@ -778,6 +781,7 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
 
     public async Task<int> RepararFirmasFaltantesAsync(Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var candidatos = await (from o in db.OrdenesMedicamentosPublicas
                                 where o.RevocadaAt == null && o.TipoOrden == "MED"
                                 join h in db.HistoriasClinicas.AsNoTracking() on o.HistoriaClinicaId equals h.Id
@@ -814,6 +818,7 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
 
     public async Task<IReadOnlyList<string>> ListarEspecialistasAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.EspecialistaNombre != null && h.EspecialistaNombre != "")
             .Select(h => h.EspecialistaNombre!)
@@ -824,6 +829,7 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
 
     public async Task<IReadOnlyList<AseguradoraOpcionDto>> ListarAseguradorasAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Solo aseguradoras que realmente aparecen en el listado — HCs ->
         // Paciente -> paciente_contratos -> Contrato -> Aseguradora. Evita
         // ensuciar el filtro con EPSes que el tenant configuro pero que
@@ -860,6 +866,7 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
 
     public async Task<IReadOnlyList<SucursalOpcionDto>> ListarSucursalesAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Solo sucursales que aparecen como SedeAtencionId de pacientes con HCs.
         // Partido en dos queries por la misma razon que Aseguradoras: EF Core
         // no traduce Distinct()+Join en cadena tras query filters.
@@ -881,6 +888,7 @@ public sealed class OrdenesClinicasService(IApplicationDbContext db) : IOrdenesC
 
     public async Task<IReadOnlyList<FormatoHcOpcionDto>> ListarFormatosAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Formatos que efectivamente aparecen en HCs del tenant. Distinct por Id
         // para no listar el mismo formato N veces. Ordenados por codigo para que
         // el dropdown quede predecible (HC-FO-01, HC-FO-02, ...).

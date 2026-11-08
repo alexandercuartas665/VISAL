@@ -132,7 +132,8 @@ public sealed class BorradoSinHuerfanasTests
         await using var ctx = NewCtx();
         var (_, turnoId, hcId) = await SembrarConHcAsync(ctx, HistoriaClinicaEstado.Cerrada);
 
-        var ag = new AsignacionAgendasService(ctx, new FakeFestivos(), Svc(ctx));
+        var ag = new AsignacionAgendasService(
+            new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }), new FakeFestivos(), Svc(ctx));
         await Assert.ThrowsAsync<InvalidOperationException>(
             () => ag.CancelarCitaAsync(turnoId, Guid.NewGuid()));
 
@@ -146,7 +147,8 @@ public sealed class BorradoSinHuerfanasTests
         await using var ctx = NewCtx();
         var (_, turnoId, hcId) = await SembrarConHcAsync(ctx, HistoriaClinicaEstado.Inactiva);
 
-        var ag = new AsignacionAgendasService(ctx, new FakeFestivos(), Svc(ctx));
+        var ag = new AsignacionAgendasService(
+            new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }), new FakeFestivos(), Svc(ctx));
         var ok = await ag.CancelarCitaAsync(turnoId, Guid.NewGuid());
         Assert.True(ok);
 

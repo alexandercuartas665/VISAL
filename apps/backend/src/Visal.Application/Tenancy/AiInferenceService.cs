@@ -8,16 +8,17 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class AiInferenceService : IAiInferenceService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ISecretProtector _secretProtector;
     private readonly IAiProviderClient _client;
     private readonly IAiUsageService _usage;
 
-    public AiInferenceService(IApplicationDbContext db, ISecretProtector secretProtector, IAiProviderClient client, IAiUsageService usage)
+    public AiInferenceService(IApplicationDbContextFactory dbFactory, ISecretProtector secretProtector, IAiProviderClient client, IAiUsageService usage)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _secretProtector = secretProtector;
         _client = client;
         _usage = usage;
@@ -28,11 +29,12 @@ public sealed class AiInferenceService : IAiInferenceService
 
     public async Task<AiChatResult> RunAgentAsync(Guid agentId, IReadOnlyList<AiChatTurn> turns, string? systemPromptOverride, string source, CancellationToken cancellationToken = default)
     {
-        var agent = await _db.AiAgents.AsNoTracking().FirstOrDefaultAsync(a => a.Id == agentId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var agent = await db.AiAgents.AsNoTracking().FirstOrDefaultAsync(a => a.Id == agentId, cancellationToken);
         if (agent is null) { return new AiChatResult(false, null, "El agente no existe."); }
 
         // La cuenta del proveedor (API key, modelo, base url) la define el Super Admin (config global).
-        var providerCfg = await _db.AiProviderConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.Provider == agent.Provider, cancellationToken);
+        var providerCfg = await db.AiProviderConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.Provider == agent.Provider, cancellationToken);
         if (providerCfg is null || !providerCfg.IsEnabled || string.IsNullOrWhiteSpace(providerCfg.ApiKeyEncrypted))
         {
             return new AiChatResult(false, null, $"El proveedor {agent.Provider} no esta habilitado en la plataforma.");
@@ -58,13 +60,13 @@ public sealed class AiInferenceService : IAiInferenceService
         }
 
         // Recursos del agente (todos los tipos): se usan para componer el prompt y para resolver adjuntos.
-        var resources = await _db.AiAgentResources.AsNoTracking()
+        var resources = await db.AiAgentResources.AsNoTracking()
             .Where(r => r.AgentId == agentId)
             .OrderBy(r => r.SortOrder)
             .Select(r => new AiChatAttachment(r.Name, r.ResourceType, r.FileUrl, r.FileName, r.Detail))
             .ToListAsync(cancellationToken);
 
-        var systemPrompt = await BuildSystemPrompt(agentId, systemPromptOverride ?? agent.SystemPrompt, resources, cancellationToken);
+        var systemPrompt = await BuildSystemPrompt(db, agentId, systemPromptOverride ?? agent.SystemPrompt, resources, cancellationToken);
 
         var result = await _client.CompleteAsync(agent.Provider, apiKey, providerCfg.BaseUrl, model, systemPrompt, turns, cancellationToken);
 
@@ -85,11 +87,11 @@ public sealed class AiInferenceService : IAiInferenceService
     }
 
     // Arma el prompt del sistema: prompt base + enrutador (con {{recurso}} expandido) + catalogo de recursos.
-    private async Task<string> BuildSystemPrompt(Guid agentId, string basePrompt, IReadOnlyList<AiChatAttachment> resources, CancellationToken ct)
+    private async Task<string> BuildSystemPrompt(IApplicationDbContext db, Guid agentId, string basePrompt, IReadOnlyList<AiChatAttachment> resources, CancellationToken ct)
     {
         var sb = new StringBuilder(ExpandResourceRefs(basePrompt, resources));
 
-        var prompts = await _db.AiAgentPrompts.AsNoTracking()
+        var prompts = await db.AiAgentPrompts.AsNoTracking()
             .Where(p => p.AgentId == agentId)
             .OrderBy(p => p.SortOrder)
             .Select(p => new { p.Name, p.Rule, p.Body })

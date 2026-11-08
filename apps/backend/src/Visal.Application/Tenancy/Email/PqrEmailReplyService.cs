@@ -7,15 +7,17 @@ namespace Visal.Application.Tenancy.Email;
 
 public sealed class PqrEmailReplyService : IPqrEmailReplyService
 {
-    private readonly IApplicationDbContext _db;
+    // Ola 4c estabilizacion (P0): contexto CORTO por operacion (using var db = _dbFactory.Create();)
+    // en vez del IApplicationDbContext scoped.
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ISecretProtector _secret;
     private readonly IPqrEmailReplySender _sender;
     private readonly ITenantContext _tenant;
 
-    public PqrEmailReplyService(IApplicationDbContext db, ISecretProtector secret,
+    public PqrEmailReplyService(IApplicationDbContextFactory dbFactory, ISecretProtector secret,
         IPqrEmailReplySender sender, ITenantContext tenant)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _secret = secret;
         _sender = sender;
         _tenant = tenant;
@@ -23,7 +25,8 @@ public sealed class PqrEmailReplyService : IPqrEmailReplyService
 
     public async Task<PqrReplyContextDto> GetReplyContextAsync(Guid cardId, CancellationToken ct = default)
     {
-        var log = await UltimoLogAsync(cardId, ct);
+        using var db = _dbFactory.Create();
+        var log = await UltimoLogAsync(db, cardId, ct);
         if (log is null)
         {
             return new PqrReplyContextDto(cardId, false,
@@ -35,7 +38,7 @@ public sealed class PqrEmailReplyService : IPqrEmailReplyService
                 "El correo original no registro un remitente valido.", null, log.FromName, "", null, log.ReceivedAt, log.Subject);
         }
 
-        var cfg = await _db.TenantEmailIngestConfigs.AsNoTracking()
+        var cfg = await db.TenantEmailIngestConfigs.AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == log.ConfigId, ct);
         if (cfg is null || string.IsNullOrEmpty(cfg.AppPasswordEncrypted))
         {
@@ -54,13 +57,14 @@ public sealed class PqrEmailReplyService : IPqrEmailReplyService
     {
         if (string.IsNullOrWhiteSpace(cuerpo)) { return (false, "El mensaje esta vacio."); }
 
-        var log = await UltimoLogAsync(cardId, ct);
+        using var db = _dbFactory.Create();
+        var log = await UltimoLogAsync(db, cardId, ct);
         if (log is null || string.IsNullOrWhiteSpace(log.FromAddress))
         {
             return (false, "No se encontro el correo original para responder.");
         }
 
-        var cfg = await _db.TenantEmailIngestConfigs.AsNoTracking()
+        var cfg = await db.TenantEmailIngestConfigs.AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == log.ConfigId, ct);
         if (cfg is null || string.IsNullOrEmpty(cfg.AppPasswordEncrypted))
         {
@@ -88,7 +92,7 @@ public sealed class PqrEmailReplyService : IPqrEmailReplyService
 
         // Registrar en la tarjeta: una accion + un comentario con el texto enviado.
         var adjTxt = (adjuntos is { Count: > 0 }) ? $" (con {adjuntos.Count} adjunto(s))" : "";
-        _db.TaskCardActivities.Add(new TaskCardActivity
+        db.TaskCardActivities.Add(new TaskCardActivity
         {
             TaskCardId = cardId,
             Type = TaskActivityType.Action,
@@ -96,7 +100,7 @@ public sealed class PqrEmailReplyService : IPqrEmailReplyService
             ActorName = actorDisplayName,
             Text = $"respondio el correo a {log.FromAddress}{adjTxt}",
         });
-        _db.TaskCardActivities.Add(new TaskCardActivity
+        db.TaskCardActivities.Add(new TaskCardActivity
         {
             TaskCardId = cardId,
             Type = TaskActivityType.Comment,
@@ -104,7 +108,7 @@ public sealed class PqrEmailReplyService : IPqrEmailReplyService
             ActorName = actorDisplayName,
             Text = $"✉ Respuesta enviada — Asunto: {subject}\n\n{cuerpo}",
         });
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return (true, null);
     }
 
@@ -112,7 +116,8 @@ public sealed class PqrEmailReplyService : IPqrEmailReplyService
 
     public async Task<IReadOnlyList<PqrPlantillaDto>> ListPlantillasAsync(CancellationToken ct = default)
     {
-        return await _db.PqrRespuestaPlantillas.AsNoTracking()
+        using var db = _dbFactory.Create();
+        return await db.PqrRespuestaPlantillas.AsNoTracking()
             .Where(p => p.IsActive)
             .OrderBy(p => p.SortOrder).ThenBy(p => p.Nombre)
             .Select(p => new PqrPlantillaDto(p.Id, p.Nombre, p.Asunto, p.Cuerpo))
@@ -125,39 +130,41 @@ public sealed class PqrEmailReplyService : IPqrEmailReplyService
         if (string.IsNullOrWhiteSpace(req.Nombre)) { throw new InvalidOperationException("El nombre es obligatorio."); }
         if (string.IsNullOrWhiteSpace(req.Cuerpo)) { throw new InvalidOperationException("El cuerpo es obligatorio."); }
 
+        using var db = _dbFactory.Create();
         PqrRespuestaPlantilla p;
         if (req.Id is { } id && id != Guid.Empty)
         {
-            p = await _db.PqrRespuestaPlantillas.FirstOrDefaultAsync(x => x.Id == id, ct)
+            p = await db.PqrRespuestaPlantillas.FirstOrDefaultAsync(x => x.Id == id, ct)
                 ?? throw new InvalidOperationException("La plantilla no existe.");
         }
         else
         {
             p = new PqrRespuestaPlantilla { TenantId = tid };
-            var maxOrder = await _db.PqrRespuestaPlantillas.Select(x => (int?)x.SortOrder).MaxAsync(ct) ?? -1;
+            var maxOrder = await db.PqrRespuestaPlantillas.Select(x => (int?)x.SortOrder).MaxAsync(ct) ?? -1;
             p.SortOrder = maxOrder + 1;
-            _db.PqrRespuestaPlantillas.Add(p);
+            db.PqrRespuestaPlantillas.Add(p);
         }
         p.Nombre = req.Nombre.Trim();
         p.Asunto = string.IsNullOrWhiteSpace(req.Asunto) ? null : req.Asunto.Trim();
         p.Cuerpo = req.Cuerpo;
         p.IsActive = true;
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return p.Id;
     }
 
     public async Task EliminarPlantillaAsync(Guid id, CancellationToken ct = default)
     {
-        var p = await _db.PqrRespuestaPlantillas.FirstOrDefaultAsync(x => x.Id == id, ct);
+        using var db = _dbFactory.Create();
+        var p = await db.PqrRespuestaPlantillas.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (p is null) { return; }
-        _db.PqrRespuestaPlantillas.Remove(p);
-        await _db.SaveChangesAsync(ct);
+        db.PqrRespuestaPlantillas.Remove(p);
+        await db.SaveChangesAsync(ct);
     }
 
     // ---- Helpers ----
 
-    private Task<EmailIngestLog?> UltimoLogAsync(Guid cardId, CancellationToken ct)
-        => _db.EmailIngestLogs.AsNoTracking()
+    private static Task<EmailIngestLog?> UltimoLogAsync(IApplicationDbContext db, Guid cardId, CancellationToken ct)
+        => db.EmailIngestLogs.AsNoTracking()
             .Where(l => l.TaskCardId == cardId && l.MessageId != null)
             .OrderByDescending(l => l.ReceivedAt).ThenByDescending(l => l.ProcessedAt)
             .FirstOrDefaultAsync(ct);

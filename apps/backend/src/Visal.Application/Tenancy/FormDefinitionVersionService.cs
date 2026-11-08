@@ -4,18 +4,19 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class FormDefinitionVersionService : IFormDefinitionVersionService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenantContext;
     private readonly IAuditWriter _audit;
 
     public FormDefinitionVersionService(
-        IApplicationDbContext db,
+        IApplicationDbContextFactory dbFactory,
         ITenantContext tenantContext,
         IAuditWriter audit)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenantContext = tenantContext;
         _audit = audit;
     }
@@ -24,9 +25,10 @@ public sealed class FormDefinitionVersionService : IFormDefinitionVersionService
         Guid formDefinitionId,
         CancellationToken cancellationToken = default)
     {
+        using var db = _dbFactory.Create();
         // El query filter global por TenantId garantiza que solo veo snapshots
         // de mi tenant — no necesito filtrar manualmente por TenantId aqui.
-        return await _db.FormDefinitionSnapshots
+        return await db.FormDefinitionSnapshots
             .AsNoTracking()
             .Where(s => s.FormDefinitionId == formDefinitionId)
             .OrderByDescending(s => s.SnapshotAt)
@@ -41,7 +43,8 @@ public sealed class FormDefinitionVersionService : IFormDefinitionVersionService
         Guid snapshotId,
         CancellationToken cancellationToken = default)
     {
-        return await _db.FormDefinitionSnapshots
+        using var db = _dbFactory.Create();
+        return await db.FormDefinitionSnapshots
             .AsNoTracking()
             .Where(s => s.Id == snapshotId)
             .Select(s => new FormDefinitionSnapshotDetailDto(
@@ -57,15 +60,16 @@ public sealed class FormDefinitionVersionService : IFormDefinitionVersionService
         Guid actorUserId,
         CancellationToken cancellationToken = default)
     {
+        using var db = _dbFactory.Create();
         // Cargamos el snapshot completo (incluye el schema_json) Y la fila viva
         // del formulario al que pertenece. Ambas operaciones pasan por el query
         // filter global, asi que no veo nada de otros tenants.
-        var snapshot = await _db.FormDefinitionSnapshots
+        var snapshot = await db.FormDefinitionSnapshots
             .AsNoTracking()
             .FirstOrDefaultAsync(s => s.Id == snapshotId, cancellationToken);
         if (snapshot is null) { return false; }
 
-        var live = await _db.FormDefinitions
+        var live = await db.FormDefinitions
             .FirstOrDefaultAsync(f => f.Id == snapshot.FormDefinitionId, cancellationToken);
         if (live is null) { return false; }
 
@@ -83,14 +87,14 @@ public sealed class FormDefinitionVersionService : IFormDefinitionVersionService
         live.PrefillRoutesJson = snapshot.PrefillRoutesJson;
         live.Activo = snapshot.Activo;
 
-        _audit.Write(actorUserId,
+        _audit.Write(db, actorUserId,
             "form-definition.restore",
             nameof(FormDefinition),
             live.Id,
             previousValue: new { snapshotId = snapshot.Id, snapshotAt = snapshot.SnapshotAt },
             newValue: new { codigo = snapshot.Codigo, nombre = snapshot.Nombre, version = snapshot.Version });
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return true;
     }
 }

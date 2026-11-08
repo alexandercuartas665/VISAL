@@ -4,11 +4,13 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class AtencionColumnaConfigService(IApplicationDbContext db, ITenantContext tenant)
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class AtencionColumnaConfigService(IApplicationDbContextFactory dbFactory, ITenantContext tenant)
     : IAtencionColumnaConfigService
 {
     public async Task<IReadOnlyList<AtencionColumnaConfigDto>> ListarAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.AtencionColumnaConfigs.AsNoTracking()
             .OrderBy(x => x.Orden ?? int.MaxValue).ThenBy(x => x.ColumnaKey)
             .Select(x => new AtencionColumnaConfigDto(x.ColumnaKey, x.Visible, x.Alias, x.Orden))
@@ -19,6 +21,7 @@ public sealed class AtencionColumnaConfigService(IApplicationDbContext db, ITena
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (items is null || items.Count == 0) { return; }
+        using var db = dbFactory.Create();
 
         // Merge por (tenant, columna_key): si la fila con default puro (Visible=true,
         // Alias=null, Orden=null) llega, borramos la fila para no ensuciar la tabla —

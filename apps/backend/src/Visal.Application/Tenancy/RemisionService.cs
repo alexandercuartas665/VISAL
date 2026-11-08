@@ -5,14 +5,16 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class RemisionService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     IHistoriaPrefillService prefill) : IRemisionService
 {
     public async Task<IReadOnlyList<RemisionItemDto>> ListarPorHistoriaAsync(
         Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.HistoriaClinicaRemisiones.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == historiaId)
             .OrderBy(x => x.Orden)
@@ -27,6 +29,7 @@ public sealed class RemisionService(
     public async Task<RemisionItemDto> AgregarAsync(
         Guid historiaId, AgregarRemisionRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (string.IsNullOrWhiteSpace(req.EspecialidadNombre))
         { throw new InvalidOperationException("La descripcion de la remision es obligatoria."); }
@@ -59,6 +62,7 @@ public sealed class RemisionService(
 
     public async Task<bool> EliminarAsync(Guid itemId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var entity = await db.HistoriaClinicaRemisiones.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
         var hcId = entity.HistoriaClinicaId;
@@ -71,6 +75,7 @@ public sealed class RemisionService(
 
     public async Task<int> ContarPorHistoriaAsync(Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.HistoriaClinicaRemisiones
             .CountAsync(x => x.HistoriaClinicaId == historiaId, ct);
     }

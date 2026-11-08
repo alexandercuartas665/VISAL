@@ -19,7 +19,8 @@ public interface IReporteCamposDinamicos
     IReadOnlyList<ReportableFieldDef> CamposPaciente { get; }
 }
 
-public sealed class ReporteCamposDinamicos(IApplicationDbContext db) : IReporteCamposDinamicos
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class ReporteCamposDinamicos(IApplicationDbContextFactory dbFactory) : IReporteCamposDinamicos
 {
     private IReadOnlyList<ReportableFieldDef>? _cache;
 
@@ -28,6 +29,7 @@ public sealed class ReporteCamposDinamicos(IApplicationDbContext db) : IReporteC
     public async Task<IReadOnlyList<ReportableFieldDef>> CargarAsync(CancellationToken ct = default)
     {
         if (_cache is not null) { return _cache; }
+        using var db = dbFactory.Create();
         // El query filter de tenant limita a los campos del tenant actual.
         var rows = await db.PacienteCampoDefs.AsNoTracking()
             .Where(c => c.Activo && c.Tipo != Domain.Enums.PacienteCampoTipo.Separador)

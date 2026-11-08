@@ -4,10 +4,12 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class PaqueteService(IApplicationDbContext db, ITenantContext tenant) : IPaqueteService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class PaqueteService(IApplicationDbContextFactory dbFactory, ITenantContext tenant) : IPaqueteService
 {
     public async Task<IReadOnlyList<PaqueteDto>> ListarAsync(string? filtro = null, bool soloActivos = false, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var q = db.Paquetes.AsNoTracking();
         if (soloActivos) { q = q.Where(p => p.Activo); }
         if (!string.IsNullOrWhiteSpace(filtro))
@@ -22,6 +24,7 @@ public sealed class PaqueteService(IApplicationDbContext db, ITenantContext tena
 
     public async Task<PaqueteDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.Paquetes.AsNoTracking().Where(p => p.Id == id)
             .Select(p => new PaqueteDto(p.Id, p.Codigo, p.Nombre, p.Activo, p.Precio, p.CupsRepresentativoServicioId, p.Observacion))
             .FirstOrDefaultAsync(ct);
@@ -29,6 +32,7 @@ public sealed class PaqueteService(IApplicationDbContext db, ITenantContext tena
 
     public async Task<PaqueteDto?> SaveAsync(SavePaqueteRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var codigo = (req.Codigo ?? "").Trim();
         var nombre = (req.Nombre ?? "").Trim();
         if (codigo.Length == 0 || nombre.Length == 0)
@@ -74,6 +78,7 @@ public sealed class PaqueteService(IApplicationDbContext db, ITenantContext tena
 
     public async Task<bool> DeleteAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.Paquetes.FirstOrDefaultAsync(p => p.Id == id, ct);
         if (e is null) { return false; }
         db.Paquetes.Remove(e);
@@ -83,6 +88,7 @@ public sealed class PaqueteService(IApplicationDbContext db, ITenantContext tena
 
     public async Task<int> SembrarAsync(IReadOnlyList<SavePaqueteRequest> items, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { return 0; }
         if (items.Count == 0) { return 0; }
 
@@ -123,6 +129,7 @@ public sealed class PaqueteService(IApplicationDbContext db, ITenantContext tena
 
     public async Task<IReadOnlyList<PaqueteServicioDto>> ListarServiciosAsync(Guid paqueteId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Join left al catalogo para traer el nombre. Si el catalogo se borro/desactivo,
         // el codigo queda visible con nombre null (marcado en UI como "(codigo suelto)").
         return await (
@@ -141,6 +148,7 @@ public sealed class PaqueteService(IApplicationDbContext db, ITenantContext tena
 
     public async Task<PaqueteServicioDto> AgregarServicioAsync(AgregarPaqueteServicioRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid)
         {
             throw new InvalidOperationException("Sin tenant activo.");
@@ -180,6 +188,7 @@ public sealed class PaqueteService(IApplicationDbContext db, ITenantContext tena
 
     public async Task<PaqueteServicioDto?> ActualizarCantidadServicioAsync(Guid servicioId, int cantidad, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (cantidad <= 0) { throw new InvalidOperationException("La cantidad debe ser mayor a cero."); }
         var e = await db.PaqueteServicios.FirstOrDefaultAsync(x => x.Id == servicioId, ct);
         if (e is null) { return null; }
@@ -196,6 +205,7 @@ public sealed class PaqueteService(IApplicationDbContext db, ITenantContext tena
 
     public async Task<bool> QuitarServicioAsync(Guid servicioId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.PaqueteServicios.FirstOrDefaultAsync(x => x.Id == servicioId, ct);
         if (e is null) { return false; }
         db.PaqueteServicios.Remove(e);
@@ -205,6 +215,7 @@ public sealed class PaqueteService(IApplicationDbContext db, ITenantContext tena
 
     public async Task<IReadOnlyList<CatalogoServicioAutocompleteDto>> BuscarCatalogoAsync(string filtro, int limite = 20, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var f = (filtro ?? "").Trim().ToLower();
         if (f.Length < 2) { return Array.Empty<CatalogoServicioAutocompleteDto>(); }
         if (limite <= 0 || limite > 100) { limite = 20; }
@@ -218,6 +229,7 @@ public sealed class PaqueteService(IApplicationDbContext db, ITenantContext tena
 
     public async Task<PaqueteDto?> MarcarRepresentativoAsync(Guid paqueteId, Guid? paqueteServicioId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var paquete = await db.Paquetes.FirstOrDefaultAsync(p => p.Id == paqueteId, ct);
         if (paquete is null) { return null; }
         if (paqueteServicioId is Guid sid)

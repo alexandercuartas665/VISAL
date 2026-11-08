@@ -23,8 +23,9 @@ namespace Visal.Application.Tenancy;
 ///      Organization pagador (EPS).
 ///  C5 (pendiente): DocumentReference epicrisis con PDF base64.
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class RdaConsultaBuilderService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     ILogger<RdaConsultaBuilderService> log) : IRdaConsultaBuilderService
 {
@@ -44,6 +45,7 @@ public sealed class RdaConsultaBuilderService(
         {
             throw new InvalidOperationException("No hay tenant activo.");
         }
+        using var db = dbFactory.Create();
         var advertencias = new List<string>();
 
         // ---------- Cargar datos clinicos de la HC ----------

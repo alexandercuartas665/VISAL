@@ -4,12 +4,14 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy.Reportes;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class PacienteIngresoService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant) : IPacienteIngresoService
 {
     public async Task<IReadOnlyList<PacienteIngresoDto>> ListarAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.PacienteIngresos.AsNoTracking()
             .OrderByDescending(x => x.FechaComentan)
             .Select(x => new PacienteIngresoDto(
@@ -23,6 +25,7 @@ public sealed class PacienteIngresoService(
 
     public async Task<IReadOnlyList<PacienteBusquedaDto>> BuscarPacientesAsync(string termino, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         termino = (termino ?? "").Trim();
         if (termino.Length < 2) { return []; }
         var t = termino.ToLower();
@@ -37,6 +40,7 @@ public sealed class PacienteIngresoService(
 
     public async Task<Guid> GuardarAsync(Guid? id, GuardarIngresoRequest req, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid)
         {
             throw new InvalidOperationException("Sin tenant activo.");
@@ -79,6 +83,7 @@ public sealed class PacienteIngresoService(
 
     public async Task<bool> EliminarAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.PacienteIngresos.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (e is null) { return false; }
         db.PacienteIngresos.Remove(e);

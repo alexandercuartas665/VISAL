@@ -4,11 +4,13 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class DiagnosticoService(IApplicationDbContext db, ITenantContext tenant) : IDiagnosticoService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class DiagnosticoService(IApplicationDbContextFactory dbFactory, ITenantContext tenant) : IDiagnosticoService
 {
     public async Task<(IReadOnlyList<DiagnosticoDto> rows, int total)> SearchAsync(
         string? termino, int skip, int take, bool soloHabilitados, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var q = db.Diagnosticos.AsNoTracking().AsQueryable();
         if (soloHabilitados) { q = q.Where(d => d.Habilitado); }
         if (!string.IsNullOrWhiteSpace(termino))
@@ -26,12 +28,14 @@ public sealed class DiagnosticoService(IApplicationDbContext db, ITenantContext 
 
     public async Task<DiagnosticoDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var d = await db.Diagnosticos.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         return d is null ? null : new DiagnosticoDto(d.Id, d.Codigo, d.Nombre, d.Descripcion, d.Habilitado, d.Fuente);
     }
 
     public async Task<DiagnosticoDto?> GetByCodigoAsync(string codigo, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var c = (codigo ?? "").Trim();
         if (c.Length == 0) { return null; }
         var cLower = c.ToLower();
@@ -42,6 +46,7 @@ public sealed class DiagnosticoService(IApplicationDbContext db, ITenantContext 
 
     public async Task<DiagnosticoDto?> SaveAsync(SaveDiagnosticoRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var codigo = (req.Codigo ?? "").Trim();
         var nombre = (req.Nombre ?? "").Trim();
         if (codigo.Length == 0) { throw new InvalidOperationException("El codigo es obligatorio."); }
@@ -78,6 +83,7 @@ public sealed class DiagnosticoService(IApplicationDbContext db, ITenantContext 
 
     public async Task<bool> DeleteAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.Diagnosticos.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (e is null) { return false; }
         db.Diagnosticos.Remove(e);
@@ -91,6 +97,7 @@ public sealed class DiagnosticoService(IApplicationDbContext db, ITenantContext 
         IProgress<DiagnosticoImportProgress>? progress = null,
         CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { return (0, 0); }
 
         // Sanitizar y de-duplicar por codigo dentro del batch mismo (el Excel puede
@@ -159,6 +166,7 @@ public sealed class DiagnosticoService(IApplicationDbContext db, ITenantContext 
 
     public async Task<int> ClearAllAsync(Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { return 0; }
         return await db.Diagnosticos.Where(d => d.TenantId == tid).ExecuteDeleteAsync(ct);
     }

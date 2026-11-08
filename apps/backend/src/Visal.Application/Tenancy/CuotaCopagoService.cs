@@ -4,10 +4,12 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class CuotaCopagoService(IApplicationDbContext db, ITenantContext tenant) : ICuotaCopagoService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class CuotaCopagoService(IApplicationDbContextFactory dbFactory, ITenantContext tenant) : ICuotaCopagoService
 {
     public async Task<IReadOnlyList<CuotaCopagoDto>> ListarAsync(string? tipo = null, bool soloActivos = false, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var q = db.CuotasCopagos.AsNoTracking();
         if (soloActivos) { q = q.Where(x => x.Activo); }
         if (!string.IsNullOrWhiteSpace(tipo))
@@ -28,6 +30,7 @@ public sealed class CuotaCopagoService(IApplicationDbContext db, ITenantContext 
         if (cat.Length == 0) { throw new InvalidOperationException("La categoria es obligatoria."); }
         if (req.ValorSugerido < 0) { throw new InvalidOperationException("El valor sugerido no puede ser negativo."); }
 
+        using var db = dbFactory.Create();
         CuotaCopago entity;
         if (req.Id is Guid id)
         {
@@ -59,6 +62,7 @@ public sealed class CuotaCopagoService(IApplicationDbContext db, ITenantContext 
 
     public async Task<bool> DeleteAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.CuotasCopagos.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (e is null) { return false; }
         db.CuotasCopagos.Remove(e);
@@ -69,6 +73,7 @@ public sealed class CuotaCopagoService(IApplicationDbContext db, ITenantContext 
     public async Task<int> SeedDefaultsAsync(Guid actor, CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { return 0; }
+        using var db = dbFactory.Create();
         if (await db.CuotasCopagos.AnyAsync(ct)) { return 0; }
         // Rangos estandar (aproximados) para 2026. El usuario los ajusta luego.
         var defaults = new (string Tipo, string Categoria, decimal Valor, string Desc)[]

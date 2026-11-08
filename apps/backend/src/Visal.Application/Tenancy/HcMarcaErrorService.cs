@@ -4,7 +4,8 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class HcMarcaErrorService(IApplicationDbContext db, ITenantContext tenant) : IHcMarcaErrorService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class HcMarcaErrorService(IApplicationDbContextFactory dbFactory, ITenantContext tenant) : IHcMarcaErrorService
 {
     public async Task<Guid> MarcarAsync(
         Guid asignacionId,
@@ -16,6 +17,7 @@ public sealed class HcMarcaErrorService(IApplicationDbContext db, ITenantContext
         CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+        using var db = dbFactory.Create();
         observacion = (observacion ?? "").Trim();
 
         // Si ya hay una marca Pendiente para esta asignacion, actualizamos en vez de
@@ -60,6 +62,7 @@ public sealed class HcMarcaErrorService(IApplicationDbContext db, ITenantContext
         Guid? sedeId = null,
         CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var q = db.HcMarcasError.AsNoTracking();
         if (estado is HcMarcaErrorEstado e) { q = q.Where(m => m.Estado == e); }
         if (origen is HcMarcaErrorOrigen o) { q = q.Where(m => m.Origen == o); }
@@ -111,9 +114,12 @@ public sealed class HcMarcaErrorService(IApplicationDbContext db, ITenantContext
     // Badge del tab: solo Pendientes MANUALES. Las auto-reparaciones no inflan el badge
     // (son pista de auditoria; se ven con el filtro de origen "Auto"/"Todas").
     public async Task<int> ContarPendientesAsync(CancellationToken ct = default)
-        => await db.HcMarcasError.AsNoTracking()
+    {
+        using var db = dbFactory.Create();
+        return await db.HcMarcasError.AsNoTracking()
             .CountAsync(m => m.Estado == HcMarcaErrorEstado.Pendiente
                           && m.Origen == HcMarcaErrorOrigen.Manual, ct);
+    }
 
     public async Task<Guid> RegistrarTocadoAsync(
         Guid historiaClinicaId,
@@ -123,6 +129,7 @@ public sealed class HcMarcaErrorService(IApplicationDbContext db, ITenantContext
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
 
+        using var db = dbFactory.Create();
         // Asignacion por el pivote sesion -> turno -> asignacion. Si la HC no tiene
         // pivote, cae a Guid.Empty y el codigo son los 8 primeros del HcId.
         var asigId = await (
@@ -185,6 +192,7 @@ public sealed class HcMarcaErrorService(IApplicationDbContext db, ITenantContext
         string? reparadoPorNombre,
         CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var marca = await db.HcMarcasError
             .FirstOrDefaultAsync(m => m.Id == id && m.Estado == HcMarcaErrorEstado.Pendiente, ct);
         if (marca is null) { return false; }

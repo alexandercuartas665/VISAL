@@ -76,9 +76,9 @@ public sealed class AtencionRevisionChipTests
         var tenant = new FakeTenantContext { TenantId = tenantId, UserId = RevisorA };
         var ctx = new VisalDbContext(opts, tenant);
         var clock = new FakeTimeProvider(FixedNow);
-        var revisiones = new RevisionClinicaService(ctx, tenant, clock);
-        var kanban = new RevisionKanbanService(ctx, revisiones, clock);
-        var atencion = new AtencionProfesionalService(ctx, tenant, new FakeConfigClinica());
+        var revisiones = new RevisionClinicaService(new TestDbContextFactory(ctx, tenant), tenant, clock);
+        var kanban = new RevisionKanbanService(new TestDbContextFactory(ctx, tenant), revisiones, clock);
+        var atencion = new AtencionProfesionalService(new TestDbContextFactory(ctx, tenant), tenant, new FakeConfigClinica());
 
         // TenantUser Owner + PlatformUser: Owner ve todo, no requiere ProfesionalId.
         var pu = new PlatformUser { Email = $"owner-{tenantId}@test", DisplayName = "OWNER", AuthProvider = "local" };

@@ -25,43 +25,47 @@ public interface IWhatsAppMetricsService
     Task<GupshupBalanceResult?> GetGupshupBalanceAsync(CancellationToken ct = default);
 }
 
+// Ola 4c (P0): contexto corto por operacion (using var db = _dbFactory.Create();) en vez del IApplicationDbContext scoped.
 internal sealed class WhatsAppMetricsService : IWhatsAppMetricsService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ISecretProtector _secrets;
     private readonly IGupshupApiClient _gupshup;
 
-    public WhatsAppMetricsService(IApplicationDbContext db, ISecretProtector secrets, IGupshupApiClient gupshup)
+    public WhatsAppMetricsService(IApplicationDbContextFactory dbFactory, ISecretProtector secrets, IGupshupApiClient gupshup)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _secrets = secrets;
         _gupshup = gupshup;
     }
 
     public async Task<int> CountOutboundTodayAsync(CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         var startLocal = DateTime.Today; // Kestrel corre en hora local del servidor.
         var startUtc = new DateTimeOffset(startLocal, TimeSpan.Zero).ToUniversalTime();
-        return await _db.Messages
+        return await db.Messages
             .Where(m => m.Direction == MessageDirection.Outbound && m.SentAt >= startUtc)
             .CountAsync(ct);
     }
 
     public async Task<int> CountOutboundThisMonthAsync(CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         var today = DateTime.Today;
         var startLocal = new DateTime(today.Year, today.Month, 1);
         var startUtc = new DateTimeOffset(startLocal, TimeSpan.Zero).ToUniversalTime();
-        return await _db.Messages
+        return await db.Messages
             .Where(m => m.Direction == MessageDirection.Outbound && m.SentAt >= startUtc)
             .CountAsync(ct);
     }
 
     public async Task<GupshupBalanceResult?> GetGupshupBalanceAsync(CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         // El saldo es de la cuenta Gupshup, no por App. Cualquier App activa
         // sirve para pedirlo. Tomamos la primera IsActive con apikey.
-        var cfg = await _db.TenantGupshupConfigs
+        var cfg = await db.TenantGupshupConfigs
             .Where(c => c.IsActive && c.ApiKeyEncrypted != null && c.ApiKeyEncrypted != "")
             .OrderBy(c => c.CreatedAt)
             .FirstOrDefaultAsync(ct);

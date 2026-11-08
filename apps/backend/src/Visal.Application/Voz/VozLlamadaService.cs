@@ -7,19 +7,20 @@ using Visal.Domain.Enums;
 
 namespace Visal.Application.Voz;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = _dbFactory.Create();) en vez del IApplicationDbContext scoped.
 public sealed class VozLlamadaService : IVozLlamadaService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenant;
     private readonly IRetellClient _retell;
     private readonly IRetellConfig _config;
     private readonly ILogger<VozLlamadaService> _log;
 
     public VozLlamadaService(
-        IApplicationDbContext db, ITenantContext tenant,
+        IApplicationDbContextFactory dbFactory, ITenantContext tenant,
         IRetellClient retell, IRetellConfig config, ILogger<VozLlamadaService> log)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenant = tenant;
         _retell = retell;
         _config = config;
@@ -39,13 +40,14 @@ public sealed class VozLlamadaService : IVozLlamadaService
         if (_tenant.TenantId is not Guid tid) { return new(0, 0, 0, dryRun, msgs); }
         if (hastaMes < desdeMes) { (desdeMes, hastaMes) = (hastaMes, desdeMes); }
 
-        var pendientes = await _db.SeguimientoEncuestas.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var pendientes = await db.SeguimientoEncuestas.AsNoTracking()
             .Where(x => x.Mes >= desdeMes && x.Mes <= hastaMes && x.Estado == "Pendiente")
             .ToListAsync(ct);
         if (pendientes.Count == 0) { return new(0, 0, 0, dryRun, msgs); }
 
         var pacIds = pendientes.Select(p => p.PacienteId).Distinct().ToList();
-        var pacientes = (await _db.Pacientes.AsNoTracking()
+        var pacientes = (await db.Pacientes.AsNoTracking()
             .Where(p => pacIds.Contains(p.Id))
             .Select(p => new { p.Id, p.NombreCompleto, p.PrimerNombre, p.Telefono })
             .ToListAsync(ct))
@@ -53,7 +55,7 @@ public sealed class VozLlamadaService : IVozLlamadaService
 
         // Dedup: encuestas que ya tienen una llamada activa (no relanzar).
         var encIds = pendientes.Select(p => p.Id).ToList();
-        var activas = await _db.LlamadasVoz.AsNoTracking()
+        var activas = await db.LlamadasVoz.AsNoTracking()
             .Where(l => l.SeguimientoEncuestaId != null && encIds.Contains(l.SeguimientoEncuestaId.Value)
                 && (l.Estado == LlamadaVozEstado.Registrada || l.Estado == LlamadaVozEstado.EnCurso))
             .Select(l => l.SeguimientoEncuestaId!.Value)
@@ -94,7 +96,7 @@ public sealed class VozLlamadaService : IVozLlamadaService
             var req = new CrearLlamadaRequest(_config.FromNumber!, to, _config.AgentId, vars, meta, sip);
             var r = await _retell.CrearLlamadaAsync(req, ct);
 
-            _db.LlamadasVoz.Add(new LlamadaVoz
+            db.LlamadasVoz.Add(new LlamadaVoz
             {
                 TenantId = tid,
                 SeguimientoEncuestaId = enc.Id,
@@ -111,7 +113,7 @@ public sealed class VozLlamadaService : IVozLlamadaService
             else { errores++; msgs.Add($"{pac.NombreCompleto}: {r.Error}"); }
         }
 
-        if (!dryRun) { await _db.SaveChangesAsync(ct); }
+        if (!dryRun) { await db.SaveChangesAsync(ct); }
         _log.LogInformation("Voz lote {Desde}-{Hasta} tenant {Tenant}: {L} lanzadas, {O} omitidas, {E} errores (dryRun={Dry}).",
             desdeMes, hastaMes, tid, lanzadas, omitidas, errores, dryRun);
         return new(lanzadas, omitidas, errores, dryRun, msgs);
@@ -120,7 +122,8 @@ public sealed class VozLlamadaService : IVozLlamadaService
     public async Task ProcesarWebhookEventoAsync(RetellWebhookEvento ev, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(ev.CallId)) { return; }
-        var llamada = await _db.LlamadasVoz.IgnoreQueryFilters()
+        using var db = _dbFactory.Create();
+        var llamada = await db.LlamadasVoz.IgnoreQueryFilters()
             .FirstOrDefaultAsync(l => l.CallId == ev.CallId, ct);
         if (llamada is null)
         {
@@ -157,7 +160,7 @@ public sealed class VozLlamadaService : IVozLlamadaService
         if (llamada.SeguimientoEncuestaId is Guid encId
             && (ev.Evento == "call_ended" || ev.Evento == "call_analyzed"))
         {
-            var enc = await _db.SeguimientoEncuestas.IgnoreQueryFilters()
+            var enc = await db.SeguimientoEncuestas.IgnoreQueryFilters()
                 .FirstOrDefaultAsync(x => x.Id == encId, ct);
             if (enc is not null && enc.Estado == "Pendiente")
             {
@@ -182,18 +185,19 @@ public sealed class VozLlamadaService : IVozLlamadaService
             }
         }
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task<IReadOnlyList<LlamadaVozDto>> ListarPorMesAsync(int mes, CancellationToken ct = default)
     {
-        var encIds = await _db.SeguimientoEncuestas.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var encIds = await db.SeguimientoEncuestas.AsNoTracking()
             .Where(x => x.Mes == mes)
             .Select(x => x.Id)
             .ToListAsync(ct);
         if (encIds.Count == 0) { return Array.Empty<LlamadaVozDto>(); }
 
-        var llam = await _db.LlamadasVoz.AsNoTracking()
+        var llam = await db.LlamadasVoz.AsNoTracking()
             .Where(l => l.SeguimientoEncuestaId != null && encIds.Contains(l.SeguimientoEncuestaId.Value))
             .OrderByDescending(l => l.CreatedAt)
             .ToListAsync(ct);
@@ -212,9 +216,10 @@ public sealed class VozLlamadaService : IVozLlamadaService
         if (!_config.EstaConfigurado) { throw new InvalidOperationException("Retell no esta configurado."); }
         if (_tenant.TenantId is not Guid tid) { return new(false, "Sin tenant activo.", null); }
 
-        var enc = await _db.SeguimientoEncuestas.AsNoTracking().FirstOrDefaultAsync(x => x.Id == encuestaId, ct);
+        using var db = _dbFactory.Create();
+        var enc = await db.SeguimientoEncuestas.AsNoTracking().FirstOrDefaultAsync(x => x.Id == encuestaId, ct);
         if (enc is null) { return new(false, "Encuesta no encontrada.", null); }
-        var pac = await _db.Pacientes.AsNoTracking().Where(p => p.Id == enc.PacienteId)
+        var pac = await db.Pacientes.AsNoTracking().Where(p => p.Id == enc.PacienteId)
             .Select(p => new { p.Id, p.NombreCompleto, p.PrimerNombre, p.Telefono })
             .FirstOrDefaultAsync(ct);
         if (pac is null) { return new(false, "Paciente no encontrado.", null); }
@@ -223,7 +228,7 @@ public sealed class VozLlamadaService : IVozLlamadaService
         var to = TelefonoE164.Normalizar(esPrueba ? telefonoOverride : pac.Telefono);
         if (to is null) { return new(false, "Telefono invalido.", null); }
 
-        return await CrearYRegistrarAsync(tid, enc.Id, pac.Id, pac.NombreCompleto, pac.PrimerNombre, to, esPrueba, ct);
+        return await CrearYRegistrarAsync(db, tid, enc.Id, pac.Id, pac.NombreCompleto, pac.PrimerNombre, to, esPrueba, ct);
     }
 
     public async Task<VozLlamadaAccionResult> LlamarPruebaAsync(string telefono, string? nombre, Guid actor, CancellationToken ct = default)
@@ -235,12 +240,14 @@ public sealed class VozLlamadaService : IVozLlamadaService
         if (to is null) { return new(false, "Telefono invalido (usa formato con indicativo, ej. 3001234567).", null); }
 
         var nom = string.IsNullOrWhiteSpace(nombre) ? "Prueba" : nombre.Trim();
-        return await CrearYRegistrarAsync(tid, null, Guid.Empty, nom, nom, to, esPrueba: true, ct);
+        using var db = _dbFactory.Create();
+        return await CrearYRegistrarAsync(db, tid, null, Guid.Empty, nom, nom, to, esPrueba: true, ct);
     }
 
     public async Task<LlamadaDetalleDto?> ObtenerUltimaLlamadaAsync(Guid encuestaId, CancellationToken ct = default)
     {
-        var l = await _db.LlamadasVoz.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var l = await db.LlamadasVoz.AsNoTracking()
             .Where(x => x.SeguimientoEncuestaId == encuestaId)
             .OrderByDescending(x => x.CreatedAt)
             .FirstOrDefaultAsync(ct);
@@ -251,7 +258,7 @@ public sealed class VozLlamadaService : IVozLlamadaService
 
     /// <summary>Crea la llamada en Retell y registra la LlamadaVoz. Guarda de una vez.</summary>
     private async Task<VozLlamadaAccionResult> CrearYRegistrarAsync(
-        Guid tid, Guid? encuestaId, Guid pacienteId, string nombreCompleto, string? primerNombre,
+        IApplicationDbContext db, Guid tid, Guid? encuestaId, Guid pacienteId, string nombreCompleto, string? primerNombre,
         string to, bool esPrueba, CancellationToken ct)
     {
         var sip = string.IsNullOrWhiteSpace(_config.TelnyxSipUsername)
@@ -273,7 +280,7 @@ public sealed class VozLlamadaService : IVozLlamadaService
         var req = new CrearLlamadaRequest(_config.FromNumber!, to, _config.AgentId, vars, meta, sip);
         var r = await _retell.CrearLlamadaAsync(req, ct);
 
-        _db.LlamadasVoz.Add(new LlamadaVoz
+        db.LlamadasVoz.Add(new LlamadaVoz
         {
             TenantId = tid,
             SeguimientoEncuestaId = encuestaId,
@@ -286,7 +293,7 @@ public sealed class VozLlamadaService : IVozLlamadaService
             Error = r.Ok ? null : r.Error,
             EsPrueba = esPrueba,
         });
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return new(r.Ok, r.Error, r.CallId);
     }
 

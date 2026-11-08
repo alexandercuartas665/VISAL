@@ -4,13 +4,15 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class HcMenuConfigService(IApplicationDbContext db, ITenantContext tenant) : IHcMenuConfigService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class HcMenuConfigService(IApplicationDbContextFactory dbFactory, ITenantContext tenant) : IHcMenuConfigService
 {
     private static string NormTipo(string? s) => (s ?? "").Trim().ToUpperInvariant();
     private static string NormPestana(string? s) => (s ?? "").Trim();
 
     public async Task<IReadOnlyList<HcMenuConfigDto>> ListAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.HcMenuConfigs.AsNoTracking()
             .OrderBy(x => x.TipoServicio)
             .ThenBy(x => x.PestanaKey)
@@ -22,6 +24,7 @@ public sealed class HcMenuConfigService(IApplicationDbContext db, ITenantContext
     {
         var t = NormTipo(tipoServicio);
         if (string.IsNullOrEmpty(t)) { return new(); }
+        using var db = dbFactory.Create();
         var lista = await db.HcMenuConfigs.AsNoTracking()
             .Where(x => x.TipoServicio == t && !x.Visible)
             .Select(x => x.PestanaKey)
@@ -35,6 +38,7 @@ public sealed class HcMenuConfigService(IApplicationDbContext db, ITenantContext
         var t = NormTipo(tipoServicio);
         var p = NormPestana(pestanaKey);
         if (string.IsNullOrEmpty(t) || string.IsNullOrEmpty(p)) { return; }
+        using var db = dbFactory.Create();
         var row = await db.HcMenuConfigs.FirstOrDefaultAsync(
             x => x.TipoServicio == t && x.PestanaKey == p, ct);
         if (visible)
@@ -60,6 +64,7 @@ public sealed class HcMenuConfigService(IApplicationDbContext db, ITenantContext
 
     public async Task<IReadOnlyList<HcPestanaAliasDto>> ListAliasesAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.HcPestanaAliases.AsNoTracking()
             .OrderBy(x => x.PestanaKey)
             .Select(x => new HcPestanaAliasDto(x.PestanaKey, x.Alias, x.Orden))
@@ -68,6 +73,7 @@ public sealed class HcMenuConfigService(IApplicationDbContext db, ITenantContext
 
     public async Task<Dictionary<string, string>> ObtenerAliasesAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var rows = await db.HcPestanaAliases.AsNoTracking()
             .Where(x => x.Alias != null && x.Alias != "")
             .Select(x => new { x.PestanaKey, x.Alias })
@@ -77,6 +83,7 @@ public sealed class HcMenuConfigService(IApplicationDbContext db, ITenantContext
 
     public async Task<Dictionary<string, int>> ObtenerOrdenesAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var rows = await db.HcPestanaAliases.AsNoTracking()
             .Where(x => x.Orden != null)
             .Select(x => new { x.PestanaKey, x.Orden })
@@ -89,6 +96,7 @@ public sealed class HcMenuConfigService(IApplicationDbContext db, ITenantContext
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         var p = NormPestana(pestanaKey);
         if (string.IsNullOrEmpty(p)) { return; }
+        using var db = dbFactory.Create();
         var trimmed = alias?.Trim();
         var row = await db.HcPestanaAliases.FirstOrDefaultAsync(x => x.PestanaKey == p, ct);
         if (row is null)
@@ -110,6 +118,7 @@ public sealed class HcMenuConfigService(IApplicationDbContext db, ITenantContext
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         var p = NormPestana(pestanaKey);
         if (string.IsNullOrEmpty(p)) { return; }
+        using var db = dbFactory.Create();
         var row = await db.HcPestanaAliases.FirstOrDefaultAsync(x => x.PestanaKey == p, ct);
         if (row is null)
         {

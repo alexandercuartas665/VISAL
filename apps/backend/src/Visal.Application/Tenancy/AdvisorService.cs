@@ -7,24 +7,25 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class AdvisorService : IAdvisorService
 {
     private const int InviteValidDays = 7;
 
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenantContext;
     private readonly IPasswordHasher _passwordHasher;
     private readonly TimeProvider _timeProvider;
     private readonly IAuditWriter _audit;
 
     public AdvisorService(
-        IApplicationDbContext db,
+        IApplicationDbContextFactory dbFactory,
         ITenantContext tenantContext,
         IPasswordHasher passwordHasher,
         TimeProvider timeProvider,
         IAuditWriter audit)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenantContext = tenantContext;
         _passwordHasher = passwordHasher;
         _timeProvider = timeProvider;
@@ -34,10 +35,11 @@ public sealed class AdvisorService : IAdvisorService
     public async Task<IReadOnlyList<AdvisorDto>> ListAsync(CancellationToken cancellationToken = default)
     {
         // Filtro global: solo los miembros del tenant activo.
-        return await _db.TenantUsers
+        using var db = _dbFactory.Create();
+        return await db.TenantUsers
             .AsNoTracking()
             .OrderBy(u => u.Email)
-            .Join(_db.PlatformUsers.AsNoTracking(),
+            .Join(db.PlatformUsers.AsNoTracking(),
                 tu => tu.PlatformUserId, pu => pu.Id,
                 (tu, pu) => new AdvisorDto(
                     tu.Id, tu.PlatformUserId, tu.Email, pu.DisplayName, pu.AvatarUrl,
@@ -59,7 +61,8 @@ public sealed class AdvisorService : IAdvisorService
             return null;
         }
 
-        var platformUser = await _db.PlatformUsers.FirstOrDefaultAsync(u => u.Email == email, cancellationToken);
+        using var db = _dbFactory.Create();
+        var platformUser = await db.PlatformUsers.FirstOrDefaultAsync(u => u.Email == email, cancellationToken);
         if (platformUser is null)
         {
             platformUser = new PlatformUser
@@ -70,11 +73,11 @@ public sealed class AdvisorService : IAdvisorService
                 AuthProvider = "local",
                 Status = PlatformUserStatus.Invited
             };
-            _db.PlatformUsers.Add(platformUser);
+            db.PlatformUsers.Add(platformUser);
         }
 
         // Filtro global: detecta si ya es miembro del tenant activo.
-        var alreadyMember = await _db.TenantUsers.AnyAsync(tu => tu.PlatformUserId == platformUser.Id, cancellationToken);
+        var alreadyMember = await db.TenantUsers.AnyAsync(tu => tu.PlatformUserId == platformUser.Id, cancellationToken);
         if (alreadyMember)
         {
             return null;
@@ -92,25 +95,26 @@ public sealed class AdvisorService : IAdvisorService
             InvitationToken = NewToken(),
             InvitationExpiresAt = now.AddDays(InviteValidDays)
         };
-        _db.TenantUsers.Add(tenantUser);
+        db.TenantUsers.Add(tenantUser);
 
-        _audit.Write(actorUserId, "advisor.invite", nameof(TenantUser), tenantUser.Id,
+        _audit.Write(db, actorUserId, "advisor.invite", nameof(TenantUser), tenantUser.Id,
             previousValue: null,
             newValue: new { email, tenantUser.TenantRole, tenantUser.LeadVisibility },
             tenantId: tenantId);
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return Map(tenantUser, platformUser);
     }
 
     public async Task<AdvisorDto?> UpdateAsync(Guid tenantUserId, UpdateAdvisorRequest request, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var tenantUser = await _db.TenantUsers.FirstOrDefaultAsync(tu => tu.Id == tenantUserId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var tenantUser = await db.TenantUsers.FirstOrDefaultAsync(tu => tu.Id == tenantUserId, cancellationToken);
         if (tenantUser is null)
         {
             return null;
         }
-        var platformUser = await _db.PlatformUsers.FirstOrDefaultAsync(p => p.Id == tenantUser.PlatformUserId, cancellationToken);
+        var platformUser = await db.PlatformUsers.FirstOrDefaultAsync(p => p.Id == tenantUser.PlatformUserId, cancellationToken);
 
         tenantUser.TenantRole = request.Role;
         tenantUser.LeadVisibility = request.LeadVisibility;
@@ -119,50 +123,52 @@ public sealed class AdvisorService : IAdvisorService
             platformUser.DisplayName = request.DisplayName.Trim();
         }
 
-        _audit.Write(actorUserId, "advisor.update", nameof(TenantUser), tenantUser.Id,
+        _audit.Write(db, actorUserId, "advisor.update", nameof(TenantUser), tenantUser.Id,
             previousValue: null,
             newValue: new { tenantUser.TenantRole, tenantUser.LeadVisibility },
             tenantId: tenantUser.TenantId);
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return Map(tenantUser, platformUser);
     }
 
     public async Task<AdvisorDto?> SetStatusAsync(Guid tenantUserId, PlatformUserStatus status, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var tenantUser = await _db.TenantUsers.FirstOrDefaultAsync(tu => tu.Id == tenantUserId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var tenantUser = await db.TenantUsers.FirstOrDefaultAsync(tu => tu.Id == tenantUserId, cancellationToken);
         if (tenantUser is null)
         {
             return null;
         }
-        var platformUser = await _db.PlatformUsers.FirstOrDefaultAsync(p => p.Id == tenantUser.PlatformUserId, cancellationToken);
+        var platformUser = await db.PlatformUsers.FirstOrDefaultAsync(p => p.Id == tenantUser.PlatformUserId, cancellationToken);
 
         tenantUser.Status = status;
-        _audit.Write(actorUserId, "advisor.set-status", nameof(TenantUser), tenantUser.Id,
+        _audit.Write(db, actorUserId, "advisor.set-status", nameof(TenantUser), tenantUser.Id,
             previousValue: null, newValue: new { status }, tenantId: tenantUser.TenantId);
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return Map(tenantUser, platformUser);
     }
 
     public async Task<AdvisorDto?> ResendInviteAsync(Guid tenantUserId, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var tenantUser = await _db.TenantUsers.FirstOrDefaultAsync(tu => tu.Id == tenantUserId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var tenantUser = await db.TenantUsers.FirstOrDefaultAsync(tu => tu.Id == tenantUserId, cancellationToken);
         if (tenantUser is null)
         {
             return null;
         }
-        var platformUser = await _db.PlatformUsers.FirstOrDefaultAsync(p => p.Id == tenantUser.PlatformUserId, cancellationToken);
+        var platformUser = await db.PlatformUsers.FirstOrDefaultAsync(p => p.Id == tenantUser.PlatformUserId, cancellationToken);
 
         var now = _timeProvider.GetUtcNow();
         tenantUser.InvitationToken = NewToken();
         tenantUser.InvitationExpiresAt = now.AddDays(InviteValidDays);
         tenantUser.Status = PlatformUserStatus.Invited;
 
-        _audit.Write(actorUserId, "advisor.resend-invite", nameof(TenantUser), tenantUser.Id,
+        _audit.Write(db, actorUserId, "advisor.resend-invite", nameof(TenantUser), tenantUser.Id,
             previousValue: null, newValue: new { tenantUser.InvitationExpiresAt }, tenantId: tenantUser.TenantId);
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return Map(tenantUser, platformUser);
     }
 
@@ -173,14 +179,15 @@ public sealed class AdvisorService : IAdvisorService
             return null;
         }
 
-        var tenantUser = await _db.TenantUsers.IgnoreQueryFilters().AsNoTracking()
+        using var db = _dbFactory.Create();
+        var tenantUser = await db.TenantUsers.IgnoreQueryFilters().AsNoTracking()
             .FirstOrDefaultAsync(tu => tu.InvitationToken == token, cancellationToken);
         if (tenantUser is null)
         {
             return null;
         }
 
-        var tenantName = await _db.Tenants.IgnoreQueryFilters().AsNoTracking()
+        var tenantName = await db.Tenants.IgnoreQueryFilters().AsNoTracking()
             .Where(t => t.Id == tenantUser.TenantId)
             .Select(t => t.Name)
             .FirstOrDefaultAsync(cancellationToken) ?? "tu agencia";
@@ -196,7 +203,8 @@ public sealed class AdvisorService : IAdvisorService
             return null;
         }
 
-        var tenantUser = await _db.TenantUsers.IgnoreQueryFilters()
+        using var db = _dbFactory.Create();
+        var tenantUser = await db.TenantUsers.IgnoreQueryFilters()
             .FirstOrDefaultAsync(tu => tu.InvitationToken == request.Token, cancellationToken);
         if (tenantUser is null)
         {
@@ -207,7 +215,7 @@ public sealed class AdvisorService : IAdvisorService
             return null; // invitacion expirada
         }
 
-        var platformUser = await _db.PlatformUsers
+        var platformUser = await db.PlatformUsers
             .FirstOrDefaultAsync(p => p.Id == tenantUser.PlatformUserId, cancellationToken);
         if (platformUser is null)
         {
@@ -230,10 +238,10 @@ public sealed class AdvisorService : IAdvisorService
         tenantUser.InvitationToken = null;
         tenantUser.InvitationExpiresAt = null;
 
-        _audit.Write(platformUser.Id, "advisor.accept-invite", nameof(TenantUser), tenantUser.Id,
+        _audit.Write(db, platformUser.Id, "advisor.accept-invite", nameof(TenantUser), tenantUser.Id,
             previousValue: null, newValue: new { tenantUser.Email }, tenantId: tenantUser.TenantId);
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return platformUser.Email;
     }
 

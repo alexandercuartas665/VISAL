@@ -16,8 +16,9 @@ namespace Visal.Application.Facturacion;
 /// <c>IEnumerable&lt;ISnapshotBuilder&gt;</c>; el servicio elige por
 /// <see cref="ISnapshotBuilder.TipoAplicable"/>.
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class FacturacionSnapshotService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     IEnumerable<ISnapshotBuilder> builders,
     ISnapshotColumnaConfigService columnaConfig,
@@ -38,6 +39,7 @@ public sealed class FacturacionSnapshotService(
 
     public async Task<Guid> GenerarAsync(GenerarSnapshotCmd cmd, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
 
         var builder = builders.FirstOrDefault(b => b.TipoAplicable == cmd.Tipo)
@@ -138,6 +140,7 @@ public sealed class FacturacionSnapshotService(
         const string ColDoc = "Identificación";
         const string ColFecha = "Fecha suministro de tecnologia";
 
+        using var db = dbFactory.Create();
         var snap = await db.FacturacionSnapshots.FirstOrDefaultAsync(s => s.Id == snapshotId, ct);
         if (snap is null) { return new(false, "Snapshot no encontrado.", 0, 0); }
 
@@ -222,6 +225,7 @@ public sealed class FacturacionSnapshotService(
         FiltrosListaSnapshotDto? filtros = null,
         CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var q = db.FacturacionSnapshots.AsNoTracking().Where(x => x.Estado == estado);
         if (tipo is TipoSnapshot t) { q = q.Where(x => x.Tipo == t); }
         if (filtros?.UsuarioId is Guid u) { q = q.Where(x => x.CreatedBy == u); }
@@ -298,6 +302,7 @@ public sealed class FacturacionSnapshotService(
 
     public async Task<FacturacionSnapshotDetalleDto?> ObtenerAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var snap = await db.FacturacionSnapshots.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (snap is null) { return null; }
         var builder = builders.FirstOrDefault(b => b.TipoAplicable == snap.Tipo);
@@ -339,6 +344,7 @@ public sealed class FacturacionSnapshotService(
         string? observacionFiltro = null,
         CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (pagina < 1) { pagina = 1; }
         if (tamanoPagina < 1) { tamanoPagina = 50; }
         if (tamanoPagina > 500) { tamanoPagina = 500; }
@@ -453,6 +459,7 @@ public sealed class FacturacionSnapshotService(
                 $"El motivo del archivado es obligatorio y debe tener al menos {MotivoMinLen} caracteres.");
         }
 
+        using var db = dbFactory.Create();
         var snap = await db.FacturacionSnapshots.FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new InvalidOperationException("Snapshot no encontrado.");
 
@@ -472,6 +479,7 @@ public sealed class FacturacionSnapshotService(
 
     public async Task FacturarAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var snap = await db.FacturacionSnapshots.FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new InvalidOperationException("Snapshot no encontrado.");
 
@@ -517,6 +525,7 @@ public sealed class FacturacionSnapshotService(
         if (string.IsNullOrWhiteSpace(columna)) { throw new ArgumentException("Columna requerida.", nameof(columna)); }
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
 
+        using var db = dbFactory.Create();
         var snap = await db.FacturacionSnapshots.FirstOrDefaultAsync(x => x.Id == snapshotId, ct)
             ?? throw new InvalidOperationException("Snapshot no encontrado.");
         if (snap.Estado != EstadoSnapshot.Vigente)
@@ -592,6 +601,7 @@ public sealed class FacturacionSnapshotService(
     {
         if (tenant.TenantId is not Guid) { throw new InvalidOperationException("Sin tenant activo."); }
 
+        using var db = dbFactory.Create();
         var fila = await db.FacturacionSnapshotFilas.FirstOrDefaultAsync(
             x => x.Id == filaId && x.SnapshotId == snapshotId, ct)
             ?? throw new InvalidOperationException("Fila no encontrada en el snapshot.");
@@ -620,6 +630,7 @@ public sealed class FacturacionSnapshotService(
     {
         if (tenant.TenantId is not Guid) { throw new InvalidOperationException("Sin tenant activo."); }
 
+        using var db = dbFactory.Create();
         var fila = await db.FacturacionSnapshotFilas.FirstOrDefaultAsync(
             x => x.Id == filaId && x.SnapshotId == snapshotId, ct)
             ?? throw new InvalidOperationException("Fila no encontrada en el snapshot.");
@@ -647,6 +658,7 @@ public sealed class FacturacionSnapshotService(
         if (string.IsNullOrWhiteSpace(columna)) { throw new ArgumentException("Columna requerida.", nameof(columna)); }
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
 
+        using var db = dbFactory.Create();
         var snap = await db.FacturacionSnapshots.FirstOrDefaultAsync(x => x.Id == snapshotId, ct)
             ?? throw new InvalidOperationException("Snapshot no encontrado.");
         if (snap.Estado != EstadoSnapshot.Vigente)
@@ -713,6 +725,7 @@ public sealed class FacturacionSnapshotService(
 
     public async Task<IReadOnlyList<CambioCeldaDto>> ListarCambiosAsync(Guid snapshotId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.FacturacionSnapshotFilaCambios.AsNoTracking()
             .Where(x => x.SnapshotId == snapshotId)
             .OrderByDescending(x => x.CreatedAt)
@@ -788,6 +801,7 @@ public sealed class FacturacionSnapshotService(
     public async Task<IReadOnlyList<PacienteSnapshotDto>> ListarPacientesSnapshotAsync(
         Guid snapshotId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var jsons = await db.FacturacionSnapshotFilas.AsNoTracking()
             .Where(x => x.SnapshotId == snapshotId)
             .OrderBy(x => x.NumeroFila)
@@ -885,7 +899,8 @@ public sealed class FacturacionSnapshotService(
 
     public async Task<ArchivoExportado?> ExportarExcelAsync(Guid id, SnapshotVistaOrden? vista = null, CancellationToken ct = default)
     {
-        var ctx = await CargarParaExportAsync(id, ct);
+        using var db = dbFactory.Create();
+        var ctx = await CargarParaExportAsync(db, id, ct);
         if (ctx is null) { return null; }
 
         using var wb = new XLWorkbook();
@@ -923,7 +938,7 @@ public sealed class FacturacionSnapshotService(
         if (orden.Count == 0 && grupos.Count == 0)
         {
             // Sin vista: streaming en orden natural (NumeroFila), sin cargar todo en memoria.
-            await foreach (var fila in IterarFilasAsync(id, ct))
+            await foreach (var fila in IterarFilasAsync(db, id, ct))
             {
                 EscribirFilaExcel(hoja, row, contador, ctx, fila);
                 row++;
@@ -935,7 +950,7 @@ public sealed class FacturacionSnapshotService(
             // Con orden/agrupacion: cargamos todas las filas y replicamos la pantalla "Ver"
             // (misma logica de BuildVerItems: cabeceras de grupo con conteo + orden en cascada).
             var todas = new List<IReadOnlyDictionary<string, object?>>();
-            await foreach (var fila in IterarFilasAsync(id, ct)) { todas.Add(fila); }
+            await foreach (var fila in IterarFilasAsync(db, id, ct)) { todas.Add(fila); }
 
             var items = new List<VistaItem>();
             ConstruirItemsVista(todas, 0, orden, grupos, items);
@@ -1127,6 +1142,9 @@ public sealed class FacturacionSnapshotService(
 
     public async Task<RipsExportResult> ExportarJsonRipsAsync(Guid id, bool ignorarValidacion = false, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
+        // ObtenerAsync y ListarFilasAsync son metodos publicos que abren su propio contexto corto;
+        // aqui se invocan secuencialmente (await), sin solapamiento con este `db` -> sin "second operation".
         var detalle = await ObtenerAsync(id, ct);
         if (detalle is null) { return new RipsExportResult(null, Array.Empty<string>()); }
 
@@ -1220,7 +1238,8 @@ public sealed class FacturacionSnapshotService(
 
     public async Task<ArchivoExportado?> ExportarCsvAsync(Guid id, CancellationToken ct = default)
     {
-        var ctx = await CargarParaExportAsync(id, ct);
+        using var db = dbFactory.Create();
+        var ctx = await CargarParaExportAsync(db, id, ct);
         if (ctx is null) { return null; }
 
         var sb = new StringBuilder();
@@ -1228,7 +1247,7 @@ public sealed class FacturacionSnapshotService(
         sb.AppendLine("Nº;" + string.Join(';', ctx.Columnas.Select(c => EscaparCsv(c.HeaderExport))));
 
         var contador = 1;
-        await foreach (var fila in IterarFilasAsync(id, ct))
+        await foreach (var fila in IterarFilasAsync(db, id, ct))
         {
             var partes = new string[ctx.Columnas.Count];
             for (var c = 0; c < ctx.Columnas.Count; c++)
@@ -1261,7 +1280,7 @@ public sealed class FacturacionSnapshotService(
     /// en el archivo (respetando alias del tenant si existe).</summary>
     private sealed record CtxExport(FacturacionSnapshot Snapshot, IReadOnlyList<ColumnaExportInfo> Columnas);
 
-    private async Task<CtxExport?> CargarParaExportAsync(Guid id, CancellationToken ct)
+    private async Task<CtxExport?> CargarParaExportAsync(IApplicationDbContext db, Guid id, CancellationToken ct)
     {
         var snap = await db.FacturacionSnapshots.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (snap is null) { return null; }
@@ -1292,6 +1311,7 @@ public sealed class FacturacionSnapshotService(
 
     /// <summary>Streamea las filas del snapshot en orden natural para no cargarlas todas en memoria.</summary>
     private async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> IterarFilasAsync(
+        IApplicationDbContext db,
         Guid id,
         [EnumeratorCancellation] CancellationToken ct)
     {

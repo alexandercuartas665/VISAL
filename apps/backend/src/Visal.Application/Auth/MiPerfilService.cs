@@ -9,10 +9,12 @@ namespace Visal.Application.Auth;
 /// vinculado se resuelven contra el tenant activo. Un PlatformUser puede
 /// tener varios TenantUsers — resolvemos por el tenant del contexto.
 /// </summary>
-public sealed class MiPerfilService(IApplicationDbContext db, ITenantContext tenant) : IMiPerfilService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class MiPerfilService(IApplicationDbContextFactory dbFactory, ITenantContext tenant) : IMiPerfilService
 {
     public async Task<MiPerfilDto?> GetAsync(Guid platformUserId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var pu = await db.PlatformUsers.IgnoreQueryFilters()
             .FirstOrDefaultAsync(u => u.Id == platformUserId, ct);
         if (pu is null) { return null; }
@@ -64,6 +66,7 @@ public sealed class MiPerfilService(IApplicationDbContext db, ITenantContext ten
     public async Task<MiPerfilDto?> ActualizarPerfilAsync(
         Guid platformUserId, ActualizarMiPerfilRequest req, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var pu = await db.PlatformUsers.IgnoreQueryFilters()
             .FirstOrDefaultAsync(u => u.Id == platformUserId, ct);
         if (pu is null) { return null; }
@@ -106,6 +109,7 @@ public sealed class MiPerfilService(IApplicationDbContext db, ITenantContext ten
     public async Task<bool> ActualizarFirmaProfesionalAsync(
         Guid platformUserId, string firmaDataUrl, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { return false; }
         if (string.IsNullOrWhiteSpace(firmaDataUrl)) { return false; }
 

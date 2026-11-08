@@ -5,14 +5,16 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class SuministroMedicamentoService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     IHistoriaPrefillService prefill) : ISuministroMedicamentoService
 {
     public async Task<IReadOnlyList<SuministroMedicamentoItemDto>> ListarPorHistoriaAsync(
         Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.HistoriaClinicaSuministroMedicamentos.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == historiaId)
             .OrderBy(x => x.FechaHora)
@@ -28,6 +30,7 @@ public sealed class SuministroMedicamentoService(
     public async Task<SuministroMedicamentoItemDto> AgregarAsync(
         Guid historiaId, AgregarSuministroMedicamentoRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (string.IsNullOrWhiteSpace(req.Presentacion))
         {
@@ -82,6 +85,7 @@ public sealed class SuministroMedicamentoService(
     public async Task<bool> ActualizarAsync(
         Guid itemId, ActualizarSuministroMedicamentoRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var entity = await db.HistoriaClinicaSuministroMedicamentos.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
         if (string.IsNullOrWhiteSpace(req.Presentacion))
@@ -102,6 +106,7 @@ public sealed class SuministroMedicamentoService(
 
     public async Task<bool> EliminarAsync(Guid itemId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var entity = await db.HistoriaClinicaSuministroMedicamentos.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
         var hcId = entity.HistoriaClinicaId;
@@ -114,6 +119,7 @@ public sealed class SuministroMedicamentoService(
 
     public async Task<int> ContarPorHistoriaAsync(Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.HistoriaClinicaSuministroMedicamentos
             .CountAsync(x => x.HistoriaClinicaId == historiaId, ct);
     }

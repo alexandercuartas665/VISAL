@@ -591,7 +591,7 @@ public sealed class SnapshotRelacionFacturasBuilderTests
         ctx.Paquetes.Add(paquete);
         await ctx.SaveChangesAsync();
 
-        var builder = new SnapshotRelacionFacturasBuilder(new RelacionFacturasSelector(ctx));
+        var builder = new SnapshotRelacionFacturasBuilder(new RelacionFacturasSelector(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = TenantId })));
         var filas = new List<IReadOnlyDictionary<string, object?>>();
         await foreach (var f in builder.ConstruirAsync(
             FiltrosJson(aseg.Id, new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30))))
@@ -662,7 +662,7 @@ public sealed class SnapshotRelacionFacturasBuilderTests
         ctx.Pacientes.Add(paciente); ctx.Profesionales.Add(prof); ctx.PacienteContratos.Add(pacCon); ctx.Paquetes.Add(paquete);
         await ctx.SaveChangesAsync();
 
-        var builder = new SnapshotRelacionFacturasBuilder(new RelacionFacturasSelector(ctx));
+        var builder = new SnapshotRelacionFacturasBuilder(new RelacionFacturasSelector(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = TenantId })));
         var filas = new List<IReadOnlyDictionary<string, object?>>();
         await foreach (var f in builder.ConstruirAsync(FiltrosJson(aseg.Id, new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30))))
         {
@@ -735,7 +735,7 @@ public sealed class SnapshotRelacionFacturasBuilderTests
         ctx.Pacientes.Add(paciente); ctx.Profesionales.Add(prof); ctx.PacienteContratos.Add(pacCon); ctx.Paquetes.Add(paquete);
         await ctx.SaveChangesAsync();
 
-        var builder = new SnapshotRelacionFacturasBuilder(new RelacionFacturasSelector(ctx));
+        var builder = new SnapshotRelacionFacturasBuilder(new RelacionFacturasSelector(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = TenantId })));
         var filas = new List<IReadOnlyDictionary<string, object?>>();
         await foreach (var f in builder.ConstruirAsync(FiltrosJson(aseg.Id, new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30))))
         {
@@ -795,7 +795,7 @@ public sealed class SnapshotRelacionFacturasBuilderTests
         ctx.Pacientes.Add(paciente); ctx.Profesionales.Add(prof); ctx.PacienteContratos.Add(pacCon);
         await ctx.SaveChangesAsync();
 
-        var builder = new SnapshotRelacionFacturasBuilder(new RelacionFacturasSelector(ctx));
+        var builder = new SnapshotRelacionFacturasBuilder(new RelacionFacturasSelector(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = TenantId })));
         var filas = new List<IReadOnlyDictionary<string, object?>>();
         await foreach (var f in builder.ConstruirAsync(FiltrosJson(aseg.Id, new DateOnly(2026, 9, 1), new DateOnly(2026, 9, 30))))
         {

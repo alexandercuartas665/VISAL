@@ -9,40 +9,42 @@ namespace Visal.Application.Tenancy;
 /// operaciones que MUTAN requieren que el actor sea Owner del tablero
 /// (no basta con ser miembro). Las de lectura requieren ser Owner o miembro.
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class TaskBoardMemberService : ITaskBoardMemberService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenant;
     private readonly IAuditWriter _audit;
 
-    public TaskBoardMemberService(IApplicationDbContext db, ITenantContext tenant, IAuditWriter audit)
+    public TaskBoardMemberService(IApplicationDbContextFactory dbFactory, ITenantContext tenant, IAuditWriter audit)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenant = tenant;
         _audit = audit;
     }
 
-    private async Task<TaskBoard?> LoadBoardIfActorHasAccessAsync(Guid boardId, Guid actor, CancellationToken ct)
+    private async Task<TaskBoard?> LoadBoardIfActorHasAccessAsync(IApplicationDbContext db, Guid boardId, Guid actor, CancellationToken ct)
     {
-        var board = await _db.TaskBoards.AsNoTracking().FirstOrDefaultAsync(b => b.Id == boardId, ct);
+        var board = await db.TaskBoards.AsNoTracking().FirstOrDefaultAsync(b => b.Id == boardId, ct);
         if (board is null) { return null; }
         if (board.OwnerPlatformUserId == actor) { return board; }
-        var isMember = await _db.TaskBoardMembers.AsNoTracking()
+        var isMember = await db.TaskBoardMembers.AsNoTracking()
             .AnyAsync(m => m.BoardId == boardId && m.PlatformUserId == actor, ct);
         return isMember ? board : null;
     }
 
     public async Task<IReadOnlyList<TaskBoardMemberDto>> ListMembersAsync(Guid boardId, Guid actor, CancellationToken ct = default)
     {
-        var board = await LoadBoardIfActorHasAccessAsync(boardId, actor, ct);
+        using var db = _dbFactory.Create();
+        var board = await LoadBoardIfActorHasAccessAsync(db, boardId, actor, ct);
         if (board is null) { return Array.Empty<TaskBoardMemberDto>(); }
-        var invited = await _db.TaskBoardMembers.AsNoTracking()
+        var invited = await db.TaskBoardMembers.AsNoTracking()
             .Where(m => m.BoardId == boardId)
             .OrderBy(m => m.DisplayName)
             .Select(m => new { m.Id, m.PlatformUserId, m.DisplayName, m.CreatedAt })
             .ToListAsync(ct);
 
-        var ownerDisplay = await _db.PlatformUsers.AsNoTracking()
+        var ownerDisplay = await db.PlatformUsers.AsNoTracking()
             .Where(u => u.Id == board.OwnerPlatformUserId)
             .Select(u => u.DisplayName ?? u.Email)
             .FirstOrDefaultAsync(ct) ?? "Owner";
@@ -62,18 +64,19 @@ public sealed class TaskBoardMemberService : ITaskBoardMemberService
     public async Task<IReadOnlyList<TaskBoardInviteCandidateDto>> ListInviteCandidatesAsync(
         Guid boardId, Guid actor, string? search = null, CancellationToken ct = default)
     {
-        var board = await LoadBoardIfActorHasAccessAsync(boardId, actor, ct);
+        using var db = _dbFactory.Create();
+        var board = await LoadBoardIfActorHasAccessAsync(db, boardId, actor, ct);
         if (board is null) { return Array.Empty<TaskBoardInviteCandidateDto>(); }
         if (_tenant.TenantId is not Guid tid) { return Array.Empty<TaskBoardInviteCandidateDto>(); }
 
         // PlatformUsers "del tenant activo" via TenantUser. Excluir owner + ya miembros.
-        var currentMemberIds = await _db.TaskBoardMembers.AsNoTracking()
+        var currentMemberIds = await db.TaskBoardMembers.AsNoTracking()
             .Where(m => m.BoardId == boardId).Select(m => m.PlatformUserId).ToListAsync(ct);
         var excluded = new HashSet<Guid>(currentMemberIds) { board.OwnerPlatformUserId };
 
-        var candidatesRaw = await _db.TenantUsers.AsNoTracking()
+        var candidatesRaw = await db.TenantUsers.AsNoTracking()
             .Where(tu => tu.TenantId == tid)
-            .Join(_db.PlatformUsers.AsNoTracking(), tu => tu.PlatformUserId, pu => pu.Id,
+            .Join(db.PlatformUsers.AsNoTracking(), tu => tu.PlatformUserId, pu => pu.Id,
                 (tu, pu) => new { pu.Id, pu.DisplayName, pu.Email })
             .Distinct()
             .ToListAsync(ct);
@@ -100,15 +103,16 @@ public sealed class TaskBoardMemberService : ITaskBoardMemberService
 
     public async Task<TaskBoardMemberDto?> InviteMemberAsync(InviteMemberRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         if (_tenant.TenantId is not Guid tid) { return null; }
         // Solo el owner puede invitar.
-        var board = await _db.TaskBoards.FirstOrDefaultAsync(
+        var board = await db.TaskBoards.FirstOrDefaultAsync(
             b => b.Id == req.BoardId && b.OwnerPlatformUserId == actor, ct);
         if (board is null) { return null; }
         // El owner no puede "invitarse a si mismo" — ya es dueno.
         if (req.PlatformUserId == board.OwnerPlatformUserId) { return null; }
         // Idempotente: si ya es miembro, devuelve la fila existente.
-        var existing = await _db.TaskBoardMembers.FirstOrDefaultAsync(
+        var existing = await db.TaskBoardMembers.FirstOrDefaultAsync(
             m => m.BoardId == req.BoardId && m.PlatformUserId == req.PlatformUserId, ct);
         if (existing is not null)
         {
@@ -116,7 +120,7 @@ public sealed class TaskBoardMemberService : ITaskBoardMemberService
                 TaskBoardService.Initials(existing.DisplayName), false, existing.CreatedAt);
         }
         // Snapshot del displayName al invitar — sobrevive cambios de perfil.
-        var displayName = await _db.PlatformUsers.AsNoTracking()
+        var displayName = await db.PlatformUsers.AsNoTracking()
             .Where(u => u.Id == req.PlatformUserId)
             .Select(u => u.DisplayName ?? u.Email)
             .FirstOrDefaultAsync(ct);
@@ -126,44 +130,45 @@ public sealed class TaskBoardMemberService : ITaskBoardMemberService
             TenantId = tid, BoardId = req.BoardId, PlatformUserId = req.PlatformUserId,
             DisplayName = displayName, InvitedByPlatformUserId = actor, CreatedBy = actor,
         };
-        _db.TaskBoardMembers.Add(member);
-        _audit.Write(actor, "task-board.invite", nameof(TaskBoardMember), member.Id,
+        db.TaskBoardMembers.Add(member);
+        _audit.Write(db, actor, "task-board.invite", nameof(TaskBoardMember), member.Id,
             previousValue: null,
             newValue: new { req.BoardId, req.PlatformUserId, displayName },
             tenantId: tid);
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return new TaskBoardMemberDto(member.Id, member.PlatformUserId, member.DisplayName,
             TaskBoardService.Initials(member.DisplayName), false, member.CreatedAt);
     }
 
     public async Task<bool> RemoveMemberAsync(Guid boardId, Guid platformUserIdToRemove, Guid actor, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         // Solo el owner puede quitar miembros.
-        var board = await _db.TaskBoards.FirstOrDefaultAsync(
+        var board = await db.TaskBoards.FirstOrDefaultAsync(
             b => b.Id == boardId && b.OwnerPlatformUserId == actor, ct);
         if (board is null) { return false; }
         // No se puede quitar al owner (ni siquiera el owner a si mismo — para
         // "salir" se archiva o borra el tablero).
         if (platformUserIdToRemove == board.OwnerPlatformUserId) { return false; }
-        var member = await _db.TaskBoardMembers.FirstOrDefaultAsync(
+        var member = await db.TaskBoardMembers.FirstOrDefaultAsync(
             m => m.BoardId == boardId && m.PlatformUserId == platformUserIdToRemove, ct);
         if (member is null) { return false; }
-        _db.TaskBoardMembers.Remove(member);
+        db.TaskBoardMembers.Remove(member);
         // Al remover, tambien quitamos sus asignaciones en cards del tablero
         // (no queremos chips huerfanos).
-        var cardIds = await _db.TaskCards.AsNoTracking()
+        var cardIds = await db.TaskCards.AsNoTracking()
             .Where(c => c.BoardId == boardId).Select(c => c.Id).ToListAsync(ct);
         if (cardIds.Count > 0)
         {
-            var stale = await _db.TaskCardAssignments
+            var stale = await db.TaskCardAssignments
                 .Where(a => cardIds.Contains(a.TaskCardId) && a.PlatformUserId == platformUserIdToRemove)
                 .ToListAsync(ct);
-            _db.TaskCardAssignments.RemoveRange(stale);
+            db.TaskCardAssignments.RemoveRange(stale);
         }
-        _audit.Write(actor, "task-board.remove-member", nameof(TaskBoardMember), member.Id,
+        _audit.Write(db, actor, "task-board.remove-member", nameof(TaskBoardMember), member.Id,
             previousValue: new { member.PlatformUserId, member.DisplayName },
             newValue: null, tenantId: board.TenantId);
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 }

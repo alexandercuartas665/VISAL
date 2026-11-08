@@ -6,32 +6,34 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class UsuarioAdminService : IUsuarioAdminService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenant;
     private readonly IPasswordHasher _hasher;
 
-    public UsuarioAdminService(IApplicationDbContext db, ITenantContext tenant, IPasswordHasher hasher)
+    public UsuarioAdminService(IApplicationDbContextFactory dbFactory, ITenantContext tenant, IPasswordHasher hasher)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenant = tenant;
         _hasher = hasher;
     }
 
     public async Task<IReadOnlyList<UsuarioDto>> ListAsync(CancellationToken ct = default)
     {
-        var users = await _db.TenantUsers.AsNoTracking().ToListAsync(ct);
-        var roles = await _db.Roles.AsNoTracking().ToDictionaryAsync(r => r.Id, r => r.Nombre, ct);
-        var sucs = await _db.Sucursales.AsNoTracking().ToDictionaryAsync(s => s.Id, s => s.Nombre, ct);
-        var assigns = await _db.TenantUserSucursales.AsNoTracking().ToListAsync(ct);
+        using var db = _dbFactory.Create();
+        var users = await db.TenantUsers.AsNoTracking().ToListAsync(ct);
+        var roles = await db.Roles.AsNoTracking().ToDictionaryAsync(r => r.Id, r => r.Nombre, ct);
+        var sucs = await db.Sucursales.AsNoTracking().ToDictionaryAsync(s => s.Id, s => s.Nombre, ct);
+        var assigns = await db.TenantUserSucursales.AsNoTracking().ToListAsync(ct);
         var byUser = assigns.GroupBy(a => a.TenantUserId).ToDictionary(g => g.Key, g => g.Select(x => x.SucursalId).ToList());
         var puIds = users.Select(u => u.PlatformUserId).ToList();
-        var pus = await _db.PlatformUsers.AsNoTracking().IgnoreQueryFilters().Where(p => puIds.Contains(p.Id))
+        var pus = await db.PlatformUsers.AsNoTracking().IgnoreQueryFilters().Where(p => puIds.Contains(p.Id))
             .ToDictionaryAsync(p => p.Id, p => p, ct);
 
         // Tipos coordinados por usuario (tabla N:N que reemplazo los 4 booleans).
-        var tipos = await _db.TenantUserTiposCoordinados.AsNoTracking().ToListAsync(ct);
+        var tipos = await db.TenantUserTiposCoordinados.AsNoTracking().ToListAsync(ct);
         var tiposByUser = tipos.GroupBy(t => t.TenantUserId)
             .ToDictionary(g => g.Key, g => (IReadOnlyList<string>)g.Select(x => x.Codigo).OrderBy(c => c).ToList());
 
@@ -57,11 +59,12 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
 
     public async Task<UsuarioDto?> GetPorProfesionalIdAsync(Guid profesionalId, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         // Busca el TenantUser por FK y reusa la logica de listado para armar el DTO.
         // Justificacion: matchear por documento fallaba en usuarios legacy con
         // platform_users.documento NULL (ej. demo-admin). El vinculo autoritativo
         // es TenantUser.ProfesionalId.
-        var tu = await _db.TenantUsers.AsNoTracking()
+        var tu = await db.TenantUsers.AsNoTracking()
             .FirstOrDefaultAsync(u => u.ProfesionalId == profesionalId, ct);
         if (tu is null) { return null; }
         return (await ListAsync(ct)).FirstOrDefault(u => u.Id == tu.Id);
@@ -69,16 +72,17 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
 
     public async Task<UsuarioDto?> ActualizarPerfilAsync(Guid tenantUserId, ActualizarPerfilUsuarioRequest req, Guid actor, CancellationToken ct = default)
     {
-        var tu = await _db.TenantUsers.FirstOrDefaultAsync(u => u.Id == tenantUserId, ct);
+        using var db = _dbFactory.Create();
+        var tu = await db.TenantUsers.FirstOrDefaultAsync(u => u.Id == tenantUserId, ct);
         if (tu is null) { return null; }
-        var pu = await _db.PlatformUsers.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Id == tu.PlatformUserId, ct);
+        var pu = await db.PlatformUsers.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Id == tu.PlatformUserId, ct);
         if (pu is null) { return null; }
 
         // Si el username viene no vacio, validar unicidad (excepto el propio usuario).
         var usernameTrim = req.Username?.Trim();
         if (!string.IsNullOrWhiteSpace(usernameTrim))
         {
-            var exists = await _db.PlatformUsers.IgnoreQueryFilters()
+            var exists = await db.PlatformUsers.IgnoreQueryFilters()
                 .AnyAsync(p => p.Id != pu.Id && p.Username == usernameTrim, ct);
             if (exists) { throw new InvalidOperationException($"El nombre de usuario '{usernameTrim}' ya esta en uso."); }
         }
@@ -87,7 +91,7 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
         var docTrim = req.Documento?.Trim();
         if (!string.IsNullOrWhiteSpace(docTrim))
         {
-            var exists = await _db.PlatformUsers.IgnoreQueryFilters()
+            var exists = await db.PlatformUsers.IgnoreQueryFilters()
                 .AnyAsync(p => p.Id != pu.Id && p.Documento == docTrim, ct);
             if (exists) { throw new InvalidOperationException($"El documento '{docTrim}' ya esta en uso por otro usuario."); }
         }
@@ -109,13 +113,14 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
         // (por si tiene otro tenant). La pagina de login del tenant respeta este flag.
         tu.Status = req.Inhabilitado ? PlatformUserStatus.Blocked : PlatformUserStatus.Active;
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return (await ListAsync(ct)).FirstOrDefault(u => u.Id == tenantUserId);
     }
 
     public async Task<UsuarioDto?> ActualizarPermisosCoordinacionAsync(Guid tenantUserId, ActualizarPermisosCoordinacionRequest req, Guid actor, CancellationToken ct = default)
     {
-        var tu = await _db.TenantUsers.AsNoTracking().FirstOrDefaultAsync(u => u.Id == tenantUserId, ct);
+        using var db = _dbFactory.Create();
+        var tu = await db.TenantUsers.AsNoTracking().FirstOrDefaultAsync(u => u.Id == tenantUserId, ct);
         if (tu is null) { return null; }
         if (_tenant.TenantId is not Guid tid) { return null; }
 
@@ -125,32 +130,33 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
             .Select(c => c.Trim().ToUpperInvariant())
             .Distinct()
             .ToHashSet();
-        var actuales = await _db.TenantUserTiposCoordinados
+        var actuales = await db.TenantUserTiposCoordinados
             .Where(x => x.TenantUserId == tenantUserId).ToListAsync(ct);
         foreach (var fila in actuales.Where(a => !codigosNorm.Contains(a.Codigo)))
         {
-            _db.TenantUserTiposCoordinados.Remove(fila);
+            db.TenantUserTiposCoordinados.Remove(fila);
         }
         var existentes = actuales.Select(a => a.Codigo).ToHashSet();
         foreach (var cod in codigosNorm.Where(c => !existentes.Contains(c)))
         {
-            _db.TenantUserTiposCoordinados.Add(new TenantUserTipoCoordinado
+            db.TenantUserTiposCoordinados.Add(new TenantUserTipoCoordinado
             {
                 TenantId = tid, TenantUserId = tenantUserId, Codigo = cod
             });
         }
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return (await ListAsync(ct)).FirstOrDefault(u => u.Id == tenantUserId);
     }
 
     public async Task<IReadOnlyList<string>> GetModulosCoordinacionAsync(Guid platformUserId, CancellationToken ct = default)
     {
-        var tu = await _db.TenantUsers.AsNoTracking().FirstOrDefaultAsync(u => u.PlatformUserId == platformUserId, ct);
+        using var db = _dbFactory.Create();
+        var tu = await db.TenantUsers.AsNoTracking().FirstOrDefaultAsync(u => u.PlatformUserId == platformUserId, ct);
         if (tu is null) { return Array.Empty<string>(); }
         // La lista de tipos que puede coordinar el usuario vive en la tabla N:N
         // tenant_user_tipos_coordinados (antes eran 4 booleans hardcodeados en
         // tenant_users). Cada codigo apunta a CatalogoTipoServicio.Codigo.
-        return await _db.TenantUserTiposCoordinados.AsNoTracking()
+        return await db.TenantUserTiposCoordinados.AsNoTracking()
             .Where(x => x.TenantUserId == tu.Id)
             .Select(x => x.Codigo)
             .ToListAsync(ct);
@@ -158,12 +164,13 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
 
     public async Task<UsuarioDto?> CrearAsync(CrearUsuarioRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         if (_tenant.TenantId is not Guid tid) { return null; }
         var email = (req.Email ?? "").Trim().ToLowerInvariant();
         if (email.Length == 0) { throw new InvalidOperationException("El correo es obligatorio."); }
         if (string.IsNullOrWhiteSpace(req.Password) || req.Password.Length < 6) { throw new InvalidOperationException("La clave debe tener al menos 6 caracteres."); }
 
-        var pu = await _db.PlatformUsers.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Email == email, ct);
+        var pu = await db.PlatformUsers.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Email == email, ct);
         if (pu is null)
         {
             pu = new PlatformUser
@@ -176,8 +183,8 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
                 Status = PlatformUserStatus.Active,
                 EsGlobal = req.EsGlobal
             };
-            _db.PlatformUsers.Add(pu);
-            await _db.SaveChangesAsync(ct);
+            db.PlatformUsers.Add(pu);
+            await db.SaveChangesAsync(ct);
         }
         else
         {
@@ -185,7 +192,7 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
             if (string.IsNullOrWhiteSpace(pu.PasswordHash)) { pu.PasswordHash = _hasher.Hash(req.Password); }
         }
 
-        if (await _db.TenantUsers.AnyAsync(u => u.PlatformUserId == pu.Id, ct))
+        if (await db.TenantUsers.AnyAsync(u => u.PlatformUserId == pu.Id, ct))
         {
             throw new InvalidOperationException("El usuario ya pertenece a esta entidad.");
         }
@@ -200,77 +207,81 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
             RolId = req.RolId,
             SucursalId = req.SucursalIds?.Count > 0 ? req.SucursalIds[0] : null
         };
-        _db.TenantUsers.Add(tu);
-        await _db.SaveChangesAsync(ct);
+        db.TenantUsers.Add(tu);
+        await db.SaveChangesAsync(ct);
 
         foreach (var sid in (req.SucursalIds ?? Array.Empty<Guid>()).Distinct())
         {
-            _db.TenantUserSucursales.Add(new TenantUserSucursal
+            db.TenantUserSucursales.Add(new TenantUserSucursal
             {
                 TenantId = tid, TenantUserId = tu.Id, SucursalId = sid
             });
         }
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
 
         return (await ListAsync(ct)).FirstOrDefault(u => u.Id == tu.Id);
     }
 
     public async Task<UsuarioDto?> AsignarAsync(Guid tenantUserId, Guid? rolId, IReadOnlyList<Guid> sucursalIds, bool esGlobal, Guid actor, CancellationToken ct = default)
     {
-        var tu = await _db.TenantUsers.FirstOrDefaultAsync(u => u.Id == tenantUserId, ct);
+        using var db = _dbFactory.Create();
+        var tu = await db.TenantUsers.FirstOrDefaultAsync(u => u.Id == tenantUserId, ct);
         if (tu is null) { return null; }
         tu.RolId = rolId;
         var distinct = (sucursalIds ?? Array.Empty<Guid>()).Distinct().ToList();
         tu.SucursalId = distinct.Count > 0 ? distinct[0] : null;
-        var pu = await _db.PlatformUsers.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Id == tu.PlatformUserId, ct);
+        var pu = await db.PlatformUsers.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Id == tu.PlatformUserId, ct);
         if (pu is not null) { pu.EsGlobal = esGlobal; }
 
         // Sincronizar asignaciones de sedes (borrar todas y reinsertar las elegidas).
-        var existentes = await _db.TenantUserSucursales.Where(s => s.TenantUserId == tenantUserId).ToListAsync(ct);
-        _db.TenantUserSucursales.RemoveRange(existentes);
+        var existentes = await db.TenantUserSucursales.Where(s => s.TenantUserId == tenantUserId).ToListAsync(ct);
+        db.TenantUserSucursales.RemoveRange(existentes);
         foreach (var sid in distinct)
         {
-            _db.TenantUserSucursales.Add(new TenantUserSucursal
+            db.TenantUserSucursales.Add(new TenantUserSucursal
             {
                 TenantId = tu.TenantId, TenantUserId = tenantUserId, SucursalId = sid
             });
         }
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return (await ListAsync(ct)).FirstOrDefault(u => u.Id == tenantUserId);
     }
 
     public async Task<bool> EliminarAsync(Guid tenantUserId, Guid actor, CancellationToken ct = default)
     {
-        var tu = await _db.TenantUsers.FirstOrDefaultAsync(u => u.Id == tenantUserId, ct);
+        using var db = _dbFactory.Create();
+        var tu = await db.TenantUsers.FirstOrDefaultAsync(u => u.Id == tenantUserId, ct);
         if (tu is null) { return false; }
-        _db.TenantUsers.Remove(tu);
-        await _db.SaveChangesAsync(ct);
+        db.TenantUsers.Remove(tu);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 
     public async Task<bool> ResetPasswordAsync(Guid tenantUserId, string nuevaClave, Guid actor, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         if (string.IsNullOrWhiteSpace(nuevaClave) || nuevaClave.Length < 6)
         {
             throw new InvalidOperationException("La nueva clave debe tener al menos 6 caracteres.");
         }
-        var tu = await _db.TenantUsers.FirstOrDefaultAsync(u => u.Id == tenantUserId, ct);
+        var tu = await db.TenantUsers.FirstOrDefaultAsync(u => u.Id == tenantUserId, ct);
         if (tu is null) { return false; }
-        var pu = await _db.PlatformUsers.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Id == tu.PlatformUserId, ct);
+        var pu = await db.PlatformUsers.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Id == tu.PlatformUserId, ct);
         if (pu is null) { return false; }
         pu.PasswordHash = _hasher.Hash(nuevaClave);
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 
     public async Task<UsuarioDto?> CrearUsuarioDesdeProfesionalAsync(Guid profesionalId, string email, string password, Guid? rolId, Guid actor, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         if (_tenant.TenantId is not Guid tid) { return null; }
-        var prof = await _db.Profesionales.AsNoTracking().FirstOrDefaultAsync(p => p.Id == profesionalId, ct)
+        var prof = await db.Profesionales.AsNoTracking().FirstOrDefaultAsync(p => p.Id == profesionalId, ct)
             ?? throw new InvalidOperationException("Profesional no encontrado.");
 
         // Validar que el profesional no tenga ya un usuario vinculado.
-        var existeVinculo = await _db.TenantUsers.AnyAsync(u => u.ProfesionalId == profesionalId, ct);
+        var existeVinculo = await db.TenantUsers.AnyAsync(u => u.ProfesionalId == profesionalId, ct);
         if (existeVinculo) { throw new InvalidOperationException($"El profesional '{prof.NombreCompleto}' ya tiene un usuario asociado."); }
 
         email = (email ?? "").Trim().ToLowerInvariant();
@@ -281,10 +292,10 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
         // el segundo lookup, un documento preexistente con OTRO email (fila
         // creada por otro flujo, o re-import parcial) viola el indice unico
         // ix_platform_users_documento cuando el INSERT llega a Postgres.
-        var pu = await _db.PlatformUsers.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Email == email, ct);
+        var pu = await db.PlatformUsers.IgnoreQueryFilters().FirstOrDefaultAsync(p => p.Email == email, ct);
         if (pu is null && !string.IsNullOrWhiteSpace(prof.NumeroDocumento))
         {
-            pu = await _db.PlatformUsers.IgnoreQueryFilters()
+            pu = await db.PlatformUsers.IgnoreQueryFilters()
                 .FirstOrDefaultAsync(p => p.Documento == prof.NumeroDocumento, ct);
         }
         if (pu is null)
@@ -306,8 +317,8 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
                 Celular = prof.Celular,
                 Ciudad = prof.Ciudad
             };
-            _db.PlatformUsers.Add(pu);
-            await _db.SaveChangesAsync(ct);
+            db.PlatformUsers.Add(pu);
+            await db.SaveChangesAsync(ct);
         }
         else
         {
@@ -316,7 +327,7 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
             if (string.IsNullOrWhiteSpace(pu.DisplayName)) { pu.DisplayName = prof.NombreCompleto; }
         }
 
-        if (await _db.TenantUsers.AnyAsync(u => u.PlatformUserId == pu.Id, ct))
+        if (await db.TenantUsers.AnyAsync(u => u.PlatformUserId == pu.Id, ct))
         {
             throw new InvalidOperationException("Ya existe un usuario para este correo en la entidad.");
         }
@@ -331,8 +342,8 @@ public sealed class UsuarioAdminService : IUsuarioAdminService
             ProfesionalId = profesionalId,
             RolId = rolId
         };
-        _db.TenantUsers.Add(tu);
-        await _db.SaveChangesAsync(ct);
+        db.TenantUsers.Add(tu);
+        await db.SaveChangesAsync(ct);
 
         return (await ListAsync(ct)).FirstOrDefault(u => u.Id == tu.Id);
     }

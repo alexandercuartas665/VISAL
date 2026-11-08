@@ -4,18 +4,19 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy.Email;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class EmailIngestConfigService : IEmailIngestConfigService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ISecretProtector _secret;
     private readonly IImapEmailReader _reader;
     private readonly IEmailIngestProcessor _processor;
     private readonly IPqrEmailReplySender _smtp;
 
-    public EmailIngestConfigService(IApplicationDbContext db, ISecretProtector secret,
+    public EmailIngestConfigService(IApplicationDbContextFactory dbFactory, ISecretProtector secret,
         IImapEmailReader reader, IEmailIngestProcessor processor, IPqrEmailReplySender smtp)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _secret = secret;
         _reader = reader;
         _processor = processor;
@@ -26,8 +27,9 @@ public sealed class EmailIngestConfigService : IEmailIngestConfigService
     /// que el buzon puede ENVIAR (no solo leer). Usa SMTP derivado del host IMAP.</summary>
     public async Task<(bool Ok, string? Error)> EnviarPruebaAsync(Guid id, string toEmail, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         if (string.IsNullOrWhiteSpace(toEmail)) { return (false, "Indica el correo destino de la prueba."); }
-        var cfg = await _db.TenantEmailIngestConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
+        var cfg = await db.TenantEmailIngestConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
         if (cfg is null) { return (false, "Buzon no encontrado."); }
         if (string.IsNullOrEmpty(cfg.AppPasswordEncrypted)) { return (false, "Primero guarda la App Password del buzon."); }
 
@@ -56,16 +58,17 @@ public sealed class EmailIngestConfigService : IEmailIngestConfigService
 
     public async Task<IReadOnlyList<EmailIngestConfigDto>> ListAsync(CancellationToken ct = default)
     {
-        var cfgs = await _db.TenantEmailIngestConfigs.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var cfgs = await db.TenantEmailIngestConfigs.AsNoTracking()
             .OrderBy(c => c.Nombre).ToListAsync(ct);
         if (cfgs.Count == 0) { return Array.Empty<EmailIngestConfigDto>(); }
 
         var agentIds = cfgs.Where(c => c.ClassifierAgentId is not null).Select(c => c.ClassifierAgentId!.Value).Distinct().ToList();
         var boardIds = cfgs.Where(c => c.TargetBoardId is not null).Select(c => c.TargetBoardId!.Value).Distinct().ToList();
 
-        var agentes = await _db.AiAgents.AsNoTracking().Where(a => agentIds.Contains(a.Id))
+        var agentes = await db.AiAgents.AsNoTracking().Where(a => agentIds.Contains(a.Id))
             .ToDictionaryAsync(a => a.Id, a => a.Name, ct);
-        var tableros = await _db.TaskBoards.AsNoTracking().Where(b => boardIds.Contains(b.Id))
+        var tableros = await db.TaskBoards.AsNoTracking().Where(b => boardIds.Contains(b.Id))
             .ToDictionaryAsync(b => b.Id, b => b.Name, ct);
 
         return cfgs.Select(c => Map(c, agentes, tableros)).ToList();
@@ -73,18 +76,19 @@ public sealed class EmailIngestConfigService : IEmailIngestConfigService
 
     public async Task<EmailIngestConfigDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
-        var c = await _db.TenantEmailIngestConfigs.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+        using var db = _dbFactory.Create();
+        var c = await db.TenantEmailIngestConfigs.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (c is null) { return null; }
         var agentes = new Dictionary<Guid, string>();
         var tableros = new Dictionary<Guid, string>();
         if (c.ClassifierAgentId is not null)
         {
-            var n = await _db.AiAgents.AsNoTracking().Where(a => a.Id == c.ClassifierAgentId).Select(a => a.Name).FirstOrDefaultAsync(ct);
+            var n = await db.AiAgents.AsNoTracking().Where(a => a.Id == c.ClassifierAgentId).Select(a => a.Name).FirstOrDefaultAsync(ct);
             if (n is not null) { agentes[c.ClassifierAgentId.Value] = n; }
         }
         if (c.TargetBoardId is not null)
         {
-            var n = await _db.TaskBoards.AsNoTracking().Where(b => b.Id == c.TargetBoardId).Select(b => b.Name).FirstOrDefaultAsync(ct);
+            var n = await db.TaskBoards.AsNoTracking().Where(b => b.Id == c.TargetBoardId).Select(b => b.Name).FirstOrDefaultAsync(ct);
             if (n is not null) { tableros[c.TargetBoardId.Value] = n; }
         }
         return Map(c, agentes, tableros);
@@ -92,19 +96,20 @@ public sealed class EmailIngestConfigService : IEmailIngestConfigService
 
     public async Task<Guid> SaveAsync(SaveEmailIngestConfigRequest req, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         if (string.IsNullOrWhiteSpace(req.Nombre)) { throw new InvalidOperationException("El nombre es obligatorio."); }
         if (string.IsNullOrWhiteSpace(req.EmailAddress)) { throw new InvalidOperationException("El correo es obligatorio."); }
 
         TenantEmailIngestConfig cfg;
         if (req.Id is { } id && id != Guid.Empty)
         {
-            cfg = await _db.TenantEmailIngestConfigs.FirstOrDefaultAsync(c => c.Id == id, ct)
+            cfg = await db.TenantEmailIngestConfigs.FirstOrDefaultAsync(c => c.Id == id, ct)
                   ?? throw new InvalidOperationException("El buzon no existe.");
         }
         else
         {
             cfg = new TenantEmailIngestConfig();
-            _db.TenantEmailIngestConfigs.Add(cfg);
+            db.TenantEmailIngestConfigs.Add(cfg);
         }
 
         cfg.Nombre = req.Nombre.Trim();
@@ -138,23 +143,25 @@ public sealed class EmailIngestConfigService : IEmailIngestConfigService
             throw new InvalidOperationException("Para habilitar el buzon primero guarda la App Password.");
         }
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return cfg.Id;
     }
 
     public async Task DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var cfg = await _db.TenantEmailIngestConfigs.FirstOrDefaultAsync(c => c.Id == id, ct);
+        using var db = _dbFactory.Create();
+        var cfg = await db.TenantEmailIngestConfigs.FirstOrDefaultAsync(c => c.Id == id, ct);
         if (cfg is null) { return; }
-        var logs = await _db.EmailIngestLogs.Where(l => l.ConfigId == id).ToListAsync(ct);
-        _db.EmailIngestLogs.RemoveRange(logs);
-        _db.TenantEmailIngestConfigs.Remove(cfg);
-        await _db.SaveChangesAsync(ct);
+        var logs = await db.EmailIngestLogs.Where(l => l.ConfigId == id).ToListAsync(ct);
+        db.EmailIngestLogs.RemoveRange(logs);
+        db.TenantEmailIngestConfigs.Remove(cfg);
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task<(bool Ok, string? Error, int Total)> TestConnectionAsync(Guid id, CancellationToken ct = default)
     {
-        var cfg = await _db.TenantEmailIngestConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
+        using var db = _dbFactory.Create();
+        var cfg = await db.TenantEmailIngestConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
         if (cfg is null) { return (false, "El buzon no existe.", 0); }
         if (string.IsNullOrEmpty(cfg.AppPasswordEncrypted)) { return (false, "Falta la App Password.", 0); }
 
@@ -169,7 +176,8 @@ public sealed class EmailIngestConfigService : IEmailIngestConfigService
 
     public async Task<(bool Ok, string? Error, IReadOnlyList<string> Labels)> ListarEtiquetasAsync(Guid id, CancellationToken ct = default)
     {
-        var cfg = await _db.TenantEmailIngestConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
+        using var db = _dbFactory.Create();
+        var cfg = await db.TenantEmailIngestConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
         if (cfg is null) { return (false, "El buzon no existe.", Array.Empty<string>()); }
         if (string.IsNullOrEmpty(cfg.AppPasswordEncrypted)) { return (false, "Primero guarda la App Password del buzon.", Array.Empty<string>()); }
 
@@ -195,7 +203,8 @@ public sealed class EmailIngestConfigService : IEmailIngestConfigService
 
     public async Task<IReadOnlyList<EmailIngestLogDto>> ListLogsAsync(Guid configId, int take = 100, CancellationToken ct = default)
     {
-        return await _db.EmailIngestLogs.AsNoTracking()
+        using var db = _dbFactory.Create();
+        return await db.EmailIngestLogs.AsNoTracking()
             .Where(l => l.ConfigId == configId)
             .OrderByDescending(l => l.ProcessedAt)
             .Take(Math.Clamp(take, 1, 500))
@@ -204,13 +213,17 @@ public sealed class EmailIngestConfigService : IEmailIngestConfigService
             .ToListAsync(ct);
     }
 
-    public Task<int> ContarPruebasAsync(Guid id, CancellationToken ct = default)
-        => _db.EmailIngestLogs.CountAsync(l => l.ConfigId == id && l.EsPrueba, ct);
+    public async Task<int> ContarPruebasAsync(Guid id, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.Create();
+        return await db.EmailIngestLogs.CountAsync(l => l.ConfigId == id && l.EsPrueba, ct);
+    }
 
     public async Task<(bool Ok, string? Error, int Tarjetas, int Logs)> LimpiarCorridaPruebaAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         // Registros generados en modo prueba para este buzon. Cada uno puede tener una tarjeta asociada.
-        var logs = await _db.EmailIngestLogs.Where(l => l.ConfigId == id && l.EsPrueba).ToListAsync(ct);
+        var logs = await db.EmailIngestLogs.Where(l => l.ConfigId == id && l.EsPrueba).ToListAsync(ct);
         if (logs.Count == 0) { return (true, null, 0, 0); }
 
         var cardIds = logs.Where(l => l.TaskCardId != null).Select(l => l.TaskCardId!.Value).Distinct().ToList();
@@ -219,15 +232,15 @@ public sealed class EmailIngestConfigService : IEmailIngestConfigService
         if (cardIds.Count > 0)
         {
             // Primero los adjuntos (FK), luego las tarjetas.
-            var adjuntos = await _db.TaskCardAttachments.Where(a => cardIds.Contains(a.TaskCardId)).ToListAsync(ct);
-            if (adjuntos.Count > 0) { _db.TaskCardAttachments.RemoveRange(adjuntos); }
-            var cards = await _db.TaskCards.Where(c => cardIds.Contains(c.Id)).ToListAsync(ct);
+            var adjuntos = await db.TaskCardAttachments.Where(a => cardIds.Contains(a.TaskCardId)).ToListAsync(ct);
+            if (adjuntos.Count > 0) { db.TaskCardAttachments.RemoveRange(adjuntos); }
+            var cards = await db.TaskCards.Where(c => cardIds.Contains(c.Id)).ToListAsync(ct);
             tarjetas = cards.Count;
-            if (cards.Count > 0) { _db.TaskCards.RemoveRange(cards); }
+            if (cards.Count > 0) { db.TaskCards.RemoveRange(cards); }
         }
 
-        _db.EmailIngestLogs.RemoveRange(logs);
-        await _db.SaveChangesAsync(ct);
+        db.EmailIngestLogs.RemoveRange(logs);
+        await db.SaveChangesAsync(ct);
         return (true, null, tarjetas, logs.Count);
     }
 

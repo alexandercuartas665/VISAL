@@ -8,9 +8,10 @@ using Visal.Domain.Enums;
 
 namespace Visal.Application.Tenancy.Alertas;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class AlertaService : IAlertaService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenant;
     private readonly IEmailSender _email;
     private readonly Email.INotificacionEmailSender _notiEmail;
@@ -19,11 +20,11 @@ public sealed class AlertaService : IAlertaService
     private readonly ILogger<AlertaService> _log;
 
     public AlertaService(
-        IApplicationDbContext db, ITenantContext tenant,
+        IApplicationDbContextFactory dbFactory, ITenantContext tenant,
         IEmailSender email, Email.INotificacionEmailSender notiEmail,
         IHsmTemplateService hsm, IInformeTerapiasService informe, ILogger<AlertaService> log)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenant = tenant;
         _email = email;
         _notiEmail = notiEmail;
@@ -36,7 +37,8 @@ public sealed class AlertaService : IAlertaService
 
     public async Task<IReadOnlyList<AlertaReglaDto>> ListAsync(CancellationToken ct = default)
     {
-        var reglas = await _db.AlertaReglas.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var reglas = await db.AlertaReglas.AsNoTracking()
             .OrderBy(r => r.Orden).ThenBy(r => r.Nombre)
             .ToListAsync(ct);
         if (reglas.Count == 0) { return Array.Empty<AlertaReglaDto>(); }
@@ -44,7 +46,7 @@ public sealed class AlertaService : IAlertaService
         var userIds = reglas.Where(r => r.UsuarioSistemaId is Guid).Select(r => r.UsuarioSistemaId!.Value).Distinct().ToList();
         var usuarios = userIds.Count == 0
             ? new Dictionary<Guid, string>()
-            : await _db.TenantUsers.AsNoTracking()
+            : await db.TenantUsers.AsNoTracking()
                 .Where(u => userIds.Contains(u.Id))
                 .ToDictionaryAsync(u => u.Id, u => u.Email, ct);
 
@@ -53,12 +55,13 @@ public sealed class AlertaService : IAlertaService
 
     public async Task<AlertaReglaDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
-        var r = await _db.AlertaReglas.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+        using var db = _dbFactory.Create();
+        var r = await db.AlertaReglas.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (r is null) { return null; }
         string? nombre = null;
         if (r.UsuarioSistemaId is Guid uid)
         {
-            nombre = await _db.TenantUsers.AsNoTracking().Where(u => u.Id == uid).Select(u => u.Email).FirstOrDefaultAsync(ct);
+            nombre = await db.TenantUsers.AsNoTracking().Where(u => u.Id == uid).Select(u => u.Email).FirstOrDefaultAsync(ct);
         }
         return ToDto(r, nombre);
     }
@@ -74,16 +77,17 @@ public sealed class AlertaService : IAlertaService
             ? JsonSerializer.Serialize(req.HsmParametros)
             : null;
 
+        using var db = _dbFactory.Create();
         AlertaRegla entity;
         if (req.Id is Guid id)
         {
-            entity = await _db.AlertaReglas.FirstOrDefaultAsync(x => x.Id == id, ct)
+            entity = await db.AlertaReglas.FirstOrDefaultAsync(x => x.Id == id, ct)
                 ?? throw new InvalidOperationException("La regla no existe.");
         }
         else
         {
             entity = new AlertaRegla { TenantId = tid };
-            _db.AlertaReglas.Add(entity);
+            db.AlertaReglas.Add(entity);
         }
 
         entity.Nombre = req.Nombre.Trim();
@@ -108,31 +112,34 @@ public sealed class AlertaService : IAlertaService
         entity.HsmHeaderUrl = req.Canal == AlertaCanal.WhatsApp ? Vacio(req.HsmHeaderUrl) : null;
         entity.SeguimientoReglaId = req.Condicion == AlertaCondicion.InformeNoLeido ? req.SeguimientoReglaId : null;
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return entity.Id;
     }
 
     public async Task<bool> DeleteAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
-        var r = await _db.AlertaReglas.FirstOrDefaultAsync(x => x.Id == id, ct);
+        using var db = _dbFactory.Create();
+        var r = await db.AlertaReglas.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (r is null) { return false; }
-        _db.AlertaReglas.Remove(r);
-        await _db.SaveChangesAsync(ct);
+        db.AlertaReglas.Remove(r);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 
     public async Task<bool> ToggleActivaAsync(Guid id, bool activa, Guid actor, CancellationToken ct = default)
     {
-        var r = await _db.AlertaReglas.FirstOrDefaultAsync(x => x.Id == id, ct);
+        using var db = _dbFactory.Create();
+        var r = await db.AlertaReglas.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (r is null) { return false; }
         r.Activa = activa;
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 
     public async Task<IReadOnlyList<AlertaLineaDto>> ListLineasGupshupAsync(CancellationToken ct = default)
     {
-        return await _db.WhatsAppLines.AsNoTracking()
+        using var db = _dbFactory.Create();
+        return await db.WhatsAppLines.AsNoTracking()
             .Where(l => l.Provider == WhatsAppProvider.Gupshup)
             .OrderBy(l => l.InstanceName)
             .Select(l => new AlertaLineaDto(l.Id, l.InstanceName + (l.PhoneNumber != null ? " (" + l.PhoneNumber + ")" : "")))
@@ -141,7 +148,8 @@ public sealed class AlertaService : IAlertaService
 
     public async Task<IReadOnlyList<AlertaUsuarioDto>> ListUsuariosAsync(CancellationToken ct = default)
     {
-        return await _db.TenantUsers.AsNoTracking()
+        using var db = _dbFactory.Create();
+        return await db.TenantUsers.AsNoTracking()
             .Where(u => u.Status == PlatformUserStatus.Active)
             .OrderBy(u => u.Email)
             .Select(u => new AlertaUsuarioDto(u.Id, u.Email, u.Email))
@@ -153,7 +161,8 @@ public sealed class AlertaService : IAlertaService
         // Servicios de los contratos del tenant. Un mismo codigo puede repetirse en
         // varios contratos; agrupamos por codigo base (sin sufijo d/f) para presentar
         // una lista limpia y guardar el codigo base en la regla.
-        var filas = await _db.ServiciosContrato.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var filas = await db.ServiciosContrato.AsNoTracking()
             .Where(s => s.CodigoServicio != null && s.CodigoServicio != "")
             .Select(s => new { s.CodigoServicio, s.Descripcion })
             .ToListAsync(ct);
@@ -175,7 +184,8 @@ public sealed class AlertaService : IAlertaService
     {
         if (_tenant.TenantId is not Guid tid) { return new(0, 0, 0, Array.Empty<string>()); }
 
-        var reglas = await _db.AlertaReglas.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var reglas = await db.AlertaReglas.AsNoTracking()
             .Where(r => r.Activa)
             .OrderBy(r => r.Orden)
             .ToListAsync(ct);
@@ -184,9 +194,9 @@ public sealed class AlertaService : IAlertaService
         // Las reglas de control (InformeNoLeido) son agregadas (un resumen a gerencia),
         // no per-paciente: se procesan aparte del nucleo por-candidato.
         var reglasNormales = reglas.Where(r => r.Condicion != AlertaCondicion.InformeNoLeido).ToList();
-        var nucleo = await EvaluarNucleoAsync(tid, reglasNormales, hoy, forzar, dryRun: false, telefonoOverride: null, forzarReenvio: false, actor, baseUri: null, soloAsignaciones: null, ct);
+        var nucleo = await EvaluarNucleoAsync(db, tid, reglasNormales, hoy, forzar, dryRun: false, telefonoOverride: null, forzarReenvio: false, actor, baseUri: null, soloAsignaciones: null, ct);
 
-        var (agEnv, agErr, agMsgs) = await DispararInformeNoLeidoAsync(tid, reglas, hoy, forzar, ct);
+        var (agEnv, agErr, agMsgs) = await DispararInformeNoLeidoAsync(db, tid, reglas, hoy, forzar, ct);
 
         var mensajes = new List<string>(nucleo.Mensajes);
         mensajes.AddRange(agMsgs);
@@ -200,7 +210,7 @@ public sealed class AlertaService : IAlertaService
     /// en el periodo y NO abrieron su enlace, y lo envia por correo al usuario de gerencia.
     /// Deduplicado por (regla, periodo) con una fila de outbox de asignacion vacia.</summary>
     private async Task<(int Enviadas, int Errores, List<string> Msgs)> DispararInformeNoLeidoAsync(
-        Guid tid, List<AlertaRegla> reglas, DateOnly hoy, bool forzar, CancellationToken ct)
+        IApplicationDbContext db, Guid tid, List<AlertaRegla> reglas, DateOnly hoy, bool forzar, CancellationToken ct)
     {
         var msgs = new List<string>();
         int enviadas = 0, errores = 0;
@@ -218,7 +228,7 @@ public sealed class AlertaService : IAlertaService
             {
                 errores++; msgs.Add($"{regla.Nombre}: sin usuario de gerencia configurado."); continue;
             }
-            var user = await _db.TenantUsers.AsNoTracking().FirstOrDefaultAsync(u => u.Id == uid, ct);
+            var user = await db.TenantUsers.AsNoTracking().FirstOrDefaultAsync(u => u.Id == uid, ct);
             var correo = Vacio(user?.Email);
             if (correo is null)
             {
@@ -226,11 +236,11 @@ public sealed class AlertaService : IAlertaService
             }
 
             // Dedup por (regla, periodo): fila de outbox con asignacion vacia.
-            var previo = await _db.AlertaEnvios
+            var previo = await db.AlertaEnvios
                 .FirstOrDefaultAsync(e => e.ReglaId == regla.Id && e.AsignacionId == Guid.Empty && e.Periodo == periodo, ct);
             if (previo is not null && previo.Exito && !forzar) { continue; }
 
-            var datos = await ControlLecturaCoreAsync(tid, periodo, regla.SeguimientoReglaId, ct);
+            var datos = await ControlLecturaCoreAsync(db, tid, periodo, regla.SeguimientoReglaId, ct);
             var noLey = datos.Where(d => d.Aperturas == 0).OrderBy(d => d.Nombre, StringComparer.OrdinalIgnoreCase).ToList();
 
             var asunto = string.IsNullOrWhiteSpace(regla.Asunto)
@@ -256,13 +266,13 @@ public sealed class AlertaService : IAlertaService
                     TenantId = tid, ReglaId = regla.Id, AsignacionId = Guid.Empty, PacienteId = Guid.Empty,
                     Periodo = periodo, Canal = AlertaCanal.Correo, Destinatario = AlertaDestinatario.UsuarioSistema,
                 };
-                _db.AlertaEnvios.Add(previo);
+                db.AlertaEnvios.Add(previo);
             }
             previo.Contacto = correo;
             previo.FechaEnvio = DateTimeOffset.UtcNow;
             previo.Exito = ok;
             previo.Error = err;
-            await _db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct);
 
             if (ok) { enviadas++; } else { errores++; msgs.Add($"{regla.Nombre}: {err}"); }
         }
@@ -351,7 +361,8 @@ public sealed class AlertaService : IAlertaService
         };
 
         // Simula la fecha elegida con la logica real de disparo (no forzar).
-        var nucleo = await EvaluarNucleoAsync(tid, new List<AlertaRegla> { regla }, fecha, forzar: false, dryRun: !emitir, telefonoOverride, forzarReenvio, actor, baseUri, soloAsignaciones, ct);
+        using var db = _dbFactory.Create();
+        var nucleo = await EvaluarNucleoAsync(db, tid, new List<AlertaRegla> { regla }, fecha, forzar: false, dryRun: !emitir, telefonoOverride, forzarReenvio, actor, baseUri, soloAsignaciones, ct);
         var filas = nucleo.Filas;
 
         string? aviso = null;
@@ -377,7 +388,7 @@ public sealed class AlertaService : IAlertaService
 
     private sealed record NucleoResult(int Enviadas, int Saltadas, int Errores, List<string> Mensajes, List<AlertaSimulacionFila> Filas);
 
-    private async Task<NucleoResult> EvaluarNucleoAsync(Guid tid, List<AlertaRegla> reglas, DateOnly hoy, bool forzar, bool dryRun, string? telefonoOverride, bool forzarReenvio, Guid actor, string? baseUri, IReadOnlyCollection<Guid>? soloAsignaciones, CancellationToken ct)
+    private async Task<NucleoResult> EvaluarNucleoAsync(IApplicationDbContext db, Guid tid, List<AlertaRegla> reglas, DateOnly hoy, bool forzar, bool dryRun, string? telefonoOverride, bool forzarReenvio, Guid actor, string? baseUri, IReadOnlyCollection<Guid>? soloAsignaciones, CancellationToken ct)
     {
         var overrideTel = string.IsNullOrWhiteSpace(telefonoOverride) ? null : NormalizarTelefono(telefonoOverride);
         var baseUriInforme = string.IsNullOrWhiteSpace(baseUri) ? null : baseUri!.Trim();
@@ -388,12 +399,12 @@ public sealed class AlertaService : IAlertaService
         int enviadas = 0, saltadas = 0, errores = 0;
 
         // Candidatos: asignaciones con turnos + sus agregados de sesiones.
-        var candidatos = await CargarCandidatosAsync(ct);
+        var candidatos = await CargarCandidatosAsync(db, ct);
         if (candidatos.Count == 0) { return new(0, 0, 0, mensajes, filas); }
 
         // Lookups de contacto.
         var pacienteIds = candidatos.Select(c => c.PacienteId).Distinct().ToList();
-        var pacientes = (await _db.Pacientes.AsNoTracking()
+        var pacientes = (await db.Pacientes.AsNoTracking()
             .Where(p => pacienteIds.Contains(p.Id))
             .Select(p => new { p.Id, p.NombreCompleto, p.NumeroDocumento, p.Email, p.Telefono })
             .ToListAsync(ct))
@@ -402,14 +413,14 @@ public sealed class AlertaService : IAlertaService
         var profIds = candidatos.Where(c => c.ProfesionalId is Guid).Select(c => c.ProfesionalId!.Value).Distinct().ToList();
         var profesionales = profIds.Count == 0
             ? new Dictionary<Guid, (string Nombre, string? Celular)>()
-            : await _db.Profesionales.AsNoTracking()
+            : await db.Profesionales.AsNoTracking()
                 .Where(p => profIds.Contains(p.Id))
                 .ToDictionaryAsync(p => p.Id, p => new ValueTuple<string, string?>(p.NombreCompleto, p.Celular), ct);
 
         // Correo del doctor: via TenantUser vinculado al profesional.
         var doctorEmails = profIds.Count == 0
             ? new Dictionary<Guid, string>()
-            : await _db.TenantUsers.AsNoTracking()
+            : await db.TenantUsers.AsNoTracking()
                 .Where(u => u.ProfesionalId != null && profIds.Contains(u.ProfesionalId!.Value) && u.Email != null)
                 .GroupBy(u => u.ProfesionalId!.Value)
                 .Select(g => new { ProfId = g.Key, Email = g.Max(x => x.Email) })
@@ -419,7 +430,7 @@ public sealed class AlertaService : IAlertaService
         var reglaUserIds = reglas.Where(r => r.UsuarioSistemaId is Guid).Select(r => r.UsuarioSistemaId!.Value).Distinct().ToList();
         var reglaUsuarios = reglaUserIds.Count == 0
             ? new Dictionary<Guid, (string Email, Guid? ProfId)>()
-            : (await _db.TenantUsers.AsNoTracking()
+            : (await db.TenantUsers.AsNoTracking()
                 .Where(u => reglaUserIds.Contains(u.Id))
                 .Select(u => new { u.Id, u.Email, u.ProfesionalId })
                 .ToListAsync(ct))
@@ -428,13 +439,13 @@ public sealed class AlertaService : IAlertaService
         var reglaUserProfIds = reglaUsuarios.Values.Where(v => v.ProfId is Guid).Select(v => v.ProfId!.Value).Distinct().ToList();
         var reglaUserCelulares = reglaUserProfIds.Count == 0
             ? new Dictionary<Guid, string?>()
-            : await _db.Profesionales.AsNoTracking()
+            : await db.Profesionales.AsNoTracking()
                 .Where(p => reglaUserProfIds.Contains(p.Id))
                 .ToDictionaryAsync(p => p.Id, p => p.Celular, ct);
 
         // Outbox previo (para dedup) de estas reglas.
         var reglaIds = reglas.Select(r => r.Id).ToList();
-        var enviosPrevios = await _db.AlertaEnvios
+        var enviosPrevios = await db.AlertaEnvios
             .Where(e => reglaIds.Contains(e.ReglaId))
             .ToListAsync(ct);
         var enviosIdx = enviosPrevios.ToDictionary(e => (e.ReglaId, e.AsignacionId, e.Periodo));
@@ -605,7 +616,7 @@ public sealed class AlertaService : IAlertaService
                             Canal = regla.Canal,
                             Destinatario = regla.Destinatario,
                         };
-                        _db.AlertaEnvios.Add(previo);
+                        db.AlertaEnvios.Add(previo);
                         enviosIdx[key] = previo;
                     }
                     previo.Contacto = contacto;
@@ -631,14 +642,15 @@ public sealed class AlertaService : IAlertaService
             }
         }
 
-        if (!dryRun) { await _db.SaveChangesAsync(ct); }
+        if (!dryRun) { await db.SaveChangesAsync(ct); }
         return new NucleoResult(enviadas, saltadas, errores, mensajes, filas);
     }
 
     public async Task<IReadOnlyList<AlertaEnvioDto>> ListEnviosRecientesAsync(int max = 200, DateOnly? desde = null, DateOnly? hasta = null, Guid? reglaId = null, CancellationToken ct = default)
     {
         if (max <= 0) { max = 200; }
-        var q = _db.AlertaEnvios.AsNoTracking().AsQueryable();
+        using var db = _dbFactory.Create();
+        var q = db.AlertaEnvios.AsNoTracking().AsQueryable();
         if (desde is DateOnly d1) { var ini = new DateTimeOffset(d1.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)); q = q.Where(e => e.FechaEnvio >= ini); }
         if (hasta is DateOnly d2) { var fin = new DateTimeOffset(d2.AddDays(1).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc)); q = q.Where(e => e.FechaEnvio < fin); }
         if (reglaId is Guid rid) { q = q.Where(e => e.ReglaId == rid); }
@@ -649,17 +661,17 @@ public sealed class AlertaService : IAlertaService
         if (envios.Count == 0) { return Array.Empty<AlertaEnvioDto>(); }
 
         var reglaIds = envios.Select(e => e.ReglaId).Distinct().ToList();
-        var reglas = await _db.AlertaReglas.AsNoTracking()
+        var reglas = await db.AlertaReglas.AsNoTracking()
             .Where(r => reglaIds.Contains(r.Id))
             .ToDictionaryAsync(r => r.Id, r => r.Nombre, ct);
         var pacIds = envios.Select(e => e.PacienteId).Distinct().ToList();
-        var pacientes = await _db.Pacientes.AsNoTracking()
+        var pacientes = await db.Pacientes.AsNoTracking()
             .Where(p => pacIds.Contains(p.Id))
             .ToDictionaryAsync(p => p.Id, p => p.NombreCompleto, ct);
         var profIds = envios.Where(e => e.ProfesionalId is Guid).Select(e => e.ProfesionalId!.Value).Distinct().ToList();
         var profesionales = profIds.Count == 0
             ? new Dictionary<Guid, string>()
-            : await _db.Profesionales.AsNoTracking()
+            : await db.Profesionales.AsNoTracking()
                 .Where(p => profIds.Contains(p.Id))
                 .ToDictionaryAsync(p => p.Id, p => p.NombreCompleto, ct);
 
@@ -710,26 +722,29 @@ public sealed class AlertaService : IAlertaService
     public async Task<bool> MarcarGestionLoteAsync(IReadOnlyCollection<Guid> envioIds, AlertaGestion estado, Guid actor, CancellationToken ct = default)
     {
         if (envioIds is null || envioIds.Count == 0) { return false; }
-        var filas = await _db.AlertaEnvios.Where(x => envioIds.Contains(x.Id)).ToListAsync(ct);
+        using var db = _dbFactory.Create();
+        var filas = await db.AlertaEnvios.Where(x => envioIds.Contains(x.Id)).ToListAsync(ct);
         if (filas.Count == 0) { return false; }
         foreach (var e in filas) { e.EstadoGestion = estado; }
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 
     public async Task<int> EliminarEnviosAsync(IReadOnlyCollection<Guid> envioIds, Guid actor, CancellationToken ct = default)
     {
         if (envioIds is null || envioIds.Count == 0) { return 0; }
-        var filas = await _db.AlertaEnvios.Where(x => envioIds.Contains(x.Id)).ToListAsync(ct);
+        using var db = _dbFactory.Create();
+        var filas = await db.AlertaEnvios.Where(x => envioIds.Contains(x.Id)).ToListAsync(ct);
         if (filas.Count == 0) { return 0; }
-        _db.AlertaEnvios.RemoveRange(filas);
-        await _db.SaveChangesAsync(ct);
+        db.AlertaEnvios.RemoveRange(filas);
+        await db.SaveChangesAsync(ct);
         return filas.Count;
     }
 
     public async Task<IReadOnlyList<AlertaReglaDto>> ListReglasDoctorAsync(CancellationToken ct = default)
     {
-        var reglas = await _db.AlertaReglas.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var reglas = await db.AlertaReglas.AsNoTracking()
             .Where(r => r.Destinatario == AlertaDestinatario.DoctorAtendio
                      && r.Condicion != AlertaCondicion.InformeNoLeido)
             .OrderBy(r => r.Orden).ThenBy(r => r.Nombre)
@@ -742,7 +757,8 @@ public sealed class AlertaService : IAlertaService
         if (_tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         periodo = string.IsNullOrWhiteSpace(periodo) ? DateTime.Now.ToString("yyyy-MM") : periodo.Trim();
 
-        var datos = await ControlLecturaCoreAsync(tid, periodo, reglaObjetivoId, ct);
+        using var db = _dbFactory.Create();
+        var datos = await ControlLecturaCoreAsync(db, tid, periodo, reglaObjetivoId, ct);
         var consum = datos.Where(d => d.Aperturas > 0).OrderByDescending(d => d.UltimaApertura).ToList();
         var noLey = datos.Where(d => d.Aperturas == 0).OrderBy(d => d.Nombre, StringComparer.OrdinalIgnoreCase).ToList();
         return new ControlLecturaResult(periodo, datos.Count, consum.Count, noLey.Count, consum, noLey);
@@ -751,9 +767,9 @@ public sealed class AlertaService : IAlertaService
     /// <summary>Nucleo del control de lectura: doctores a los que se les envio la alerta en
     /// el periodo con su conteo de envios y de aperturas del enlace. Reusado por el reporte
     /// y por la alerta a gerencia.</summary>
-    private async Task<List<ControlLecturaDoctorDto>> ControlLecturaCoreAsync(Guid tid, string periodo, Guid? reglaObjetivoId, CancellationToken ct)
+    private async Task<List<ControlLecturaDoctorDto>> ControlLecturaCoreAsync(IApplicationDbContext db, Guid tid, string periodo, Guid? reglaObjetivoId, CancellationToken ct)
     {
-        var q = _db.AlertaEnvios.AsNoTracking()
+        var q = db.AlertaEnvios.AsNoTracking()
             .Where(e => e.Destinatario == AlertaDestinatario.DoctorAtendio
                      && e.Exito && e.Periodo == periodo && e.ProfesionalId != null);
         if (reglaObjetivoId is Guid robj) { q = q.Where(e => e.ReglaId == robj); }
@@ -767,7 +783,7 @@ public sealed class AlertaService : IAlertaService
         var profIds = porDoctor.Keys.ToList();
 
         var (ini, fin) = RangoMes(periodo);
-        var accesos = await _db.InformeAccesos.AsNoTracking()
+        var accesos = await db.InformeAccesos.AsNoTracking()
             .Where(a => a.ProfesionalId != null && profIds.Contains(a.ProfesionalId.Value)
                      && a.AccedidoEn >= ini && a.AccedidoEn < fin)
             .Select(a => new { ProfId = a.ProfesionalId!.Value, a.AccedidoEn })
@@ -775,7 +791,7 @@ public sealed class AlertaService : IAlertaService
         var aperturas = accesos.GroupBy(a => a.ProfId)
             .ToDictionary(g => g.Key, g => (Count: g.Count(), Ultima: g.Max(x => x.AccedidoEn)));
 
-        var profs = (await _db.Profesionales.AsNoTracking()
+        var profs = (await db.Profesionales.AsNoTracking()
             .Where(p => profIds.Contains(p.Id))
             .Select(p => new { p.Id, p.NombreCompleto, p.Celular })
             .ToListAsync(ct))
@@ -814,14 +830,14 @@ public sealed class AlertaService : IAlertaService
         string? CodigoBase, string Contrato, int Cantidad, DateOnly FechaInicio, DateOnly? FechaFinal,
         bool HasPending, bool AllFinished, DateOnly? UltimaAtencion, Guid? ProfesionalId);
 
-    private async Task<List<Candidato>> CargarCandidatosAsync(CancellationToken ct)
+    private async Task<List<Candidato>> CargarCandidatosAsync(IApplicationDbContext db, CancellationToken ct)
     {
         // Sesiones con su asignacion + profesional (via turno).
-        var sesiones = await (from s in _db.AsignacionTurnoSesiones.AsNoTracking()
-                              join t in _db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+        var sesiones = await (from s in db.AsignacionTurnoSesiones.AsNoTracking()
+                              join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
                               select new { t.AsignacionId, t.ProfesionalId, s.FechaAtencion, s.Completado })
                              .ToListAsync(ct);
-        var turnos = await _db.AsignacionTurnos.AsNoTracking()
+        var turnos = await db.AsignacionTurnos.AsNoTracking()
             .Select(t => new { t.AsignacionId, t.ProfesionalId, t.Cantidad })
             .ToListAsync(ct);
         if (turnos.Count == 0) { return new(); }
@@ -831,7 +847,7 @@ public sealed class AlertaService : IAlertaService
         var sesPorAsig = sesiones.GroupBy(s => s.AsignacionId).ToDictionary(g => g.Key, g => g.ToList());
 
         var asigIds = turnosPorAsig.Keys.ToList();
-        var asigs = await _db.Asignaciones.AsNoTracking()
+        var asigs = await db.Asignaciones.AsNoTracking()
             .Where(a => asigIds.Contains(a.Id))
             .Select(a => new { a.Id, a.PacienteId, a.NombreServicio, a.TipoServicio, a.Modulo, a.CodigoRips, a.ContratoCodigo, a.Cantidad, a.FechaInicio, a.FechaFinal })
             .ToListAsync(ct);

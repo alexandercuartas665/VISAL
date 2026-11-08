@@ -16,8 +16,9 @@ namespace Visal.Application.Tenancy;
 /// los plaintext al frontend — solo flags "tiene valor" para que la UI muestre el estado
 /// sin exponer el secreto.
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class InteroperabilidadConfigService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     ISecretProtector secrets,
     IHttpClientFactory http,
@@ -25,6 +26,7 @@ public sealed class InteroperabilidadConfigService(
 {
     public async Task<InteroperabilidadConfigDto?> GetConfigAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var c = await db.InteroperabilidadConfigs.AsNoTracking().FirstOrDefaultAsync(ct);
         if (c is null) { return null; }
         return Map(c);
@@ -32,6 +34,7 @@ public sealed class InteroperabilidadConfigService(
 
     public async Task<InteroperabilidadConfigDto> SaveConfigAsync(InteroperabilidadConfigSaveRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid)
         {
             throw new InvalidOperationException("No hay tenant activo para guardar la config de interoperabilidad.");
@@ -79,6 +82,7 @@ public sealed class InteroperabilidadConfigService(
 
     public async Task<IReadOnlyList<InteroperabilidadCredencialSedeDto>> ListarCredencialesAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Join con Sucursales para devolver el nombre legible de la sede sin un segundo round-trip.
         var rows = await (
             from cr in db.InteroperabilidadCredencialesSede.AsNoTracking()
@@ -107,6 +111,7 @@ public sealed class InteroperabilidadConfigService(
 
     public async Task<InteroperabilidadCredencialSedeDto> GuardarCredencialAsync(InteroperabilidadCredencialSedeSaveRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid)
         {
             throw new InvalidOperationException("No hay tenant activo.");
@@ -153,6 +158,7 @@ public sealed class InteroperabilidadConfigService(
 
     public async Task<bool> EliminarCredencialAsync(Guid credencialId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var cr = await db.InteroperabilidadCredencialesSede.FirstOrDefaultAsync(x => x.Id == credencialId, ct);
         if (cr is null) { return false; }
         db.InteroperabilidadCredencialesSede.Remove(cr);
@@ -163,6 +169,7 @@ public sealed class InteroperabilidadConfigService(
 
     public async Task<ProbarConexionResultado> ProbarConexionAsync(Guid credencialId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var cr = await db.InteroperabilidadCredencialesSede.AsNoTracking()
             .FirstOrDefaultAsync(x => x.Id == credencialId, ct);
         if (cr is null)

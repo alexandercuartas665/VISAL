@@ -154,11 +154,11 @@ public sealed class FormDefinitionSnapshotTests : IAsyncLifetime
         }
 
         // Restauramos snapshot1: la fila viva debe volver a "HC Original" y debe
-        // aparecer snapshot2 conteniendo el estado reemplazado ("HC v2").
-        await using (var ctx = CreateContext(_tenantId))
+        // aparecer snapshot2 conteniendo el estado reemplazado ("HC v2"). El servicio
+        // abre su propio contexto corto por operacion (factory inline).
         {
             var svc = new FormDefinitionVersionService(
-                ctx, // VisalDbContext implementa IApplicationDbContext directamente
+                new FormFactory(this, _tenantId),
                 new FixedTenantContext(_tenantId),
                 new NullAuditWriter());
 
@@ -214,6 +214,14 @@ public sealed class FormDefinitionSnapshotTests : IAsyncLifetime
         public Guid? TenantId { get; } = tenantId;
         public Guid? UserId { get; } = userId;
         public Guid? SucursalId => null;
+    }
+
+    // Factory inline (modelo AuditShortContext): un VisalDbContext NUEVO por Create() sobre
+    // las MISMAS opciones y tenant del test -> contexto corto por operacion sobre el mismo Postgres.
+    private sealed class FormFactory(FormDefinitionSnapshotTests owner, Guid? tenantId)
+        : IApplicationDbContextFactory
+    {
+        public IApplicationDbContext Create() => owner.CreateContext(tenantId);
     }
 
     private sealed class NullAuditWriter : IAuditWriter

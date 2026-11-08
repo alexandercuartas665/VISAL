@@ -5,20 +5,22 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = _dbFactory.Create();) en vez del IApplicationDbContext scoped.
 public sealed class MessageTemplateService : IMessageTemplateService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenantContext;
 
-    public MessageTemplateService(IApplicationDbContext db, ITenantContext tenantContext)
+    public MessageTemplateService(IApplicationDbContextFactory dbFactory, ITenantContext tenantContext)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenantContext = tenantContext;
     }
 
     public async Task<IReadOnlyList<MessageTemplateDto>> ListAsync(CancellationToken cancellationToken = default)
     {
-        return await _db.MessageTemplates
+        using var db = _dbFactory.Create();
+        return await db.MessageTemplates
             .AsNoTracking()
             .Where(t => t.IsActive)
             .OrderBy(t => t.Category).ThenBy(t => t.SortOrder)
@@ -32,12 +34,13 @@ public sealed class MessageTemplateService : IMessageTemplateService
         {
             return null;
         }
+        using var db = _dbFactory.Create();
         var category = (request.Category ?? "").Trim().ToLowerInvariant();
         if (string.IsNullOrWhiteSpace(category))
         {
             category = "saludo";
         }
-        var nextOrder = await _db.MessageTemplates
+        var nextOrder = await db.MessageTemplates
             .Where(t => t.Category == category)
             .Select(t => (int?)t.SortOrder)
             .MaxAsync(cancellationToken) ?? -1;
@@ -53,14 +56,15 @@ public sealed class MessageTemplateService : IMessageTemplateService
             SortOrder = nextOrder + 1,
             IsActive = true
         };
-        _db.MessageTemplates.Add(entity);
-        await _db.SaveChangesAsync(cancellationToken);
+        db.MessageTemplates.Add(entity);
+        await db.SaveChangesAsync(cancellationToken);
         return Map(entity);
     }
 
     public async Task<MessageTemplateDto?> UpdateAsync(Guid id, UpdateMessageTemplateRequest request, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _db.MessageTemplates.FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
+        using var db = _dbFactory.Create();
+        var entity = await db.MessageTemplates.FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
         if (entity is null)
         {
             return null;
@@ -70,30 +74,31 @@ public sealed class MessageTemplateService : IMessageTemplateService
         entity.MediaType = request.MediaType;
         entity.MediaUrl = request.MediaUrl;
         entity.MediaMimeType = request.MediaMimeType;
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return Map(entity);
     }
 
     public async Task<bool> DeleteAsync(Guid id, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var entity = await _db.MessageTemplates.FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
+        using var db = _dbFactory.Create();
+        var entity = await db.MessageTemplates.FirstOrDefaultAsync(t => t.Id == id, cancellationToken);
         if (entity is null)
         {
             return false;
         }
-        _db.MessageTemplates.Remove(entity);
+        db.MessageTemplates.Remove(entity);
 
         // Marca al tenant como "ya intervine" — evita que el auto-seed del chat
         // WhatsApp resucite los defaults al proximo abrir de un chat. Idempotente:
         // no duplica la marca si ya existe.
         if (_tenantContext.TenantId is Guid tenantId)
         {
-            var yaMarcado = await _db.TenantConfigurations
+            var yaMarcado = await db.TenantConfigurations
                 .AsNoTracking()
                 .AnyAsync(c => c.ConfigKey == SeededFlagKey, cancellationToken);
             if (!yaMarcado)
             {
-                _db.TenantConfigurations.Add(new TenantConfiguration
+                db.TenantConfigurations.Add(new TenantConfiguration
                 {
                     TenantId = tenantId,
                     ConfigKey = SeededFlagKey,
@@ -102,7 +107,7 @@ public sealed class MessageTemplateService : IMessageTemplateService
             }
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return true;
     }
 
@@ -119,9 +124,10 @@ public sealed class MessageTemplateService : IMessageTemplateService
             return 0;
         }
 
+        using var db = _dbFactory.Create();
         // Si YA sembramos alguna vez, no volver a hacerlo — respeta que el usuario
         // haya eliminado plantillas a proposito.
-        var yaSembrado = await _db.TenantConfigurations
+        var yaSembrado = await db.TenantConfigurations
             .AsNoTracking()
             .AnyAsync(c => c.ConfigKey == SeededFlagKey, cancellationToken);
         if (yaSembrado)
@@ -132,7 +138,7 @@ public sealed class MessageTemplateService : IMessageTemplateService
         // Fallback para tenants anteriores al flag: si hay al menos una plantilla,
         // consideramos que ya paso por el seed y creamos la marca sin volver a
         // insertar. Asi convergemos sin duplicados.
-        var tieneAlguna = await _db.MessageTemplates.AnyAsync(cancellationToken);
+        var tieneAlguna = await db.MessageTemplates.AnyAsync(cancellationToken);
         var created = 0;
         if (!tieneAlguna)
         {
@@ -141,7 +147,7 @@ public sealed class MessageTemplateService : IMessageTemplateService
                 var order = 0;
                 foreach (var body in items)
                 {
-                    _db.MessageTemplates.Add(new MessageTemplate
+                    db.MessageTemplates.Add(new MessageTemplate
                     {
                         TenantId = tenantId,
                         Category = category,
@@ -155,13 +161,13 @@ public sealed class MessageTemplateService : IMessageTemplateService
             }
         }
 
-        _db.TenantConfigurations.Add(new TenantConfiguration
+        db.TenantConfigurations.Add(new TenantConfiguration
         {
             TenantId = tenantId,
             ConfigKey = SeededFlagKey,
             ConfigValue = DateTimeOffset.UtcNow.ToString("O")
         });
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return created;
     }
 

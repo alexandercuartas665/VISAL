@@ -77,10 +77,12 @@ public interface IPacientePruebaService
     Task<PacientePruebaLimpiezaResultDto> LimpiarAsync(Guid pacienteId, Guid actor, CancellationToken ct = default);
 }
 
-public sealed class PacientePruebaService(IApplicationDbContext db, ITenantContext tenant) : IPacientePruebaService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class PacientePruebaService(IApplicationDbContextFactory dbFactory, ITenantContext tenant) : IPacientePruebaService
 {
     public async Task<IReadOnlyList<PacientePruebaDto>> ListarAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Query filter de tenant aplica automaticamente.
         var pacientes = await db.Pacientes.AsNoTracking()
             .Where(p => p.EsPrueba)
@@ -100,6 +102,7 @@ public sealed class PacientePruebaService(IApplicationDbContext db, ITenantConte
 
     public async Task<IReadOnlyList<PacienteBusquedaDto>> BuscarAsync(string termino, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         termino = (termino ?? "").Trim();
         if (termino.Length < 2) { return Array.Empty<PacienteBusquedaDto>(); }
         var t = termino.ToLower();
@@ -114,6 +117,7 @@ public sealed class PacientePruebaService(IApplicationDbContext db, ITenantConte
 
     public async Task<bool> MarcarAsync(Guid pacienteId, bool esPrueba, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var p = await db.Pacientes.FirstOrDefaultAsync(x => x.Id == pacienteId, ct);
         if (p is null) { return false; }
         p.EsPrueba = esPrueba;
@@ -123,6 +127,7 @@ public sealed class PacientePruebaService(IApplicationDbContext db, ITenantConte
 
     public async Task<PacientePruebaConteoDto> ContarAsync(Guid pacienteId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var hcIds = await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.PacienteId == pacienteId).Select(h => h.Id).ToListAsync(ct);
 
@@ -143,6 +148,7 @@ public sealed class PacientePruebaService(IApplicationDbContext db, ITenantConte
 
     public async Task<PacientePruebaLimpiezaResultDto> LimpiarAsync(Guid pacienteId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Guard 1: el paciente debe existir y ser del tenant actual (query filter).
         var pac = await db.Pacientes.AsNoTracking().FirstOrDefaultAsync(p => p.Id == pacienteId, ct);
         if (pac is null)

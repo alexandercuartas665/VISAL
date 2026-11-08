@@ -11,19 +11,20 @@ namespace Visal.Application.Tenancy.WhatsApp;
 /// antes de guardarse y se descifra al vuelo cuando el provider la
 /// necesita para enviar (ver GupshupWhatsAppProvider).
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = _dbFactory.Create();) en vez del IApplicationDbContext scoped.
 internal sealed class GupshupConfigService : IGupshupConfigService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenantContext;
     private readonly ISecretProtector _secretProtector;
     private readonly IAuditWriter _audit;
     private readonly TimeProvider _timeProvider;
 
     public GupshupConfigService(
-        IApplicationDbContext db, ITenantContext tenantContext,
+        IApplicationDbContextFactory dbFactory, ITenantContext tenantContext,
         ISecretProtector secretProtector, IAuditWriter audit, TimeProvider timeProvider)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenantContext = tenantContext;
         _secretProtector = secretProtector;
         _audit = audit;
@@ -32,13 +33,15 @@ internal sealed class GupshupConfigService : IGupshupConfigService
 
     public async Task<IReadOnlyList<GupshupConfigDto>> ListAsync(CancellationToken ct = default)
     {
-        var rows = await _db.TenantGupshupConfigs.AsNoTracking().OrderBy(c => c.AppName).ToListAsync(ct);
+        using var db = _dbFactory.Create();
+        var rows = await db.TenantGupshupConfigs.AsNoTracking().OrderBy(c => c.AppName).ToListAsync(ct);
         return rows.Select(Map).ToList();
     }
 
     public async Task<GupshupConfigDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
-        var row = await _db.TenantGupshupConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
+        using var db = _dbFactory.Create();
+        var row = await db.TenantGupshupConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
         return row is null ? null : Map(row);
     }
 
@@ -46,16 +49,17 @@ internal sealed class GupshupConfigService : IGupshupConfigService
     {
         if (_tenantContext.TenantId is not Guid tenantId) { return null; }
 
+        using var db = _dbFactory.Create();
         TenantGupshupConfig? row = null;
         if (id is Guid gid && gid != Guid.Empty)
         {
-            row = await _db.TenantGupshupConfigs.FirstOrDefaultAsync(c => c.Id == gid, ct);
+            row = await db.TenantGupshupConfigs.FirstOrDefaultAsync(c => c.Id == gid, ct);
             if (row is null) { return null; }
         }
         else
         {
             row = new TenantGupshupConfig { TenantId = tenantId, ApiKeyEncrypted = string.Empty };
-            _db.TenantGupshupConfigs.Add(row);
+            db.TenantGupshupConfigs.Add(row);
         }
 
         row.AppId = req.AppId;
@@ -79,42 +83,44 @@ internal sealed class GupshupConfigService : IGupshupConfigService
             row.PartnerTokenEncrypted = _secretProtector.Protect(req.PartnerToken.Trim());
         }
 
-        _audit.Write(actorUserId, "gupshup-config.upsert", nameof(TenantGupshupConfig), row.Id,
+        _audit.Write(db, actorUserId, "gupshup-config.upsert", nameof(TenantGupshupConfig), row.Id,
             previousValue: null,
             newValue: new { row.AppId, row.AppName, row.WabaId, row.PhoneNumber, row.IsActive, updatedApiKey = !string.IsNullOrWhiteSpace(req.ApiKey) },
             tenantId: tenantId);
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return Map(row);
     }
 
     public async Task<bool> DeleteAsync(Guid id, Guid actorUserId, CancellationToken ct = default)
     {
-        var row = await _db.TenantGupshupConfigs.FirstOrDefaultAsync(c => c.Id == id, ct);
+        using var db = _dbFactory.Create();
+        var row = await db.TenantGupshupConfigs.FirstOrDefaultAsync(c => c.Id == id, ct);
         if (row is null) { return false; }
         // Desatar las lineas que apuntaban a esta App para que no queden con
         // referencia colgando. La linea sigue existiendo (Provider=Gupshup) pero
         // sin credenciales -- la UI deberia forzar reasignarla.
-        var lines = await _db.WhatsAppLines.Where(l => l.GupshupAppId == row.Id).ToListAsync(ct);
+        var lines = await db.WhatsAppLines.Where(l => l.GupshupAppId == row.Id).ToListAsync(ct);
         foreach (var l in lines) { l.GupshupAppId = null; }
-        _db.TenantGupshupConfigs.Remove(row);
-        _audit.Write(actorUserId, "gupshup-config.delete", nameof(TenantGupshupConfig), id,
+        db.TenantGupshupConfigs.Remove(row);
+        _audit.Write(db, actorUserId, "gupshup-config.delete", nameof(TenantGupshupConfig), id,
             previousValue: new { row.AppName, row.AppId }, newValue: null, tenantId: row.TenantId);
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 
     public async Task<string?> RegenerateInboundTokenAsync(Guid lineId, Guid actorUserId, CancellationToken ct = default)
     {
-        var line = await _db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineId, ct);
+        using var db = _dbFactory.Create();
+        var line = await db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineId, ct);
         if (line is null) { return null; }
         var previous = line.InboundToken;
         line.InboundToken = GenerateInboundToken();
-        _audit.Write(actorUserId, "whatsapp-line.regenerate-inbound-token", nameof(WhatsAppLine), line.Id,
+        _audit.Write(db, actorUserId, "whatsapp-line.regenerate-inbound-token", nameof(WhatsAppLine), line.Id,
             previousValue: new { hadToken = previous is not null },
             newValue: new { rotated = true },
             tenantId: line.TenantId);
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return line.InboundToken;
     }
 

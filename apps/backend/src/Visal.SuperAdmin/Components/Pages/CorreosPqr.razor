@@ -6,7 +6,7 @@
 @using Visal.Application.Tenancy.Email
 @using Visal.Domain.Enums
 @inject IEmailIngestConfigService Svc
-@inject IApplicationDbContext Db
+@inject IApplicationDbContextFactory DbFactory
 @inject Microsoft.JSInterop.IJSRuntime Js
 
 <PageTitle>Correos PQR - Visal</PageTitle>
@@ -440,7 +440,8 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var db = (DbContext)Db;
+        using var dbCtx = DbFactory.Create();
+        var db = (DbContext)dbCtx;
         _agentes = await db.Set<Visal.Domain.Entities.AiAgent>().AsNoTracking()
             .OrderByDescending(a => a.IsActive).ThenBy(a => a.SortOrder).ThenBy(a => a.Name)
             .Select(a => new AgenteOpt { Id = a.Id, Name = a.Name, Provider = a.Provider }).ToListAsync();

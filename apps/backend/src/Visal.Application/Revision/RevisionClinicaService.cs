@@ -14,17 +14,18 @@ namespace Visal.Application.Revision;
 ///
 /// Multi-tenant es implicito por el global query filter del DbContext.
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class RevisionClinicaService : IRevisionClinicaService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenant;
     private readonly TimeProvider _clock;
     private readonly IAuditWriter? _audit;
     private readonly IRdaConsultaBuilderService? _rdaBuilder;
 
-    public RevisionClinicaService(IApplicationDbContext db, ITenantContext tenant, TimeProvider clock)
+    public RevisionClinicaService(IApplicationDbContextFactory dbFactory, ITenantContext tenant, TimeProvider clock)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenant = tenant;
         _clock = clock;
     }
@@ -35,8 +36,8 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
     /// general del tenant pasa un <see cref="IAuditWriter"/>. Los tests y
     /// callers que no lo necesiten pueden seguir usando el ctor de 3 args.
     /// </summary>
-    public RevisionClinicaService(IApplicationDbContext db, ITenantContext tenant, TimeProvider clock, IAuditWriter audit)
-        : this(db, tenant, clock)
+    public RevisionClinicaService(IApplicationDbContextFactory dbFactory, ITenantContext tenant, TimeProvider clock, IAuditWriter audit)
+        : this(dbFactory, tenant, clock)
     {
         _audit = audit;
     }
@@ -47,19 +48,20 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
     /// para envio automatico al IHCE (el worker de reintentos hace el envio). Es
     /// best-effort: un fallo generando el RDA nunca revierte la aprobacion.
     /// </summary>
-    public RevisionClinicaService(IApplicationDbContext db, ITenantContext tenant, TimeProvider clock,
+    public RevisionClinicaService(IApplicationDbContextFactory dbFactory, ITenantContext tenant, TimeProvider clock,
         IAuditWriter audit, IRdaConsultaBuilderService rdaBuilder)
-        : this(db, tenant, clock, audit)
+        : this(dbFactory, tenant, clock, audit)
     {
         _rdaBuilder = rdaBuilder;
     }
 
     public async Task<RevisionClinicaDto> SolicitarAsync(SolicitarRevisionCmd cmd, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         var tenantId = RequireTenant();
         // Si ya existe una revision viva para la HC (por UNIQUE index), devolverla
         // sin duplicar el evento SolicitudCreada.
-        var existente = await _db.RevisionesClinica
+        var existente = await db.RevisionesClinica
             .FirstOrDefaultAsync(x => x.HistoriaClinicaId == cmd.HistoriaClinicaId, ct);
         if (existente is not null)
         {
@@ -77,9 +79,9 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
             UltimaAccionEn = now,
             IteracionActual = 1,
         };
-        _db.RevisionesClinica.Add(revision);
+        db.RevisionesClinica.Add(revision);
 
-        AppendEvento(revision, new RevisionClinicaEvento
+        AppendEvento(db, revision, new RevisionClinicaEvento
         {
             TenantId = tenantId,
             Tipo = RevisionTipoEvento.SolicitudCreada,
@@ -90,20 +92,22 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
             OcurridoEn = now,
         });
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return ToDto(revision);
     }
 
     public async Task<RevisionClinicaDto?> GetPorHistoriaAsync(Guid historiaClinicaId, CancellationToken ct = default)
     {
-        var r = await _db.RevisionesClinica.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var r = await db.RevisionesClinica.AsNoTracking()
             .FirstOrDefaultAsync(x => x.HistoriaClinicaId == historiaClinicaId, ct);
         return r is null ? null : ToDto(r);
     }
 
     public async Task<IReadOnlyList<RevisionEventoDto>> ListarEventosAsync(Guid revisionClinicaId, CancellationToken ct = default)
     {
-        var eventos = await _db.RevisionClinicaEventos.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var eventos = await db.RevisionClinicaEventos.AsNoTracking()
             .Where(x => x.RevisionClinicaId == revisionClinicaId)
             .OrderBy(x => x.OcurridoEn)
             .ThenBy(x => x.Id)
@@ -113,7 +117,8 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
 
     public async Task<IReadOnlyList<RevisionAgenteLogDto>> ListarAgenteLogsAsync(Guid revisionClinicaId, CancellationToken ct = default)
     {
-        var logs = await _db.RevisionAgenteLogs.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var logs = await db.RevisionAgenteLogs.AsNoTracking()
             .Where(x => x.RevisionClinicaId == revisionClinicaId)
             .OrderByDescending(x => x.CreatedAt)
             .ThenByDescending(x => x.Id)
@@ -139,7 +144,8 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
 
     public async Task<RevisionClinicaDto> AsignarRevisorAsync(AsignarRevisorCmd cmd, CancellationToken ct = default)
     {
-        var (revision, tenantId, now) = await LoadForMutationAsync(cmd.RevisionClinicaId, ct);
+        using var db = _dbFactory.Create();
+        var (revision, tenantId, now) = await LoadForMutationAsync(db, cmd.RevisionClinicaId, ct);
 
         // La asignacion vuelve el estado a EnRevision. Puede llegar desde SinRevisar
         // (revisor humano toma sin pre-revision) o PreRevision (el humano toma tras el
@@ -151,7 +157,7 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
                 $"Transicion invalida: no se puede asignar revisor desde {revision.EstadoAgregado}.");
         }
 
-        AppendEvento(revision, new RevisionClinicaEvento
+        AppendEvento(db, revision, new RevisionClinicaEvento
         {
             TenantId = tenantId,
             Tipo = cmd.Automatica ? RevisionTipoEvento.AsignacionAutomatica : RevisionTipoEvento.AsignacionRevisor,
@@ -165,13 +171,14 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
         revision.EstadoAgregado = RevisionEstadoAgregado.EnRevision;
         revision.UltimaAccionEn = now;
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return ToDto(revision);
     }
 
     public async Task<RevisionClinicaDto> RegistrarVeredictoAgenteAsync(VeredictoAgenteCmd cmd, CancellationToken ct = default)
     {
-        var (revision, tenantId, now) = await LoadForMutationAsync(cmd.RevisionClinicaId, ct);
+        using var db = _dbFactory.Create();
+        var (revision, tenantId, now) = await LoadForMutationAsync(db, cmd.RevisionClinicaId, ct);
 
         // El agente puede opinar en cualquier momento antes de un terminal.
         // Nunca cambia EstadoAgregado. Solo actualiza EstadoAgente. Si es la
@@ -181,7 +188,7 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
             throw new InvalidOperationException("Ciclo terminado: el agente no puede opinar sobre revisiones cerradas.");
         }
 
-        AppendEvento(revision, new RevisionClinicaEvento
+        AppendEvento(db, revision, new RevisionClinicaEvento
         {
             TenantId = tenantId,
             Tipo = RevisionTipoEvento.PreRevisionAgente,
@@ -200,13 +207,14 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
         }
         revision.UltimaAccionEn = now;
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return ToDto(revision);
     }
 
     public async Task<RevisionClinicaDto> AprobarAsync(AprobarCmd cmd, CancellationToken ct = default)
     {
-        var (revision, tenantId, now) = await LoadForMutationAsync(cmd.RevisionClinicaId, ct);
+        using var db = _dbFactory.Create();
+        var (revision, tenantId, now) = await LoadForMutationAsync(db, cmd.RevisionClinicaId, ct);
 
         if (!EsTransicionValida(revision.EstadoAgregado, RevisionEstadoAgregado.Aprobada))
         {
@@ -214,7 +222,7 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
                 $"Transicion invalida: no se puede aprobar desde {revision.EstadoAgregado}.");
         }
 
-        AppendEvento(revision, new RevisionClinicaEvento
+        AppendEvento(db, revision, new RevisionClinicaEvento
         {
             TenantId = tenantId,
             Tipo = RevisionTipoEvento.Aprobado,
@@ -228,14 +236,15 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
         revision.EstadoAgregado = RevisionEstadoAgregado.Aprobada;
         revision.UltimaAccionEn = now;
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         await GenerarRdaConsultaBestEffortAsync(revision.HistoriaClinicaId, cmd.RevisorUsuarioId, ct);
         return ToDto(revision);
     }
 
     public async Task<RevisionClinicaDto> AprobarPorSistemaAsync(AprobarPorSistemaCmd cmd, CancellationToken ct = default)
     {
-        var (revision, tenantId, now) = await LoadForMutationAsync(cmd.RevisionClinicaId, ct);
+        using var db = _dbFactory.Create();
+        var (revision, tenantId, now) = await LoadForMutationAsync(db, cmd.RevisionClinicaId, ct);
 
         if (!EsTransicionValida(revision.EstadoAgregado, RevisionEstadoAgregado.Aprobada))
         {
@@ -252,7 +261,7 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
         };
         var payloadJson = System.Text.Json.JsonSerializer.Serialize(payload);
 
-        AppendEvento(revision, new RevisionClinicaEvento
+        AppendEvento(db, revision, new RevisionClinicaEvento
         {
             TenantId = tenantId,
             Tipo = RevisionTipoEvento.Aprobado,
@@ -271,6 +280,7 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
         // automaticas aparezcan en el panel de auditoria SuperAdmin/Owner junto a las
         // acciones humanas. Guid.Empty como actorUserId porque no hay usuario humano.
         _audit?.Write(
+            db,
             actorUserId: Guid.Empty,
             actionName: "revision.aprobado-sistema",
             entityName: nameof(RevisionClinica),
@@ -280,7 +290,7 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
             tenantId: tenantId,
             actorType: AuditActorType.System);
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         await GenerarRdaConsultaBestEffortAsync(revision.HistoriaClinicaId, Guid.Empty, ct);
         return ToDto(revision);
     }
@@ -313,7 +323,8 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
             throw new ArgumentException("El motivo es obligatorio para rechazar.", nameof(cmd.Motivo));
         }
 
-        var (revision, tenantId, now) = await LoadForMutationAsync(cmd.RevisionClinicaId, ct);
+        using var db = _dbFactory.Create();
+        var (revision, tenantId, now) = await LoadForMutationAsync(db, cmd.RevisionClinicaId, ct);
 
         if (!EsTransicionValida(revision.EstadoAgregado, RevisionEstadoAgregado.Rechazada))
         {
@@ -321,7 +332,7 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
                 $"Transicion invalida: no se puede rechazar desde {revision.EstadoAgregado}.");
         }
 
-        AppendEvento(revision, new RevisionClinicaEvento
+        AppendEvento(db, revision, new RevisionClinicaEvento
         {
             TenantId = tenantId,
             Tipo = RevisionTipoEvento.Rechazado,
@@ -336,13 +347,14 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
         revision.EstadoAgregado = RevisionEstadoAgregado.Rechazada;
         revision.UltimaAccionEn = now;
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return ToDto(revision);
     }
 
     public async Task<RevisionClinicaDto> ReenviarAsync(ReenviarCmd cmd, CancellationToken ct = default)
     {
-        var (revision, tenantId, now) = await LoadForMutationAsync(cmd.RevisionClinicaId, ct);
+        using var db = _dbFactory.Create();
+        var (revision, tenantId, now) = await LoadForMutationAsync(db, cmd.RevisionClinicaId, ct);
 
         if (revision.EstadoAgregado != RevisionEstadoAgregado.Rechazada)
         {
@@ -352,7 +364,7 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
 
         revision.IteracionActual += 1;
 
-        AppendEvento(revision, new RevisionClinicaEvento
+        AppendEvento(db, revision, new RevisionClinicaEvento
         {
             TenantId = tenantId,
             Tipo = RevisionTipoEvento.Reenvio,
@@ -369,7 +381,7 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
         revision.EstadoAgente = null;
         revision.UltimaAccionEn = now;
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return ToDto(revision);
     }
 
@@ -381,7 +393,8 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
                 "Se requiere permiso historias.revisar.aprobar_final para archivar.");
         }
 
-        var (revision, tenantId, now) = await LoadForMutationAsync(cmd.RevisionClinicaId, ct);
+        using var db = _dbFactory.Create();
+        var (revision, tenantId, now) = await LoadForMutationAsync(db, cmd.RevisionClinicaId, ct);
 
         if (!EsTransicionValida(revision.EstadoAgregado, RevisionEstadoAgregado.ArchivadaOk))
         {
@@ -389,7 +402,7 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
                 $"Transicion invalida: no se puede archivar desde {revision.EstadoAgregado}.");
         }
 
-        AppendEvento(revision, new RevisionClinicaEvento
+        AppendEvento(db, revision, new RevisionClinicaEvento
         {
             TenantId = tenantId,
             Tipo = RevisionTipoEvento.ArchivadoOk,
@@ -403,7 +416,7 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
         revision.EstadoAgregado = RevisionEstadoAgregado.ArchivadaOk;
         revision.UltimaAccionEn = now;
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return ToDto(revision);
     }
 
@@ -419,7 +432,8 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
             throw new ArgumentException("El motivo es obligatorio para inactivar.", nameof(cmd.Motivo));
         }
 
-        var (revision, tenantId, now) = await LoadForMutationAsync(cmd.RevisionClinicaId, ct);
+        using var db = _dbFactory.Create();
+        var (revision, tenantId, now) = await LoadForMutationAsync(db, cmd.RevisionClinicaId, ct);
 
         if (!EsTransicionValida(revision.EstadoAgregado, RevisionEstadoAgregado.Inactivada))
         {
@@ -427,7 +441,7 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
                 $"Transicion invalida: no se puede inactivar desde {revision.EstadoAgregado}.");
         }
 
-        AppendEvento(revision, new RevisionClinicaEvento
+        AppendEvento(db, revision, new RevisionClinicaEvento
         {
             TenantId = tenantId,
             Tipo = RevisionTipoEvento.Inactivacion,
@@ -441,7 +455,7 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
         revision.EstadoAgregado = RevisionEstadoAgregado.Inactivada;
         revision.UltimaAccionEn = now;
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return ToDto(revision);
     }
 
@@ -489,19 +503,19 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
     }
 
     private async Task<(RevisionClinica revision, Guid tenantId, DateTimeOffset now)> LoadForMutationAsync(
-        Guid revisionId, CancellationToken ct)
+        IApplicationDbContext db, Guid revisionId, CancellationToken ct)
     {
         var tenantId = RequireTenant();
-        var revision = await _db.RevisionesClinica.FirstOrDefaultAsync(x => x.Id == revisionId, ct)
+        var revision = await db.RevisionesClinica.FirstOrDefaultAsync(x => x.Id == revisionId, ct)
             ?? throw new InvalidOperationException($"Revision {revisionId} no existe o pertenece a otro tenant.");
         return (revision, tenantId, _clock.GetUtcNow());
     }
 
-    private void AppendEvento(RevisionClinica revision, RevisionClinicaEvento evento)
+    private static void AppendEvento(IApplicationDbContext db, RevisionClinica revision, RevisionClinicaEvento evento)
     {
         evento.RevisionClinicaId = revision.Id;
         evento.Iteracion = revision.IteracionActual;
-        _db.RevisionClinicaEventos.Add(evento);
+        db.RevisionClinicaEventos.Add(evento);
     }
 
     private static RevisionClinicaDto ToDto(RevisionClinica r) => new(

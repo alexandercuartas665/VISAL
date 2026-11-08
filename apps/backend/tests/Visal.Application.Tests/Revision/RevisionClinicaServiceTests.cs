@@ -36,7 +36,7 @@ public sealed class RevisionClinicaServiceTests
         var tenant = new FakeTenantContext { TenantId = tenantId, UserId = RevisorA };
         var ctx = new VisalDbContext(opts, tenant);
         var clock = new FakeTimeProvider(FixedNow);
-        var svc = new RevisionClinicaService(ctx, tenant, clock);
+        var svc = new RevisionClinicaService(new TestDbContextFactory(ctx, tenant), tenant, clock);
 
         // Sembrar una HC minima en el mismo tenant para satisfacer la FK.
         var hc = new HistoriaClinica

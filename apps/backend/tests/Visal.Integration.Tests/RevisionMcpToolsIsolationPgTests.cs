@@ -148,13 +148,20 @@ public sealed class RevisionMcpToolsIsolationPgTests : IAsyncLifetime
     [MemberData(nameof(AllTools))]
     public async Task Tool_NoFugaDeDatosDeOtroTenant(string tool)
     {
-        await using var ctxB = CreateContext(_tenantB);
-        var svc = new RevisionMcpToolsService(ctxB);
+        // Ola 4c: el servicio abre contexto corto por operacion. Factory inline que
+        // crea un VisalDbContext nuevo (mismas opciones, scope tenant B) por Create().
+        var svc = new RevisionMcpToolsService(new TestFactory(this, _tenantB));
         var res = await svc.EjecutarToolAsync(tool, _hcAId, RevisionMcpToolNames.Todas, ventanaAsignacionesDias: 30);
         var payload = res.JsonPayload ?? "";
         Assert.DoesNotContain("ALPHA", payload);
         Assert.DoesNotContain("9001A", payload);
         Assert.DoesNotContain("MED-ALPHA-1", payload);
+    }
+
+    private sealed class TestFactory(RevisionMcpToolsIsolationPgTests owner, Guid? tenantId)
+        : IApplicationDbContextFactory
+    {
+        public IApplicationDbContext Create() => owner.CreateContext(tenantId);
     }
 
     private VisalDbContext CreateContext(Guid? tenantId)

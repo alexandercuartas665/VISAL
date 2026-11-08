@@ -40,33 +40,38 @@ public interface IPlatformBrandingService
 /// </summary>
 public sealed class PlatformBrandingService : IPlatformBrandingService
 {
-    private readonly IApplicationDbContext _db;
+    // Ola 4c estabilizacion (P0): contexto CORTO por operacion (using var db = _dbFactory.Create();)
+    // en vez del IApplicationDbContext scoped compartido por el circuito. Este servicio se lee en
+    // el render de /login, donde se solapaba con otras lecturas de config -> "second operation".
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly IAuditWriter _audit;
 
-    public PlatformBrandingService(IApplicationDbContext db, IAuditWriter audit)
+    public PlatformBrandingService(IApplicationDbContextFactory dbFactory, IAuditWriter audit)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _audit = audit;
     }
 
     public async Task<PlatformBrandingDto> GetAsync(CancellationToken cancellationToken = default)
     {
+        using var db = _dbFactory.Create();
         // OrderBy determinista: PlatformBranding es singleton global, pero sin OrderBy EF emite
         // FirstWithoutOrderByAndFilterWarning; fija el orden para que el resultado sea estable.
-        var row = await _db.PlatformBrandings.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(cancellationToken);
+        var row = await db.PlatformBrandings.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(cancellationToken);
         if (row is null) { return PlatformBrandingDto.Default; }
         return new PlatformBrandingDto(row.PlatformName, row.Tagline, row.LoginLogoUrl, row.LoginHeadline, row.LoginSubtext);
     }
 
     public async Task SaveAsync(SaveBrandingRequest request, Guid actorUserId, CancellationToken cancellationToken = default)
     {
+        using var db = _dbFactory.Create();
         var name = string.IsNullOrWhiteSpace(request.PlatformName) ? "Visal" : request.PlatformName.Trim();
 
-        var row = await _db.PlatformBrandings.OrderBy(x => x.Id).FirstOrDefaultAsync(cancellationToken);
+        var row = await db.PlatformBrandings.OrderBy(x => x.Id).FirstOrDefaultAsync(cancellationToken);
         if (row is null)
         {
             row = new PlatformBranding();
-            _db.PlatformBrandings.Add(row);
+            db.PlatformBrandings.Add(row);
         }
 
         row.PlatformName = name;
@@ -75,10 +80,10 @@ public sealed class PlatformBrandingService : IPlatformBrandingService
         row.LoginHeadline = request.LoginHeadline?.Trim();
         row.LoginSubtext = request.LoginSubtext?.Trim();
 
-        _audit.Write(actorUserId, "platform.branding.save", nameof(PlatformBranding), row.Id,
+        _audit.Write(db, actorUserId, "platform.branding.save", nameof(PlatformBranding), row.Id,
             previousValue: null,
             newValue: new { row.PlatformName, HasLogo = row.LoginLogoUrl is not null });
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
     }
 }

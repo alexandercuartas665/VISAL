@@ -19,8 +19,9 @@ namespace Visal.Application.Tenancy;
 ///   Content-Type: application/json
 /// No requiere Authorization Bearer en sandbox; en produccion probablemente si.
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class IhceSenderService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ISecretProtector secrets,
     IHttpClientFactory http,
     ILogger<IhceSenderService> log) : IIhceSenderService
@@ -39,19 +40,20 @@ public sealed class IhceSenderService(
 
     public async Task<EnvioRdaResultado> EnviarRdaAsync(Guid rdaEventoId, Guid actor, bool automatico = false, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var ev = await db.RdaEventos.FirstOrDefaultAsync(x => x.Id == rdaEventoId, ct)
             ?? throw new InvalidOperationException($"RdaEvento {rdaEventoId} no existe.");
 
         // Cargar config y armar la URL completa. El path depende del TipoRda:
         //  - Paciente => /Composition/$enviar-rda-paciente
         //  - Consulta => /Composition/$enviar-rda-consulta
-        var (cfg, urlBase, apimSubskey) = await CargarContextoAsync(ev.Ambiente, ct);
+        var (cfg, urlBase, apimSubskey) = await CargarContextoAsync(db, ev.Ambiente, ct);
         var path = ev.TipoRda == TipoRdaIhce.Consulta ? cfg.PathEnvioRdaConsulta : cfg.PathEnvioRda;
         var url = JoinUrl(urlBase, path);
 
         // El POST al IHCE requiere ADEMAS de la APIM key un Bearer token Azure AD
         // obtenido de la credencial de la sede que emite el RDA.
-        var bearer = await ObtenerBearerAsync(ev.SucursalId, ev.Ambiente, cfg, ct);
+        var bearer = await ObtenerBearerAsync(db, ev.SucursalId, ev.Ambiente, cfg, ct);
 
         // PRE-FLIGHT CHECK: consultar profesional firmante en el directorio IHCE.
         // Si MinSalud no lo tiene (cruzado contra ReTHUS), no tiene sentido enviar el RDA
@@ -193,10 +195,11 @@ public sealed class IhceSenderService(
 
     public async Task<IhceCallResult> ConsultarPacienteAsync(ConsultaPacienteRequest req, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Para consulta no atribuimos a un RdaEvento; usamos el ambiente activo de la config.
         var cfgEntity = await db.InteroperabilidadConfigs.AsNoTracking().FirstOrDefaultAsync(ct)
             ?? throw new InvalidOperationException("Interoperabilidad no configurada.");
-        var (cfg, urlBase, apimSubskey) = await CargarContextoAsync(cfgEntity.AmbienteActivo, ct);
+        var (cfg, urlBase, apimSubskey) = await CargarContextoAsync(db, cfgEntity.AmbienteActivo, ct);
         var url = JoinUrl(urlBase, cfg.PathConsultarPaciente);
 
         // Para consultar paciente tambien necesitamos Bearer; tomamos la primera
@@ -206,7 +209,7 @@ public sealed class IhceSenderService(
                 && !string.IsNullOrEmpty(c.ClientSecretCifrado), ct)
             ?? throw new InvalidOperationException(
                 $"No hay credencial de sede configurada para el ambiente {cfgEntity.AmbienteActivo}.");
-        var bearer = await ObtenerBearerAsync(credencial.SucursalId, cfgEntity.AmbienteActivo, cfg, ct);
+        var bearer = await ObtenerBearerAsync(db, credencial.SucursalId, cfgEntity.AmbienteActivo, cfg, ct);
 
         // Cuerpo: Parameters resource segun la especificacion del MinSalud.
         // Consultar paciente lleva ADEMAS un 'humanuser' (operador), que es CC del usuario que consulta.
@@ -233,9 +236,10 @@ public sealed class IhceSenderService(
 
     public async Task<IhceCallResult> ConsultarProfesionalAsync(ConsultaPacienteRequest req, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var cfgEntity = await db.InteroperabilidadConfigs.AsNoTracking().FirstOrDefaultAsync(ct)
             ?? throw new InvalidOperationException("Interoperabilidad no configurada.");
-        var (cfg, urlBase, apimSubskey) = await CargarContextoAsync(cfgEntity.AmbienteActivo, ct);
+        var (cfg, urlBase, apimSubskey) = await CargarContextoAsync(db, cfgEntity.AmbienteActivo, ct);
         var url = JoinUrl(urlBase, cfg.PathConsultarProfesional);
 
         var credencial = await db.InteroperabilidadCredencialesSede.AsNoTracking()
@@ -243,7 +247,7 @@ public sealed class IhceSenderService(
                 && !string.IsNullOrEmpty(c.ClientSecretCifrado), ct)
             ?? throw new InvalidOperationException(
                 $"No hay credencial de sede configurada para el ambiente {cfgEntity.AmbienteActivo}.");
-        var bearer = await ObtenerBearerAsync(credencial.SucursalId, cfgEntity.AmbienteActivo, cfg, ct);
+        var bearer = await ObtenerBearerAsync(db, credencial.SucursalId, cfgEntity.AmbienteActivo, cfg, ct);
 
         var json = ParametersPayload(req.TipoDocumento, req.NumeroDocumento);
         return await PostJsonAsync(url, apimSubskey, json, bearer, ct);
@@ -251,9 +255,10 @@ public sealed class IhceSenderService(
 
     public async Task<IhceCallResult> ConsultarOrganizacionAsync(ConsultaOrganizacionRequest req, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var cfgEntity = await db.InteroperabilidadConfigs.AsNoTracking().FirstOrDefaultAsync(ct)
             ?? throw new InvalidOperationException("Interoperabilidad no configurada.");
-        var (cfg, urlBase, apimSubskey) = await CargarContextoAsync(cfgEntity.AmbienteActivo, ct);
+        var (cfg, urlBase, apimSubskey) = await CargarContextoAsync(db, cfgEntity.AmbienteActivo, ct);
         // El path no vive en la config todavia; el Postman oficial lo fija en /Organization/$consultar-organizacion.
         var url = JoinUrl(urlBase, "/Organization/$consultar-organizacion");
 
@@ -262,7 +267,7 @@ public sealed class IhceSenderService(
                 && !string.IsNullOrEmpty(c.ClientSecretCifrado), ct)
             ?? throw new InvalidOperationException(
                 $"No hay credencial de sede configurada para el ambiente {cfgEntity.AmbienteActivo}.");
-        var bearer = await ObtenerBearerAsync(credencial.SucursalId, cfgEntity.AmbienteActivo, cfg, ct);
+        var bearer = await ObtenerBearerAsync(db, credencial.SucursalId, cfgEntity.AmbienteActivo, cfg, ct);
 
         // Construimos Parameters con solo los campos con valor (MinSalud tolera params opcionales).
         var parameters = new List<object>();
@@ -284,9 +289,10 @@ public sealed class IhceSenderService(
 
     public async Task<IhceCallResult> ConsultarEapbAsync(ConsultaEapbRequest req, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var cfgEntity = await db.InteroperabilidadConfigs.AsNoTracking().FirstOrDefaultAsync(ct)
             ?? throw new InvalidOperationException("Interoperabilidad no configurada.");
-        var (cfg, urlBase, apimSubskey) = await CargarContextoAsync(cfgEntity.AmbienteActivo, ct);
+        var (cfg, urlBase, apimSubskey) = await CargarContextoAsync(db, cfgEntity.AmbienteActivo, ct);
         var url = JoinUrl(urlBase, "/Organization/$consultar-eapb");
 
         var credencial = await db.InteroperabilidadCredencialesSede.AsNoTracking()
@@ -294,7 +300,7 @@ public sealed class IhceSenderService(
                 && !string.IsNullOrEmpty(c.ClientSecretCifrado), ct)
             ?? throw new InvalidOperationException(
                 $"No hay credencial de sede configurada para el ambiente {cfgEntity.AmbienteActivo}.");
-        var bearer = await ObtenerBearerAsync(credencial.SucursalId, cfgEntity.AmbienteActivo, cfg, ct);
+        var bearer = await ObtenerBearerAsync(db, credencial.SucursalId, cfgEntity.AmbienteActivo, cfg, ct);
 
         if (string.IsNullOrWhiteSpace(req.Name))
         {
@@ -320,7 +326,7 @@ public sealed class IhceSenderService(
     /// <c>$consultar-organizacion</c> y <c>$consultar-eapb</c>; los uuids quedan cacheados en
     /// memoria hasta que se reinicie el proceso.
     /// </summary>
-    private async Task<string> ResolverOrganizationUuidsAsync(RdaEvento ev, string urlBase,
+    private async Task<string> ResolverOrganizationUuidsAsync(IApplicationDbContext db, RdaEvento ev, string urlBase,
         string apimSubskey, string bearer, CancellationToken ct)
     {
         var bundleJson = ev.BundleJson;
@@ -612,7 +618,7 @@ public sealed class IhceSenderService(
     /// credenciales OAuth2 client_credentials de la sede + el TenantID Azure y Scope
     /// globales de la config. Cachea por (azureTid+clientId) hasta cerca de expirar.
     /// </summary>
-    private async Task<string> ObtenerBearerAsync(Guid sucursalId, AmbienteIhce ambiente, InteroperabilidadConfig cfg, CancellationToken ct)
+    private async Task<string> ObtenerBearerAsync(IApplicationDbContext db, Guid sucursalId, AmbienteIhce ambiente, InteroperabilidadConfig cfg, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(cfg.AzureTenantId) || string.IsNullOrWhiteSpace(cfg.Scope))
         {
@@ -682,7 +688,7 @@ public sealed class IhceSenderService(
     /// Carga la config IHCE, escoge endpoint base + APIM key segun ambiente,
     /// descifra los secretos. Lanza si falta config o APIM key.
     /// </summary>
-    private async Task<(InteroperabilidadConfig cfg, string urlBase, string apim)> CargarContextoAsync(AmbienteIhce ambiente, CancellationToken ct)
+    private async Task<(InteroperabilidadConfig cfg, string urlBase, string apim)> CargarContextoAsync(IApplicationDbContext db, AmbienteIhce ambiente, CancellationToken ct)
     {
         var cfg = await db.InteroperabilidadConfigs.AsNoTracking().FirstOrDefaultAsync(ct)
             ?? throw new InvalidOperationException("No hay configuracion de interoperabilidad para este tenant.");

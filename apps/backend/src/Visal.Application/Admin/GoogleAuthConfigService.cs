@@ -26,31 +26,35 @@ public interface IGoogleAuthConfigService
 /// </summary>
 public sealed class GoogleAuthConfigService : IGoogleAuthConfigService
 {
-    private readonly IApplicationDbContext _db;
+    // Ola 4c estabilizacion (P0): contexto CORTO por operacion (using var db = _dbFactory.Create();)
+    // en vez del IApplicationDbContext scoped. Se lee en el render de /login (boton de Google).
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ISecretProtector _secretProtector;
     private readonly IAuditWriter _audit;
 
-    public GoogleAuthConfigService(IApplicationDbContext db, ISecretProtector secretProtector, IAuditWriter audit)
+    public GoogleAuthConfigService(IApplicationDbContextFactory dbFactory, ISecretProtector secretProtector, IAuditWriter audit)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _secretProtector = secretProtector;
         _audit = audit;
     }
 
     public async Task<GoogleAuthConfigDto?> GetAsync(CancellationToken cancellationToken = default)
     {
-        var cfg = await _db.GoogleAuthConfigs.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(cancellationToken);
+        using var db = _dbFactory.Create();
+        var cfg = await db.GoogleAuthConfigs.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(cancellationToken);
         return cfg is null ? null : new GoogleAuthConfigDto(cfg.ClientId, !string.IsNullOrEmpty(cfg.ClientSecretEncrypted), cfg.IsEnabled);
     }
 
     public async Task SaveAsync(SaveGoogleAuthConfigRequest request, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var cfg = await _db.GoogleAuthConfigs.OrderBy(x => x.Id).FirstOrDefaultAsync(cancellationToken);
+        using var db = _dbFactory.Create();
+        var cfg = await db.GoogleAuthConfigs.OrderBy(x => x.Id).FirstOrDefaultAsync(cancellationToken);
         var isNew = cfg is null;
         if (cfg is null)
         {
             cfg = new GoogleAuthConfig();
-            _db.GoogleAuthConfigs.Add(cfg);
+            db.GoogleAuthConfigs.Add(cfg);
         }
 
         cfg.ClientId = request.ClientId?.Trim();
@@ -60,15 +64,16 @@ public sealed class GoogleAuthConfigService : IGoogleAuthConfigService
             cfg.ClientSecretEncrypted = _secretProtector.Protect(request.ClientSecret.Trim());
         }
 
-        _audit.Write(actorUserId, isNew ? "google.auth.create" : "google.auth.update",
+        _audit.Write(db, actorUserId, isNew ? "google.auth.create" : "google.auth.update",
             nameof(GoogleAuthConfig), cfg.Id, previousValue: null, newValue: new { cfg.ClientId, cfg.IsEnabled });
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<GoogleAuthCredentials?> GetCredentialsAsync(CancellationToken cancellationToken = default)
     {
-        var cfg = await _db.GoogleAuthConfigs.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(cancellationToken);
+        using var db = _dbFactory.Create();
+        var cfg = await db.GoogleAuthConfigs.AsNoTracking().OrderBy(x => x.Id).FirstOrDefaultAsync(cancellationToken);
         if (cfg is null || !cfg.IsEnabled || string.IsNullOrWhiteSpace(cfg.ClientId) || string.IsNullOrEmpty(cfg.ClientSecretEncrypted))
         {
             return null;

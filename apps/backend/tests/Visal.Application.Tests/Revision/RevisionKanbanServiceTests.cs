@@ -35,8 +35,8 @@ public sealed class RevisionKanbanServiceTests
         var tenant = new FakeTenantContext { TenantId = tenantId, UserId = RevisorA };
         var ctx = new VisalDbContext(opts, tenant);
         var clock = new FakeTimeProvider(FixedNow);
-        var revisiones = new RevisionClinicaService(ctx, tenant, clock);
-        var kanban = new RevisionKanbanService(ctx, revisiones, clock);
+        var revisiones = new RevisionClinicaService(new TestDbContextFactory(ctx, tenant), tenant, clock);
+        var kanban = new RevisionKanbanService(new TestDbContextFactory(ctx, tenant), revisiones, clock);
 
         // Sembrar Paciente + FormDefinition + HC minimos.
         var paciente = new Paciente

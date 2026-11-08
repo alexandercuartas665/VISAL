@@ -20,9 +20,10 @@ using Visal.Infrastructure.Pdf;
 namespace Visal.SuperAdmin.Facturacion;
 
 /// <inheritdoc />
+// Ola 4c (P0): contexto corto por operacion (using var db = _dbFactory.Create();) en vez del IApplicationDbContext scoped.
 public sealed class TipologiaZipService : ITipologiaZipService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly IFacturacionSnapshotService _snaps;
     private readonly ICuentaMedicaConfigService _cuenta;
     private readonly IWebHostEnvironment _env;
@@ -89,7 +90,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     }
 
     public TipologiaZipService(
-        IApplicationDbContext db,
+        IApplicationDbContextFactory dbFactory,
         IFacturacionSnapshotService snaps,
         ICuentaMedicaConfigService cuenta,
         IWebHostEnvironment env,
@@ -99,7 +100,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         ITenantContext tenant,
         Microsoft.AspNetCore.Hosting.Server.IServer server)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _snaps = snaps;
         _cuenta = cuenta;
         _env = env;
@@ -113,6 +114,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     public async Task<ArchivoExportado?> GenerarZipArchivoAsync(
         Guid snapshotId, Guid archivoItemId, IProgress<ZipProgreso>? progreso = null, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         var detalle = await _snaps.ObtenerAsync(snapshotId, ct);
         if (detalle is null || detalle.Metadata.AseguradoraId is not Guid aseguradoraId)
         {
@@ -131,14 +133,14 @@ public sealed class TipologiaZipService : ITipologiaZipService
         // Se expone SOLO con digitos: NIT + digito de verificacion PEGADO, sin guion ni
         // puntos (p. ej. "900123456-7" -> "9001234567"), que es como lo piden las cuentas.
         var nitIps = (_tenant.TenantId is Guid tnit
-            ? await _db.Tenants.AsNoTracking().Where(t => t.Id == tnit).Select(t => t.TaxId).FirstOrDefaultAsync(ct)
+            ? await db.Tenants.AsNoTracking().Where(t => t.Id == tnit).Select(t => t.TaxId).FirstOrDefaultAsync(ct)
             : null) ?? "";
         nitIps = new string(nitIps.Where(char.IsDigit).ToArray());
 
         // Logo del tenant para el rotulo separador por CUP (solo se lee si el archivo lo
         // pide Y la pagina separadora esta habilitada; hoy esta deshabilitada, ver arriba).
         var logoRotulo = (EmitirPaginaRotuloCup && archivo.RotuloSeparadorCup)
-            ? await ObtenerLogoTenantBytesAsync(ct) : null;
+            ? await ObtenerLogoTenantBytesAsync(db, ct) : null;
 
         var pacientes = await _snaps.ListarPacientesSnapshotAsync(snapshotId, ct);
 
@@ -147,7 +149,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         // Pensado para archivos de solo autorizaciones; ignora otros contenidos. ---
         if (archivo.UnoPorAutorizacion)
         {
-            return await GenerarZipPorAutorizacionAsync(archivo, cfg, detalle, pacientes, patron, nitIps, logoRotulo, progreso, ct);
+            return await GenerarZipPorAutorizacionAsync(db, archivo, cfg, detalle, pacientes, patron, nitIps, logoRotulo, progreso, ct);
         }
 
         // --- Pase 1: plan por paciente + junta TODAS las URLs de formularios-por-tipo.
@@ -163,7 +165,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         foreach (var pac in pacientes)
         {
             ct.ThrowIfCancellationRequested();
-            var partes = await ConstruirPlanPacienteAsync(archivo, pac, allUrls, pDesde, pHasta, ct);
+            var partes = await ConstruirPlanPacienteAsync(db, archivo, pac, allUrls, pDesde, pHasta, ct);
             if (partes is null) { continue; } // paciente no existe en el sistema
             planes.Add((pac, partes));
         }
@@ -255,7 +257,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// sesion-&gt;turno-&gt;asignacion-&gt;codigo). Los adjuntos y firmas "libres" (sin HC) no se
     /// pueden atribuir a una autorizacion y no entran en este modo.</summary>
     private async Task<ArchivoExportado?> GenerarZipPorAutorizacionAsync(
-        InformeItemDto archivo, CuentaMedicaConfigDto cfg,
+        IApplicationDbContext db, InformeItemDto archivo, CuentaMedicaConfigDto cfg,
         FacturacionSnapshotDetalleDto detalle, IReadOnlyList<PacienteSnapshotDto> pacientes,
         string patron, string nitIps, byte[]? logoRotulo, IProgress<ZipProgreso>? progreso, CancellationToken ct)
     {
@@ -266,7 +268,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
 
         // doc -> pacienteId (los del snapshot que existen en el sistema).
         var docs = pacientes.Select(p => p.Documento).Distinct().ToList();
-        var pacs = await _db.Pacientes.AsNoTracking()
+        var pacs = await db.Pacientes.AsNoTracking()
             .Where(p => docs.Contains(p.NumeroDocumento))
             .Select(p => new { p.Id, p.NumeroDocumento })
             .ToListAsync(ct);
@@ -274,7 +276,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         foreach (var p in pacs) { docToId[p.NumeroDocumento] = p.Id; }
 
         // Mapa HC -> autorizacion (una sola consulta para todos los pacientes del snapshot).
-        var hcAut = await ConstruirMapaHcAutorizacionAsync(docToId.Values.ToHashSet(), ct);
+        var hcAut = await ConstruirMapaHcAutorizacionAsync(db, docToId.Values.ToHashSet(), ct);
 
         // --- Pase 1: una "unidad" por (paciente, autorizacion). Junta todas las URLs de
         // formulario-por-tipo para rendirlas de una sola vez (un navegador, en paralelo). ---
@@ -294,7 +296,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 .ToList();
             foreach (var codigo in codigos)
             {
-                var partes = await ConstruirPlanAutorizacionAsync(archivo, pacienteId, codigo, hcAut, docsRender, allUrls, pDesde, pHasta, ct);
+                var partes = await ConstruirPlanAutorizacionAsync(db, archivo, pacienteId, codigo, hcAut, docsRender, allUrls, pDesde, pHasta, ct);
                 if (partes.Count == 0) { continue; }
                 unidades.Add((pac, codigo, partes));
             }
@@ -378,7 +380,8 @@ public sealed class TipologiaZipService : ITipologiaZipService
     public async Task<IReadOnlyDictionary<Guid, int>> ContarConContenidoAsync(
         Guid snapshotId, CancellationToken ct = default)
     {
-        var lookup = await ConstruirLookupAsync(snapshotId, ct);
+        using var db = _dbFactory.Create();
+        var lookup = await ConstruirLookupAsync(db, snapshotId, ct);
         if (lookup is null) { return new Dictionary<Guid, int>(); }
 
         var res = new Dictionary<Guid, int>();
@@ -399,7 +402,8 @@ public sealed class TipologiaZipService : ITipologiaZipService
     public async Task<ArchivoExportado?> GenerarExcelFaltantesAsync(
         Guid snapshotId, Guid archivoItemId, CancellationToken ct = default)
     {
-        var lookup = await ConstruirLookupAsync(snapshotId, ct);
+        using var db = _dbFactory.Create();
+        var lookup = await ConstruirLookupAsync(db, snapshotId, ct);
         if (lookup is null) { return null; }
 
         var archivo = lookup.Archivos.FirstOrDefault(a => a.Id == archivoItemId);
@@ -499,6 +503,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     public async Task<ArchivoExportado?> SimularGeneracionAsync(
         Guid snapshotId, Guid archivoItemId, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         var detalle = await _snaps.ObtenerAsync(snapshotId, ct);
         if (detalle is null || detalle.Metadata.AseguradoraId is not Guid aseguradoraId) { return null; }
 
@@ -512,7 +517,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
             : "{sigla}_{cedula}";
 
         var nitIps = (_tenant.TenantId is Guid tnit
-            ? await _db.Tenants.AsNoTracking().Where(t => t.Id == tnit).Select(t => t.TaxId).FirstOrDefaultAsync(ct)
+            ? await db.Tenants.AsNoTracking().Where(t => t.Id == tnit).Select(t => t.TaxId).FirstOrDefaultAsync(ct)
             : null) ?? "";
         nitIps = new string(nitIps.Where(char.IsDigit).ToArray());
 
@@ -521,7 +526,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
 
         // doc -> pacienteId (los del snapshot que existen en el sistema).
         var docs = pacientes.Select(p => p.Documento).Distinct().ToList();
-        var pacs = await _db.Pacientes.AsNoTracking()
+        var pacs = await db.Pacientes.AsNoTracking()
             .Where(p => docs.Contains(p.NumeroDocumento))
             .Select(p => new { p.Id, p.NumeroDocumento })
             .ToListAsync(ct);
@@ -546,7 +551,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         {
             var incluyeTokenAut = patron.Contains("{autorizacion}", StringComparison.OrdinalIgnoreCase);
             var docsRender = CalcularDocsRender(archivo);
-            var hcAut = await ConstruirMapaHcAutorizacionAsync(docToId.Values.ToHashSet(), ct);
+            var hcAut = await ConstruirMapaHcAutorizacionAsync(db, docToId.Values.ToHashSet(), ct);
 
             foreach (var pac in pacientes)
             {
@@ -567,7 +572,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 foreach (var codigo in codigos)
                 {
                     var partes = await ConstruirPlanAutorizacionAsync(
-                        archivo, pacienteId, codigo, hcAut, docsRender, allUrls, pDesde, pHasta, ct);
+                        db, archivo, pacienteId, codigo, hcAut, docsRender, allUrls, pDesde, pHasta, ct);
 
                     if (partes.Count == 0)
                     {
@@ -583,7 +588,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     var n = 2;
                     while (!usados.Add(name)) { name = $"{baseName}_{n++}.pdf"; }
 
-                    var exp = await ExpandirYDiagnosticarAsync(partes, incluyeEvo, pDesde, pHasta, ct);
+                    var exp = await ExpandirYDiagnosticarAsync(db, partes, incluyeEvo, pDesde, pHasta, ct);
                     filas.Add(new SimFila(name, pac.Nombre ?? "", pac.TipoDocumento ?? "",
                         pac.Documento ?? "", codigo, exp.Partes, "OK", exp.Avisos));
                 }
@@ -594,7 +599,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
             foreach (var pac in pacientes)
             {
                 ct.ThrowIfCancellationRequested();
-                var partes = await ConstruirPlanPacienteAsync(archivo, pac, allUrls, pDesde, pHasta, ct);
+                var partes = await ConstruirPlanPacienteAsync(db, archivo, pac, allUrls, pDesde, pHasta, ct);
                 if (partes is null)
                 {
                     filas.Add(new SimFila("(no se genera)", pac.Nombre ?? "", pac.TipoDocumento ?? "",
@@ -614,7 +619,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 var n = 2;
                 while (!usados.Add(name)) { name = $"{baseName}_{n++}.pdf"; }
 
-                var exp = await ExpandirYDiagnosticarAsync(partes, incluyeEvo, pDesde, pHasta, ct);
+                var exp = await ExpandirYDiagnosticarAsync(db, partes, incluyeEvo, pDesde, pHasta, ct);
                 filas.Add(new SimFila(name, pac.Nombre ?? "", pac.TipoDocumento ?? "",
                     pac.Documento ?? "", string.Join(", ", pac.Autorizaciones.Where(x => !string.IsNullOrWhiteSpace(x))),
                     exp.Partes, "OK", exp.Avisos));
@@ -635,7 +640,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// suelto en el mismo PDF, lo reporta como aviso de "doble fuente" (el patron que duplicaba
     /// historias), aunque el gate de EVO este apagado.</summary>
     private async Task<SimExpand> ExpandirYDiagnosticarAsync(
-        List<PartePlan> partes, bool incluyeEvo, DateOnly? desde, DateOnly? hasta, CancellationToken ct)
+        IApplicationDbContext db, List<PartePlan> partes, bool incluyeEvo, DateOnly? desde, DateOnly? hasta, CancellationToken ct)
     {
         var res = new List<SimParte>(partes.Count);
         var avisos = new List<string>();
@@ -653,7 +658,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
             res.Add(new SimParte(etq, p.Cup, p.CupNombre));
             if (p.HcId == Guid.Empty) { continue; }
 
-            var anidadas = await ConsultarEvolucionesAnidadasAsync(p.HcId, desde, hasta, ct);
+            var anidadas = await ConsultarEvolucionesAnidadasAsync(db, p.HcId, desde, hasta, ct);
             if (anidadas.Count == 0) { continue; }
 
             // Refleja el render: las evoluciones salen DENTRO de la hoja base solo si docs incluye EVO.
@@ -695,30 +700,30 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// HC del mismo formato de evolucion ligadas a la misma asignacion, Cerradas), acotada al
     /// periodo por fecha de atencion igual que el render. Vacia si la HC no es base de terapia.</summary>
     private async Task<List<long>> ConsultarEvolucionesAnidadasAsync(
-        Guid baseHcId, DateOnly? desde, DateOnly? hasta, CancellationToken ct)
+        IApplicationDbContext db, Guid baseHcId, DateOnly? desde, DateOnly? hasta, CancellationToken ct)
     {
-        var evoCod = await _db.HistoriasClinicas.AsNoTracking()
+        var evoCod = await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.Id == baseHcId)
-            .Join(_db.FormDefinitions.AsNoTracking(),
+            .Join(db.FormDefinitions.AsNoTracking(),
                   h => h.FormDefinitionId, f => f.Id, (h, f) => f.FormatoEvolucionCodigo)
             .FirstOrDefaultAsync(ct);
         if (string.IsNullOrWhiteSpace(evoCod)) { return new(); }
 
-        var asigId = await _db.AsignacionTurnoSesionHcs.AsNoTracking()
+        var asigId = await db.AsignacionTurnoSesionHcs.AsNoTracking()
             .Where(p => p.HistoriaClinicaId == baseHcId)
-            .Join(_db.AsignacionTurnoSesiones.AsNoTracking(),
+            .Join(db.AsignacionTurnoSesiones.AsNoTracking(),
                   p => p.SesionId, s => s.Id, (p, s) => s.AsignacionTurnoId)
-            .Join(_db.AsignacionTurnos.AsNoTracking(),
+            .Join(db.AsignacionTurnos.AsNoTracking(),
                   turnoId => turnoId, t => t.Id, (turnoId, t) => t.AsignacionId)
             .FirstOrDefaultAsync(ct);
         if (asigId == Guid.Empty) { return new(); }
 
         var filas = await (
-            from p in _db.AsignacionTurnoSesionHcs.AsNoTracking()
-            join s in _db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
-            join t in _db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
-            join h in _db.HistoriasClinicas.AsNoTracking() on p.HistoriaClinicaId equals h.Id
-            join f in _db.FormDefinitions.AsNoTracking() on h.FormDefinitionId equals f.Id
+            from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
+            join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+            join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+            join h in db.HistoriasClinicas.AsNoTracking() on p.HistoriaClinicaId equals h.Id
+            join f in db.FormDefinitions.AsNoTracking() on h.FormDefinitionId equals f.Id
             where t.AsignacionId == asigId
                   && f.Codigo == evoCod
                   && h.Estado == HistoriaClinicaEstado.Cerrada
@@ -907,7 +912,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// tarjeta y el Excel de faltantes para que nunca se desalineen. Devuelve null si el
     /// snapshot no existe, no tiene aseguradora o la aseguradora no tiene archivos configurados.
     /// </summary>
-    private async Task<ContenidoLookup?> ConstruirLookupAsync(Guid snapshotId, CancellationToken ct)
+    private async Task<ContenidoLookup?> ConstruirLookupAsync(IApplicationDbContext db, Guid snapshotId, CancellationToken ct)
     {
         var detalle = await _snaps.ObtenerAsync(snapshotId, ct);
         if (detalle is null || detalle.Metadata.AseguradoraId is not Guid aseguradoraId) { return null; }
@@ -922,7 +927,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         var docs = pacientes.Select(p => p.Documento).Distinct().ToList();
 
         // doc -> pacienteId (los del snapshot que existen en el sistema).
-        var pacs = await _db.Pacientes.AsNoTracking()
+        var pacs = await db.Pacientes.AsNoTracking()
             .Where(p => docs.Contains(p.NumeroDocumento))
             .Select(p => new { p.Id, p.NumeroDocumento })
             .ToListAsync(ct);
@@ -955,7 +960,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         var conAut = new HashSet<Guid>();
         if (idSet.Count > 0)
         {
-            var autRows = await _db.Asignaciones.AsNoTracking()
+            var autRows = await db.Asignaciones.AsNoTracking()
                 .Where(a => idSet.Contains(a.PacienteId) && a.PdfAutorizacionUrl != null && a.CodigoAutorizacion != null)
                 .Select(a => new { a.PacienteId, a.PdfAutorizacionUrl, a.CodigoAutorizacion })
                 .ToListAsync(ct);
@@ -971,10 +976,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
         var conFirma = new HashSet<Guid>();
         if (idSet.Count > 0)
         {
-            foreach (var pid in await _db.NotasMedicas.AsNoTracking()
+            foreach (var pid in await db.NotasMedicas.AsNoTracking()
                 .Where(n => idSet.Contains(n.PacienteId) && n.FirmaPacienteDataUrl != null)
                 .Select(n => n.PacienteId).Distinct().ToListAsync(ct)) { conFirma.Add(pid); }
-            foreach (var pid in await _db.FirmaPacienteRequests.AsNoTracking()
+            foreach (var pid in await db.FirmaPacienteRequests.AsNoTracking()
                 .Where(r => idSet.Contains(r.PacienteId) && r.ImageDataUrl != null)
                 .Select(r => r.PacienteId).Distinct().ToListAsync(ct)) { conFirma.Add(pid); }
         }
@@ -991,9 +996,9 @@ public sealed class TipologiaZipService : ITipologiaZipService
         var conFormTipo = new Dictionary<string, HashSet<Guid>>(StringComparer.OrdinalIgnoreCase);
         if (idSet.Count > 0 && tiposReferenciados.Count > 0)
         {
-            var filas = await _db.HistoriasClinicas.AsNoTracking()
+            var filas = await db.HistoriasClinicas.AsNoTracking()
                 .Where(h => idSet.Contains(h.PacienteId) && h.Estado == HistoriaClinicaEstado.Cerrada)
-                .Join(_db.FormDefinitions.AsNoTracking(), h => h.FormDefinitionId, f => f.Id,
+                .Join(db.FormDefinitions.AsNoTracking(), h => h.FormDefinitionId, f => f.Id,
                       (h, f) => new { h.PacienteId, f.Tipo, Fecha = h.FechaAtencion ?? h.FechaCierre ?? h.CreatedAt })
                 .Where(x => x.Tipo != null && tiposReferenciados.Contains(x.Tipo))
                 .ToListAsync(ct);
@@ -1015,7 +1020,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         var docsExternos = new Dictionary<Guid, List<(string? Cat, bool Hc, bool Nota)>>();
         if (idSet.Count > 0 && usaDocExterno)
         {
-            var rows = await _db.NotaMedicaDocumentos.AsNoTracking()
+            var rows = await db.NotaMedicaDocumentos.AsNoTracking()
                 .Where(d => idSet.Contains(d.PacienteId))
                 .Select(d => new
                 {
@@ -1059,10 +1064,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// indice, para rendirse todas juntas luego (un solo navegador, en paralelo).
     /// Devuelve null si el paciente no existe en el sistema.</summary>
     private async Task<List<PartePlan>?> ConstruirPlanPacienteAsync(
-        InformeItemDto archivo, PacienteSnapshotDto pac, List<string> allUrls,
+        IApplicationDbContext db, InformeItemDto archivo, PacienteSnapshotDto pac, List<string> allUrls,
         DateOnly? desde, DateOnly? hasta, CancellationToken ct)
     {
-        var pid = await _db.Pacientes.AsNoTracking()
+        var pid = await db.Pacientes.AsNoTracking()
             .Where(p => p.NumeroDocumento == pac.Documento)
             .Select(p => (Guid?)p.Id)
             .FirstOrDefaultAsync(ct);
@@ -1083,13 +1088,13 @@ public sealed class TipologiaZipService : ITipologiaZipService
             switch (c.Origen)
             {
                 case OrigenInformeItem.AutorizacionAsignacion:
-                    foreach (var b in await CargarAutorizacionesAsync(pacienteId, pac.Autorizaciones, c.SoloUltimo, ct))
+                    foreach (var b in await CargarAutorizacionesAsync(db, pacienteId, pac.Autorizaciones, c.SoloUltimo, ct))
                     {
                         partes.Add(new PartePlan(b, -1, Etiqueta: "[AUT]"));
                     }
                     break;
                 case OrigenInformeItem.FirmaPaciente:
-                    foreach (var b in await CargarFirmasAsync(pacienteId, c.SoloUltimo, ct))
+                    foreach (var b in await CargarFirmasAsync(db, pacienteId, c.SoloUltimo, ct))
                     {
                         partes.Add(new PartePlan(b, -1, Etiqueta: "[FIRMA]"));
                     }
@@ -1097,13 +1102,13 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 case OrigenInformeItem.FormularioPorTipo:
                     ftInsertIdx ??= partes.Count;
                     formTipoUrls.AddRange(await ResolverUrlsFormularioPorTipoAsync(
-                        pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct,
+                        db, pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct,
                         desde: desde, hasta: hasta, rotuloPorCup: archivo.RotuloSeparadorCup));
                     break;
                 case OrigenInformeItem.DocumentoHc:
                 case OrigenInformeItem.DocumentoPacienteLibre:
                 case OrigenInformeItem.DocumentoNota:
-                    foreach (var d in await CargarDocumentosExternosAsync(pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct, membrete: archivo.MembreteHcCup, rotuloPorCup: archivo.RotuloSeparadorCup))
+                    foreach (var d in await CargarDocumentosExternosAsync(db, pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct, membrete: archivo.MembreteHcCup, rotuloPorCup: archivo.RotuloSeparadorCup))
                     {
                         partes.Add(new PartePlan(d.Bytes, -1, Cup: d.Cup, CupNombre: d.CupNombre, Etiqueta: "[ANEXO]"));
                     }
@@ -1146,7 +1151,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// <paramref name="soloUltimo"/> reduce a la ultima autorizacion.
     /// </summary>
     private async Task<List<byte[]>> CargarAutorizacionesAsync(
-        Guid pacienteId, IReadOnlyList<string> codigosSnapshot, bool soloUltimo, CancellationToken ct)
+        IApplicationDbContext db, Guid pacienteId, IReadOnlyList<string> codigosSnapshot, bool soloUltimo, CancellationToken ct)
     {
         var codSet = codigosSnapshot
             .Where(x => !string.IsNullOrWhiteSpace(x))
@@ -1157,7 +1162,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         // Cargamos las asignaciones del paciente con PDF (son pocas) y filtramos en
         // memoria por codigo con trim en ambos lados: el snapshot guarda el codigo
         // trimmeado (NormalizarAutorizacion) y en BD puede tener espacios.
-        var filas = (await _db.Asignaciones.AsNoTracking()
+        var filas = (await db.Asignaciones.AsNoTracking()
             .Where(a => a.PacienteId == pacienteId
                         && a.PdfAutorizacionUrl != null
                         && a.CodigoAutorizacion != null)
@@ -1187,7 +1192,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     }
 
     private async Task<List<byte[]>> CargarFirmasAsync(
-        Guid pacienteId, bool soloUltimo, CancellationToken ct,
+        IApplicationDbContext db, Guid pacienteId, bool soloUltimo, CancellationToken ct,
         string? filtroAutorizacion = null, IReadOnlyDictionary<Guid, HashSet<string>>? hcAut = null)
     {
         // La firma del paciente puede estar en dos lugares:
@@ -1195,7 +1200,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         //  2) FirmaPacienteRequest.ImageDataUrl (firmas "libres" pedidas desde HC/paciente/
         //     WhatsApp; NO actualizan la nota). La mayoria de firmas del paciente viven aqui.
         // Unimos ambas fuentes, ordenadas por fecha, y aplicamos SoloUltimo sobre el total.
-        var deNotas = await _db.NotasMedicas.AsNoTracking()
+        var deNotas = await db.NotasMedicas.AsNoTracking()
             .Where(n => n.PacienteId == pacienteId && n.FirmaPacienteDataUrl != null)
             .Select(n => new { Fecha = n.CreatedAt, Url = n.FirmaPacienteDataUrl!, Hc = n.HistoriaClinicaId })
             .ToListAsync(ct);
@@ -1217,7 +1222,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         else
         {
             foreach (var n in deNotas) { todas.Add((n.Fecha, n.Url)); }
-            var deRequests = await _db.FirmaPacienteRequests.AsNoTracking()
+            var deRequests = await db.FirmaPacienteRequests.AsNoTracking()
                 .Where(r => r.PacienteId == pacienteId && r.ImageDataUrl != null)
                 .Select(r => new { Fecha = r.CompletedAt ?? r.CreatedAt, Url = r.ImageDataUrl! })
                 .ToListAsync(ct);
@@ -1243,16 +1248,16 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// usa el modo "un archivo por autorizacion" para atribuir cada HC/adjunto/firma a su
     /// autorizacion. Una HC puede colgar de mas de una autorizacion (set).</summary>
     private async Task<Dictionary<Guid, HashSet<string>>> ConstruirMapaHcAutorizacionAsync(
-        IReadOnlyCollection<Guid> pacienteIds, CancellationToken ct)
+        IApplicationDbContext db, IReadOnlyCollection<Guid> pacienteIds, CancellationToken ct)
     {
         var map = new Dictionary<Guid, HashSet<string>>();
         if (pacienteIds.Count == 0) { return map; }
 
         var filas = await (
-            from p in _db.AsignacionTurnoSesionHcs.AsNoTracking()
-            join s in _db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
-            join t in _db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
-            join a in _db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+            from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
+            join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+            join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+            join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
             where pacienteIds.Contains(a.PacienteId) && a.CodigoAutorizacion != null
             select new { p.HistoriaClinicaId, a.CodigoAutorizacion })
             .ToListAsync(ct);
@@ -1275,7 +1280,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// pero filtrando cada origen a lo que pertenece a esa autorizacion. Las URLs de
     /// formulario-por-tipo se agregan al lote global para rendirse juntas.</summary>
     private async Task<List<PartePlan>> ConstruirPlanAutorizacionAsync(
-        InformeItemDto archivo, Guid pacienteId, string codigo,
+        IApplicationDbContext db, InformeItemDto archivo, Guid pacienteId, string codigo,
         IReadOnlyDictionary<Guid, HashSet<string>> hcAut, string docsRender,
         List<string> allUrls, DateOnly? desde, DateOnly? hasta, CancellationToken ct)
     {
@@ -1292,13 +1297,13 @@ public sealed class TipologiaZipService : ITipologiaZipService
             {
                 case OrigenInformeItem.AutorizacionAsignacion:
                     // Solo el PDF de ESTA autorizacion.
-                    foreach (var b in await CargarAutorizacionesAsync(pacienteId, unoCodigo, c.SoloUltimo, ct))
+                    foreach (var b in await CargarAutorizacionesAsync(db, pacienteId, unoCodigo, c.SoloUltimo, ct))
                     {
                         partes.Add(new PartePlan(b, -1, Etiqueta: $"[AUT {codigo}]"));
                     }
                     break;
                 case OrigenInformeItem.FirmaPaciente:
-                    foreach (var b in await CargarFirmasAsync(pacienteId, c.SoloUltimo, ct, codigo, hcAut))
+                    foreach (var b in await CargarFirmasAsync(db, pacienteId, c.SoloUltimo, ct, codigo, hcAut))
                     {
                         partes.Add(new PartePlan(b, -1, Etiqueta: "[FIRMA]"));
                     }
@@ -1306,14 +1311,14 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 case OrigenInformeItem.FormularioPorTipo:
                     ftInsertIdx ??= partes.Count;
                     formTipoUrls.AddRange(await ResolverUrlsFormularioPorTipoAsync(
-                        pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct,
+                        db, pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct,
                         codigo, hcAut, desde, hasta, archivo.RotuloSeparadorCup));
                     break;
                 case OrigenInformeItem.DocumentoHc:
                 case OrigenInformeItem.DocumentoPacienteLibre:
                 case OrigenInformeItem.DocumentoNota:
                     foreach (var d in await CargarDocumentosExternosAsync(
-                        pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct, codigo, hcAut, archivo.MembreteHcCup, archivo.RotuloSeparadorCup))
+                        db, pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct, codigo, hcAut, archivo.MembreteHcCup, archivo.RotuloSeparadorCup))
                     {
                         partes.Add(new PartePlan(d.Bytes, -1, Cup: d.Cup, CupNombre: d.CupNombre, Etiqueta: "[ANEXO]"));
                     }
@@ -1332,11 +1337,11 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// categoria = tipologia elegida (si no se eligio, cualquiera). PDFs pasan tal cual;
     /// imagenes se envuelven en una pagina. SoloUltimo = solo el adjunto mas reciente.</summary>
     private async Task<List<(byte[] Bytes, string? Cup, string? CupNombre)>> CargarDocumentosExternosAsync(
-        Guid pacienteId, OrigenInformeItem origen, string? tipologiaNombre, bool soloUltimo, CancellationToken ct,
+        IApplicationDbContext db, Guid pacienteId, OrigenInformeItem origen, string? tipologiaNombre, bool soloUltimo, CancellationToken ct,
         string? filtroAutorizacion = null, IReadOnlyDictionary<Guid, HashSet<string>>? hcAut = null,
         bool membrete = false, bool rotuloPorCup = false)
     {
-        var q = _db.NotaMedicaDocumentos.AsNoTracking()
+        var q = db.NotaMedicaDocumentos.AsNoTracking()
             .Where(d => d.PacienteId == pacienteId);
 
         // Ambito segun el origen seleccionado.
@@ -1379,7 +1384,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         // consulta) si hace falta: para estampar el membrete (membrete) y/o para ordenar por CUP
         // y poner la cabecera "CUP ..." (rotuloPorCup).
         var info = (membrete || rotuloPorCup)
-            ? await ResolverMembretePorHcAsync(
+            ? await ResolverMembretePorHcAsync(db,
                 seleccion.Where(r => r.HistoriaClinicaId is Guid)
                          .Select(r => r.HistoriaClinicaId!.Value).Distinct().ToList(), ct)
             : new Dictionary<Guid, (string Hc, string Cup, string Serv)>();
@@ -1421,12 +1426,12 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// fallback que RelacionFacturas (si la asignacion no estampo CodigoRips, se deriva del
     /// ServicioContrato vivo: codigo base sin sufijo d/f). Una sola consulta por lote de HC.</summary>
     private async Task<Dictionary<Guid, (string Hc, string Cup, string Serv)>> ResolverMembretePorHcAsync(
-        List<Guid> hcIds, CancellationToken ct)
+        IApplicationDbContext db, List<Guid> hcIds, CancellationToken ct)
     {
         var res = new Dictionary<Guid, (string Hc, string Cup, string Serv)>();
         if (hcIds.Count == 0) { return res; }
 
-        var consec = await _db.HistoriasClinicas.AsNoTracking()
+        var consec = await db.HistoriasClinicas.AsNoTracking()
             .Where(h => hcIds.Contains(h.Id))
             .Select(h => new { h.Id, h.Consecutivo })
             .ToListAsync(ct);
@@ -1434,11 +1439,11 @@ public sealed class TipologiaZipService : ITipologiaZipService
 
         // Primera asignacion por HC (via pivote sesion->turno->asignacion), con su servicio.
         var cups = await (
-            from p in _db.AsignacionTurnoSesionHcs.AsNoTracking()
+            from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
             where hcIds.Contains(p.HistoriaClinicaId)
-            join s in _db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
-            join t in _db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
-            join a in _db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+            join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+            join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+            join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
             select new { p.HistoriaClinicaId, a.CodigoRips, a.NombreServicio, a.ServicioId })
             .ToListAsync(ct);
         var asigPorHc = new Dictionary<Guid, (string? Cup, string? Nombre, string? ServicioId)>();
@@ -1457,7 +1462,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
             .Distinct().ToList();
         var servInfo = servIds.Count == 0
             ? new Dictionary<Guid, (string? Codigo, string? Descripcion)>()
-            : await _db.ServiciosContrato.AsNoTracking()
+            : await db.ServiciosContrato.AsNoTracking()
                 .Where(s => servIds.Contains(s.Id))
                 .Select(s => new { s.Id, s.CodigoServicio, s.Descripcion })
                 .ToDictionaryAsync(s => s.Id, s => ((string?)s.CodigoServicio, (string?)s.Descripcion), ct);
@@ -1564,16 +1569,16 @@ public sealed class TipologiaZipService : ITipologiaZipService
     private static string CalcularDocsRender(InformeItemDto archivo) => "HC";
 
     private async Task<List<UrlCup>> ResolverUrlsFormularioPorTipoAsync(
-        Guid pacienteId, string? tipo, bool soloUltimo,
+        IApplicationDbContext db, Guid pacienteId, string? tipo, bool soloUltimo,
         IReadOnlyList<InformeOrdenNivelDto>? ordenNiveles, string docsRender, CancellationToken ct,
         string? filtroAutorizacion = null, IReadOnlyDictionary<Guid, HashSet<string>>? hcAut = null,
         DateOnly? desde = null, DateOnly? hasta = null, bool rotuloPorCup = false)
     {
         if (string.IsNullOrWhiteSpace(tipo) || _tenant.TenantId is not Guid tid) { return new(); }
 
-        var filas = (await _db.HistoriasClinicas.AsNoTracking()
+        var filas = (await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.PacienteId == pacienteId && h.Estado == HistoriaClinicaEstado.Cerrada)
-            .Join(_db.FormDefinitions.AsNoTracking(),
+            .Join(db.FormDefinitions.AsNoTracking(),
                   h => h.FormDefinitionId, f => f.Id,
                   (h, f) => new { h.Id, h.Consecutivo, h.FechaCierre, h.FechaAtencion, h.CreatedAt, f.Tipo })
             .Where(x => x.Tipo == tipo)
@@ -1609,11 +1614,11 @@ public sealed class TipologiaZipService : ITipologiaZipService
         {
             var ids = filas.Select(f => f.Id).ToList();
             var cups = await (
-                from p in _db.AsignacionTurnoSesionHcs.AsNoTracking()
+                from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
                 where ids.Contains(p.HistoriaClinicaId)
-                join s in _db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
-                join t in _db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
-                join a in _db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+                join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+                join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+                join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
                 select new { p.HistoriaClinicaId, a.CodigoRips, a.NombreServicio, a.Sucursal, a.ServicioId })
                 .ToListAsync(ct);
 
@@ -1638,7 +1643,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 .Distinct().ToList();
             var servInfo = servIds.Count == 0
                 ? new Dictionary<Guid, (string? Codigo, string? Descripcion)>()
-                : await _db.ServiciosContrato.AsNoTracking()
+                : await db.ServiciosContrato.AsNoTracking()
                     .Where(s => servIds.Contains(s.Id))
                     .Select(s => new { s.Id, s.CodigoServicio, s.Descripcion })
                     .ToDictionaryAsync(s => s.Id, s => ((string?)s.CodigoServicio, (string?)s.Descripcion), ct);
@@ -1986,10 +1991,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// <summary>Bytes del logo del tenant activo (<see cref="Tenant.LogoUrl"/>, servido desde
     /// wwwroot) para el rotulo separador. Null si no hay tenant, no hay logo o no existe en
     /// disco. No lanza.</summary>
-    private async Task<byte[]?> ObtenerLogoTenantBytesAsync(CancellationToken ct)
+    private async Task<byte[]?> ObtenerLogoTenantBytesAsync(IApplicationDbContext db, CancellationToken ct)
     {
         if (_tenant.TenantId is not Guid tid) { return null; }
-        var url = await _db.Tenants.AsNoTracking()
+        var url = await db.Tenants.AsNoTracking()
             .Where(t => t.Id == tid).Select(t => t.LogoUrl).FirstOrDefaultAsync(ct);
         if (string.IsNullOrWhiteSpace(url)) { return null; }
         try

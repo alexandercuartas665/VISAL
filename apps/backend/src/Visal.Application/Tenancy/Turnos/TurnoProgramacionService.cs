@@ -4,15 +4,16 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy.Turnos;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class TurnoProgramacionService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant) : ITurnoProgramacionService
 {
     private const string KeyBloquearOverload = "turnos.bloquear_overload";
 
     /// <summary>Lee del catalogo TenantConfiguration si el tenant activo bloquea
     /// el guardado ante overload (>24h/dia). Default false = solo warning en UI.</summary>
-    private async Task<bool> LeerBloqueoOverloadAsync(CancellationToken ct)
+    private static async Task<bool> LeerBloqueoOverloadAsync(IApplicationDbContext db, CancellationToken ct)
     {
         var cfg = await db.TenantConfigurations.AsNoTracking()
             .FirstOrDefaultAsync(c => c.ConfigKey == KeyBloquearOverload, ct);
@@ -25,6 +26,7 @@ public sealed class TurnoProgramacionService(
         Guid? sucursalId, Guid? tipoServicioId, int? anio, int? mes, bool soloActivas,
         CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var q = db.TurnoProgramaciones.AsNoTracking();
         // Filtro por sede: la programacion es elegible si tiene esa sede en su lista N:N.
         if (sucursalId is Guid sid)
@@ -75,6 +77,7 @@ public sealed class TurnoProgramacionService(
 
     public async Task<TurnoProgramacionDetailDto?> ObtenerAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.TurnoProgramaciones.AsNoTracking()
             .Include(x => x.Sucursales)
             .FirstOrDefaultAsync(x => x.Id == id, ct);
@@ -90,9 +93,10 @@ public sealed class TurnoProgramacionService(
     public async Task<Guid> CrearAsync(CrearTurnoProgramacionCmd cmd, Guid actor, CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+        using var db = dbFactory.Create();
         var nombre = NormalizarNombre(cmd.Nombre);
         ValidarMesAnio(cmd.Mes, cmd.Anio);
-        var sucIds = await ValidarSucursalesAsync(cmd.SucursalIds, tid, ct);
+        var sucIds = await ValidarSucursalesAsync(db, cmd.SucursalIds, tid, ct);
 
         // Unicidad (tenant, anio, mes, nombre). Case-insensitive.
         var duplicado = await db.TurnoProgramaciones.AsNoTracking()
@@ -105,7 +109,7 @@ public sealed class TurnoProgramacionService(
                 $"Ya existe una programacion '{nombre}' para {cmd.Mes}/{cmd.Anio} en este tenant.");
         }
 
-        var bloquear = await LeerBloqueoOverloadAsync(ct);
+        var bloquear = await LeerBloqueoOverloadAsync(db, ct);
         var grid = GridDataModel.FromJson(cmd.GridDataJson);
         var err = grid.Validate(bloquear, DateTime.DaysInMonth(cmd.Anio, cmd.Mes));
         if (err is not null) { throw new InvalidOperationException(err); }
@@ -133,13 +137,14 @@ public sealed class TurnoProgramacionService(
     public async Task ActualizarAsync(Guid id, ActualizarTurnoProgramacionCmd cmd, Guid actor, CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+        using var db = dbFactory.Create();
         var e = await db.TurnoProgramaciones
             .Include(x => x.Sucursales)
             .FirstOrDefaultAsync(x => x.Id == id, ct)
                 ?? throw new InvalidOperationException("Programacion no encontrada.");
         var nombre = NormalizarNombre(cmd.Nombre);
         ValidarMesAnio(cmd.Mes, cmd.Anio);
-        var sucIds = await ValidarSucursalesAsync(cmd.SucursalIds, tid, ct);
+        var sucIds = await ValidarSucursalesAsync(db, cmd.SucursalIds, tid, ct);
 
         var duplicado = await db.TurnoProgramaciones.AsNoTracking()
             .AnyAsync(x => x.Id != id
@@ -152,7 +157,7 @@ public sealed class TurnoProgramacionService(
                 $"Ya existe otra programacion '{nombre}' para {cmd.Mes}/{cmd.Anio} en este tenant.");
         }
 
-        var bloquear = await LeerBloqueoOverloadAsync(ct);
+        var bloquear = await LeerBloqueoOverloadAsync(db, ct);
         var grid = GridDataModel.FromJson(cmd.GridDataJson);
         var err = grid.Validate(bloquear, DateTime.DaysInMonth(cmd.Anio, cmd.Mes));
         if (err is not null) { throw new InvalidOperationException(err); }
@@ -182,6 +187,7 @@ public sealed class TurnoProgramacionService(
     public async Task<Guid> DuplicarAsync(Guid id, int nuevoAnio, int nuevoMes, Guid actor, CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+        using var db = dbFactory.Create();
         var origen = await db.TurnoProgramaciones.AsNoTracking()
             .Include(x => x.Sucursales)
             .FirstOrDefaultAsync(x => x.Id == id, ct)
@@ -220,6 +226,7 @@ public sealed class TurnoProgramacionService(
 
     public async Task DesactivarAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.TurnoProgramaciones.FirstOrDefaultAsync(x => x.Id == id, ct)
                 ?? throw new InvalidOperationException("Programacion no encontrada.");
         if (!e.Activa) { return; }
@@ -229,6 +236,7 @@ public sealed class TurnoProgramacionService(
 
     public async Task<bool> EliminarAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.TurnoProgramaciones.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (e is null) { return false; }
         db.TurnoProgramaciones.Remove(e);
@@ -251,8 +259,8 @@ public sealed class TurnoProgramacionService(
     }
 
     /// <summary>Regla dura: al menos 1 sede vinculada, todas del tenant y activas.</summary>
-    private async Task<List<Guid>> ValidarSucursalesAsync(
-        IReadOnlyList<Guid> sucursalIds, Guid tid, CancellationToken ct)
+    private static async Task<List<Guid>> ValidarSucursalesAsync(
+        IApplicationDbContext db, IReadOnlyList<Guid> sucursalIds, Guid tid, CancellationToken ct)
     {
         var ids = (sucursalIds ?? Array.Empty<Guid>()).Where(g => g != Guid.Empty).Distinct().ToList();
         if (ids.Count == 0)

@@ -4,14 +4,16 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class NotaMedicaService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     IConfiguracionClinicaService clinica) : INotaMedicaService
 {
     public async Task<IReadOnlyList<NotaMedicaDto>> ListarPorHistoriaAsync(
         Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.NotasMedicas.AsNoTracking()
             .Where(n => n.HistoriaClinicaId == historiaId)
             .OrderByDescending(n => n.FechaNota).ThenByDescending(n => n.HoraNota)
@@ -22,6 +24,7 @@ public sealed class NotaMedicaService(
     public async Task<NotaConteoDto> ContarPorHistoriaAsync(
         Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var defs = await db.NotasMedicas
             .CountAsync(n => n.HistoriaClinicaId == historiaId && n.Estado == NotaMedicaEstado.Definitivo, ct);
         var parc = await db.NotasMedicas
@@ -32,6 +35,7 @@ public sealed class NotaMedicaService(
     public async Task<IReadOnlyList<NotaMedicaTarjetaDto>> ListarHistorialPacienteAsync(
         Guid pacienteId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.NotasMedicas.AsNoTracking()
             .Where(n => n.PacienteId == pacienteId)
             .OrderByDescending(n => n.FechaNota).ThenByDescending(n => n.HoraNota)
@@ -52,6 +56,7 @@ public sealed class NotaMedicaService(
 
     public async Task<NotaMedicaDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.NotasMedicas.AsNoTracking()
             .Where(n => n.Id == id)
             .Select(n => Map(n))
@@ -62,6 +67,7 @@ public sealed class NotaMedicaService(
         Guid pacienteId, string? formatoCodigo, DateOnly? desde, DateOnly? hasta,
         CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Base query: notas Definitivas del paciente. Join opcional con HC +
         // FormDefinition solo cuando hay filtro por formato.
         var q = db.NotasMedicas.AsNoTracking()
@@ -91,6 +97,7 @@ public sealed class NotaMedicaService(
     public async Task<ValidarHcParaNotaResult> ValidarHcParaNotaAsync(
         Guid pacienteId, string? formatoCodigo, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Regla: el profesional no puede crear notas de un servicio si el paciente
         // no tiene una Historia Clinica del formato que pide el servicio, y si esa
         // historia no esta dentro de la ventana de validez configurada por la
@@ -158,6 +165,7 @@ public sealed class NotaMedicaService(
     public async Task<NotaMedicaDto> GuardarAsync(
         GuardarNotaRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
 
         NotaMedica entity;
@@ -234,6 +242,7 @@ public sealed class NotaMedicaService(
 
     public async Task<bool> EliminarAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.NotasMedicas.FirstOrDefaultAsync(n => n.Id == id, ct);
         if (e is null) { return false; }
         if (e.Estado == NotaMedicaEstado.Definitivo)
@@ -248,6 +257,7 @@ public sealed class NotaMedicaService(
     public async Task<bool> ActualizarCriticidadAsync(
         Guid id, string criticidad, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.NotasMedicas.FirstOrDefaultAsync(n => n.Id == id, ct);
         if (e is null) { return false; }
         e.Criticidad = ParseCriticidad(criticidad);
@@ -258,6 +268,7 @@ public sealed class NotaMedicaService(
     public async Task<IReadOnlyList<NotaDocumentoDto>> ListarDocumentosAsync(
         Guid notaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.NotaMedicaDocumentos.AsNoTracking()
             .Where(d => d.NotaMedicaId == notaId)
             .OrderByDescending(d => d.CreatedAt)
@@ -279,6 +290,7 @@ public sealed class NotaMedicaService(
         // LEFT JOIN via SelectMany + DefaultIfEmpty para incluir documentos "libres"
         // que no tienen NotaMedicaId (ej. firmas remotas capturadas desde el chat
         // WhatsApp del paciente sin nota especifica).
+        using var db = dbFactory.Create();
         var raw = await db.NotaMedicaDocumentos.AsNoTracking()
             .Where(d => d.PacienteId == pacienteId)
             .GroupJoin(db.NotasMedicas.AsNoTracking(),
@@ -320,6 +332,7 @@ public sealed class NotaMedicaService(
     public async Task<NotaDocumentoDto> AdjuntarDocumentoAsync(
         AdjuntarDocumentoRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         // Resolver PacienteId desde la nota para que el documento quede asociado
         // tambien al paciente (visible desde el tab Documentos de Admision).
@@ -353,6 +366,7 @@ public sealed class NotaMedicaService(
     public async Task<IReadOnlyList<NotaDocumentoDto>> ListarDocumentosPorHistoriaAsync(
         Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.NotaMedicaDocumentos.AsNoTracking()
             .Where(d => d.HistoriaClinicaId == historiaId)
             .OrderByDescending(d => d.CreatedAt)
@@ -369,6 +383,7 @@ public sealed class NotaMedicaService(
     public async Task<NotaDocumentoDto> AdjuntarDocumentoHcAsync(
         AdjuntarDocumentoHcRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         // Valida que la HC exista y pertenezca al paciente. La validacion cruzada
         // evita que un actor con acceso al tenant pueda enlazar un documento a una
@@ -410,6 +425,7 @@ public sealed class NotaMedicaService(
     public async Task<NotaDocumentoDto> AdjuntarDocumentoPacienteAsync(
         AdjuntarDocumentoPacienteRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         // Verifica que el paciente exista y este en el tenant activo (evita
         // pasar un PacienteId arbitrario de otro tenant).
@@ -447,6 +463,7 @@ public sealed class NotaMedicaService(
     public async Task<bool> ActualizarCategoriaDocumentoAsync(
         Guid documentoId, string? categoria, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.NotaMedicaDocumentos.FirstOrDefaultAsync(d => d.Id == documentoId, ct);
         if (e is null) { return false; }
 
@@ -474,6 +491,7 @@ public sealed class NotaMedicaService(
     public async Task<bool> ActualizarSubcategoriaDocumentoAsync(
         Guid documentoId, string? subcategoria, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.NotaMedicaDocumentos.FirstOrDefaultAsync(d => d.Id == documentoId, ct);
         if (e is null) { return false; }
         // Mismo gate que la categoria: solo documentos no atados a una nota medica.
@@ -493,6 +511,7 @@ public sealed class NotaMedicaService(
         Guid documentoId, string? categoria, string? subcategoria, string? anotaciones,
         DateTimeOffset? fechaDocumento, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.NotaMedicaDocumentos.FirstOrDefaultAsync(d => d.Id == documentoId, ct);
         if (e is null) { return false; }
         if (e.NotaMedicaId is not null)
@@ -511,6 +530,7 @@ public sealed class NotaMedicaService(
 
     public async Task<bool> EliminarDocumentoAsync(Guid documentoId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.NotaMedicaDocumentos.FirstOrDefaultAsync(d => d.Id == documentoId, ct);
         if (e is null) { return false; }
         db.NotaMedicaDocumentos.Remove(e);

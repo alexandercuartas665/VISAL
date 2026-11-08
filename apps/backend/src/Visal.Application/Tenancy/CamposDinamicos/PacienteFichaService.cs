@@ -4,7 +4,8 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy.CamposDinamicos;
 
-public sealed class PacienteFichaService(IApplicationDbContext db, ITenantContext tenant) : IPacienteFichaService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class PacienteFichaService(IApplicationDbContextFactory dbFactory, ITenantContext tenant) : IPacienteFichaService
 {
     // Tabs de sistema: los 4 tabs fijos de la ficha de admision, ahora unificados en el mismo
     // espacio de tabs que los dinamicos para que cualquier campo (fijo o dinamico) pueda vivir
@@ -19,6 +20,7 @@ public sealed class PacienteFichaService(IApplicationDbContext db, ITenantContex
 
     public async Task<IReadOnlyList<PacienteFichaDto>> ListAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.PacienteFichaDefs.AsNoTracking()
             .OrderBy(f => f.Orden).ThenBy(f => f.Titulo)
             .Select(f => new PacienteFichaDto(f.Id, f.TabKey, f.Titulo, f.Descripcion, f.Color, f.Orden, f.Oculto, f.EsSistema))
@@ -28,13 +30,14 @@ public sealed class PacienteFichaService(IApplicationDbContext db, ITenantContex
     public async Task EnsureDefaultsAsync(CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { return; }
-        await SembrarSistemaAsync(tid, ct);
+        using var db = dbFactory.Create();
+        await SembrarSistemaAsync(db, tid, ct);
         // Top-up idempotente de tabs de sistema agregados despues (los tenants ya sembrados no
         // entran al bloque de arriba). "mortalidad": pestana especial de captura de deceso.
-        await EnsureTabAsync(tid, "mortalidad", "Mortalidad", ct);
+        await EnsureTabAsync(db, tid, "mortalidad", "Mortalidad", ct);
     }
 
-    private async Task EnsureTabAsync(Guid tid, string key, string titulo, CancellationToken ct)
+    private async Task EnsureTabAsync(IApplicationDbContext db, Guid tid, string key, string titulo, CancellationToken ct)
     {
         if (await db.PacienteFichaDefs.AnyAsync(f => f.TabKey == key, ct)) { return; }
         var maxOrden = await db.PacienteFichaDefs.MaxAsync(f => (int?)f.Orden, ct) ?? -1;
@@ -47,10 +50,10 @@ public sealed class PacienteFichaService(IApplicationDbContext db, ITenantContex
             EsSistema = true,
         });
         try { await db.SaveChangesAsync(ct); }
-        catch (DbUpdateException) { DescartarPendientes(); } // carrera de siembra (ver abajo)
+        catch (DbUpdateException) { DescartarPendientes(db); } // carrera de siembra (ver abajo)
     }
 
-    private async Task SembrarSistemaAsync(Guid tid, CancellationToken ct)
+    private async Task SembrarSistemaAsync(IApplicationDbContext db, Guid tid, CancellationToken ct)
     {
         // Idempotente: solo siembra si falta el primer tab de sistema.
         if (await db.PacienteFichaDefs.AnyAsync(f => f.TabKey == TabsSistema[0].Key, ct)) { return; }
@@ -82,11 +85,11 @@ public sealed class PacienteFichaService(IApplicationDbContext db, ITenantContex
             // casi a la vez; el segundo choca con ix_paciente_ficha_defs_tenant_id_tab_key (23505).
             // Si los tabs ya quedaron lo damos por bueno y descartamos los cambios no persistidos,
             // para no dejar entidades Added colgando en el DbContext compartido del circuito.
-            DescartarPendientes();
+            DescartarPendientes(db);
         }
     }
 
-    private void DescartarPendientes()
+    private static void DescartarPendientes(IApplicationDbContext db)
     {
         foreach (var entry in db.ChangeTracker.Entries<PacienteFichaDef>()
                      .Where(e => e.State is EntityState.Added or EntityState.Modified).ToList())
@@ -97,11 +100,12 @@ public sealed class PacienteFichaService(IApplicationDbContext db, ITenantContex
 
     public async Task<PacienteFichaDto> CreateAsync(CrearFichaRequest req, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         var titulo = (req.Titulo ?? "").Trim();
         if (titulo.Length == 0) { throw new InvalidOperationException("El tab necesita un titulo."); }
 
-        var tabKey = await UniqueTabKeyAsync(CamposDinamicosSlug.Make(titulo, "tab"), ct);
+        var tabKey = await UniqueTabKeyAsync(db, CamposDinamicosSlug.Make(titulo, "tab"), ct);
         var maxOrden = await db.PacienteFichaDefs.MaxAsync(f => (int?)f.Orden, ct) ?? -1;
         var e = new PacienteFichaDef
         {
@@ -119,6 +123,7 @@ public sealed class PacienteFichaService(IApplicationDbContext db, ITenantContex
 
     public async Task<PacienteFichaDto?> UpdateAsync(Guid id, ActualizarFichaRequest req, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.PacienteFichaDefs.FirstOrDefaultAsync(f => f.Id == id, ct);
         if (e is null) { return null; }
         var titulo = (req.Titulo ?? "").Trim();
@@ -133,6 +138,7 @@ public sealed class PacienteFichaService(IApplicationDbContext db, ITenantContex
 
     public async Task ReorderAsync(Guid id, bool up, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var fichas = await db.PacienteFichaDefs.OrderBy(f => f.Orden).ToListAsync(ct);
         var idx = fichas.FindIndex(f => f.Id == id);
         if (idx < 0) { return; }
@@ -144,6 +150,7 @@ public sealed class PacienteFichaService(IApplicationDbContext db, ITenantContex
 
     public async Task DeleteAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.PacienteFichaDefs.FirstOrDefaultAsync(f => f.Id == id, ct);
         if (e is null) { return; }
         if (e.EsSistema) { throw new InvalidOperationException("No se puede eliminar un tab de sistema."); }
@@ -156,7 +163,7 @@ public sealed class PacienteFichaService(IApplicationDbContext db, ITenantContex
         await db.SaveChangesAsync(ct);
     }
 
-    private async Task<string> UniqueTabKeyAsync(string baseKey, CancellationToken ct)
+    private async Task<string> UniqueTabKeyAsync(IApplicationDbContext db, string baseKey, CancellationToken ct)
     {
         var key = baseKey;
         var n = 2;

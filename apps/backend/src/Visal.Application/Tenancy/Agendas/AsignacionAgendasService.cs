@@ -5,13 +5,15 @@ using Visal.Domain.Enums;
 
 namespace Visal.Application.Tenancy.Agendas;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class AsignacionAgendasService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     IFestivosColombiaService festivos,
     IAsignacionService asignaciones) : IAsignacionAgendasService
 {
     public async Task<IReadOnlyList<ServicioConAgendaDto>> ListarServiciosConAgendaAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Profesionales que tienen agenda propia.
         var profIdsConAgenda = await db.AgendaProfesionalTurnos.AsNoTracking()
             .Select(t => t.ProfesionalId).Distinct().ToListAsync(ct);
@@ -51,6 +53,7 @@ public sealed class AsignacionAgendasService(
 
     public async Task<IReadOnlyList<DoctorConAgendaDto>> ListarDoctoresConAgendaAsync(string moduloCodigo, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var modulo = (moduloCodigo ?? "").Trim();
         if (modulo.Length == 0) { return Array.Empty<DoctorConAgendaDto>(); }
 
@@ -92,6 +95,7 @@ public sealed class AsignacionAgendasService(
     public async Task<DisponibilidadAgendaDto> ObtenerDisponibilidadAsync(
         Guid profesionalId, Guid sucursalId, int anioInicio, int mesInicio, int meses = 2, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (meses < 1) { meses = 1; }
         var primerDia = new DateOnly(anioInicio, mesInicio, 1);
         var ultimoDia = primerDia.AddMonths(meses).AddDays(-1);
@@ -178,6 +182,7 @@ public sealed class AsignacionAgendasService(
 
     public async Task<IReadOnlyList<ServicioContratoAgendaDto>> ListarServiciosContratoConAgendaAsync(Guid contratoId, string? filtro, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (contratoId == Guid.Empty) { return Array.Empty<ServicioContratoAgendaDto>(); }
 
         var profIdsConAgenda = await db.AgendaProfesionalTurnos.AsNoTracking()
@@ -218,6 +223,7 @@ public sealed class AsignacionAgendasService(
 
     public async Task<IReadOnlyList<DoctorConAgendaDto>> ListarDoctoresPorServicioContratoAsync(Guid servicioContratoId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var sc = await db.ServiciosContrato.AsNoTracking().FirstOrDefaultAsync(s => s.Id == servicioContratoId, ct);
         if (sc?.CodigoServicio is not string cups || cups.Length == 0) { return Array.Empty<DoctorConAgendaDto>(); }
 
@@ -253,6 +259,7 @@ public sealed class AsignacionAgendasService(
     public async Task<IReadOnlyList<DoctorDisponibilidadDto>> ListarDoctoresConDisponibilidadAsync(
         Guid servicioContratoId, Guid sucursalId, int anioInicio, int mesInicio, int meses = 2, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (meses < 1) { meses = 1; }
         var doctores = await ListarDoctoresPorServicioContratoAsync(servicioContratoId, ct);
         if (doctores.Count == 0) { return Array.Empty<DoctorDisponibilidadDto>(); }
@@ -319,6 +326,7 @@ public sealed class AsignacionAgendasService(
 
     public async Task<IReadOnlyList<TimeOnly>> SlotsDisponiblesAsync(Guid profesionalId, DateOnly fecha, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var turnos = await db.AgendaProfesionalTurnos.AsNoTracking()
             .Where(t => t.ProfesionalId == profesionalId && t.DiaSemana == fecha.DayOfWeek)
             .OrderBy(t => t.HoraInicio).ToListAsync(ct);
@@ -347,6 +355,7 @@ public sealed class AsignacionAgendasService(
 
     public async Task<Guid> AgendarAsync(AgendarDesdeAgendaRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (string.IsNullOrWhiteSpace(req.ContratoCodigo)) { throw new InvalidOperationException("Selecciona el contrato del paciente."); }
         if (string.IsNullOrWhiteSpace(req.ServicioContratoId)) { throw new InvalidOperationException("Selecciona el servicio del contrato."); }
         if (string.IsNullOrWhiteSpace(req.ViaIngresoCodigo)) { throw new InvalidOperationException("Selecciona la via de ingreso RIPS."); }
@@ -404,6 +413,7 @@ public sealed class AsignacionAgendasService(
 
     public async Task<IReadOnlyList<CitaDelDiaDto>> ListarCitasDelDiaAsync(Guid profesionalId, DateOnly fecha, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var turnos = await db.AsignacionTurnos.AsNoTracking()
             .Where(t => t.ProfesionalId == profesionalId && t.FechaInicio == fecha)
             .ToListAsync(ct);
@@ -433,6 +443,7 @@ public sealed class AsignacionAgendasService(
 
     public async Task<bool> CancelarCitaAsync(Guid asignacionTurnoId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var turno = await db.AsignacionTurnos.FirstOrDefaultAsync(t => t.Id == asignacionTurnoId, ct);
         if (turno is null) { return false; }
 

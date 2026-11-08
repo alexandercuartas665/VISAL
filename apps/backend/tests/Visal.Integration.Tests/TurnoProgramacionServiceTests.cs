@@ -265,9 +265,17 @@ public sealed class TurnoProgramacionServiceTests : IAsyncLifetime
 
     private TurnoProgramacionService CreateService(Guid? tenantId)
     {
-        var ctx = CreateContext(tenantId);
+        var factory = new TurnoFactory(this, tenantId);
         var tenantCtx = new FixedTenantContext(tenantId);
-        return new TurnoProgramacionService(ctx, tenantCtx);
+        return new TurnoProgramacionService(factory, tenantCtx);
+    }
+
+    // Factory inline (modelo AuditShortContext): un VisalDbContext NUEVO por Create() sobre
+    // las MISMAS opciones y tenant del test -> contexto corto por operacion sobre el mismo Postgres.
+    private sealed class TurnoFactory(TurnoProgramacionServiceTests owner, Guid? tenantId)
+        : IApplicationDbContextFactory
+    {
+        public IApplicationDbContext Create() => owner.CreateContext(tenantId);
     }
 
     private VisalDbContext CreateContext(Guid? tenantId)

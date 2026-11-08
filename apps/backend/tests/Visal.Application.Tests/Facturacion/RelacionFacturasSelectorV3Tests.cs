@@ -110,7 +110,7 @@ public sealed class RelacionFacturasSelectorV3Tests
         var pid = await SembrarPacienteAsync(s, s.ContratoId, s.SucursalId);
         await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 7, 15, 10, 0, 0, TimeSpan.Zero));
 
-        var sel = new RelacionFacturasSelector(s.Ctx);
+        var sel = new RelacionFacturasSelector(new TestDbContextFactory(s.Ctx, new FakeTenantContext { TenantId = TenantId }));
         var hechos = await sel.SelectAsync(Filtros(s, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31)));
 
         Assert.Single(hechos);
@@ -133,7 +133,7 @@ public sealed class RelacionFacturasSelectorV3Tests
         await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 7, 15, 10, 0, 0, TimeSpan.Zero));
         await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 8, 1, 10, 0, 0, TimeSpan.Zero));
 
-        var sel = new RelacionFacturasSelector(s.Ctx);
+        var sel = new RelacionFacturasSelector(new TestDbContextFactory(s.Ctx, new FakeTenantContext { TenantId = TenantId }));
         var hechos = await sel.SelectAsync(Filtros(s, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31)));
 
         Assert.Single(hechos);
@@ -155,7 +155,7 @@ public sealed class RelacionFacturasSelectorV3Tests
         var pid = await SembrarPacienteAsync(s, contratoB.Id, s.SucursalId, doc: "99");
         await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 7, 15, 10, 0, 0, TimeSpan.Zero));
 
-        var sel = new RelacionFacturasSelector(s.Ctx);
+        var sel = new RelacionFacturasSelector(new TestDbContextFactory(s.Ctx, new FakeTenantContext { TenantId = TenantId }));
         var hechos = await sel.SelectAsync(Filtros(s, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31)));
 
         Assert.Empty(hechos);
@@ -175,7 +175,7 @@ public sealed class RelacionFacturasSelectorV3Tests
         await SembrarHcCerradaAsync(s, pidS1, new DateTimeOffset(2026, 7, 15, 10, 0, 0, TimeSpan.Zero));
         await SembrarHcCerradaAsync(s, pidS2, new DateTimeOffset(2026, 7, 16, 10, 0, 0, TimeSpan.Zero));
 
-        var sel = new RelacionFacturasSelector(s.Ctx);
+        var sel = new RelacionFacturasSelector(new TestDbContextFactory(s.Ctx, new FakeTenantContext { TenantId = TenantId }));
         // Solo sede 1 -> devuelve 1 hecho (el de S1).
         var hechos = await sel.SelectAsync(Filtros(s, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31), new[] { s.SucursalId }));
 
@@ -191,7 +191,7 @@ public sealed class RelacionFacturasSelectorV3Tests
         var hcId = await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 7, 15, 10, 0, 0, TimeSpan.Zero));
         // NO creo RevisionClinica -> la HC no esta aprobada.
 
-        var sel = new RelacionFacturasSelector(s.Ctx);
+        var sel = new RelacionFacturasSelector(new TestDbContextFactory(s.Ctx, new FakeTenantContext { TenantId = TenantId }));
         var hechos = await sel.SelectAsync(Filtros(s, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31)));
 
         // Sede exige revision y no hay -> hecho excluido.

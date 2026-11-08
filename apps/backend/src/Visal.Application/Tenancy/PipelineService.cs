@@ -9,13 +9,16 @@ namespace Visal.Application.Tenancy;
 
 public sealed class PipelineService : IPipelineService
 {
-    private readonly IApplicationDbContext _db;
+    // Ola 4c estabilizacion (P0): contexto CORTO por operacion (using var db = _dbFactory.Create();)
+    // en vez del IApplicationDbContext scoped. El tablero/pipeline renderiza y se recarga en vivo
+    // (SignalR recolorea tarjetas), donde se solapaban consultas -> "second operation".
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenantContext;
     private readonly IAuditWriter _audit;
 
-    public PipelineService(IApplicationDbContext db, ITenantContext tenantContext, IAuditWriter audit)
+    public PipelineService(IApplicationDbContextFactory dbFactory, ITenantContext tenantContext, IAuditWriter audit)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenantContext = tenantContext;
         _audit = audit;
     }
@@ -71,7 +74,8 @@ public sealed class PipelineService : IPipelineService
         {
             return;
         }
-        if (await _db.PipelineStages.AnyAsync(cancellationToken))
+        using var db = _dbFactory.Create();
+        if (await db.PipelineStages.AnyAsync(cancellationToken))
         {
             return;
         }
@@ -80,12 +84,12 @@ public sealed class PipelineService : IPipelineService
         foreach (var (stageName, fields) in Defaults)
         {
             var stage = new PipelineStage { TenantId = tenantId, Name = stageName, SortOrder = order++ };
-            _db.PipelineStages.Add(stage);
+            db.PipelineStages.Add(stage);
 
             var fieldOrder = 0;
             foreach (var (key, label, type, col, options) in fields)
             {
-                _db.PipelineFieldDefinitions.Add(new PipelineFieldDefinition
+                db.PipelineFieldDefinitions.Add(new PipelineFieldDefinition
                 {
                     TenantId = tenantId,
                     StageId = stage.Id,
@@ -99,15 +103,18 @@ public sealed class PipelineService : IPipelineService
             }
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<IReadOnlyList<PipelineStageDto>> ListStagesAsync(CancellationToken cancellationToken = default) =>
-        await _db.PipelineStages
+    public async Task<IReadOnlyList<PipelineStageDto>> ListStagesAsync(CancellationToken cancellationToken = default)
+    {
+        using var db = _dbFactory.Create();
+        return await db.PipelineStages
             .AsNoTracking()
             .OrderBy(s => s.SortOrder)
             .Select(s => new PipelineStageDto(s.Id, s.Name, s.SortOrder, s.IsClosedWon, s.IsClosedLost))
             .ToListAsync(cancellationToken);
+    }
 
     public async Task<PipelineStageDto?> CreateStageAsync(CreatePipelineStageRequest request, Guid actorUserId, CancellationToken cancellationToken = default)
     {
@@ -116,7 +123,8 @@ public sealed class PipelineService : IPipelineService
             return null;
         }
 
-        var maxOrder = await _db.PipelineStages.Select(s => (int?)s.SortOrder).MaxAsync(cancellationToken) ?? -1;
+        using var db = _dbFactory.Create();
+        var maxOrder = await db.PipelineStages.Select(s => (int?)s.SortOrder).MaxAsync(cancellationToken) ?? -1;
         var stage = new PipelineStage
         {
             TenantId = tenantId,
@@ -125,16 +133,17 @@ public sealed class PipelineService : IPipelineService
             IsClosedWon = request.IsClosedWon,
             IsClosedLost = request.IsClosedLost
         };
-        _db.PipelineStages.Add(stage);
-        _audit.Write(actorUserId, "pipeline-stage.create", nameof(PipelineStage), stage.Id,
+        db.PipelineStages.Add(stage);
+        _audit.Write(db, actorUserId, "pipeline-stage.create", nameof(PipelineStage), stage.Id,
             previousValue: null, newValue: new { stage.Name, stage.SortOrder }, tenantId: tenantId);
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return new PipelineStageDto(stage.Id, stage.Name, stage.SortOrder, stage.IsClosedWon, stage.IsClosedLost);
     }
 
     public async Task<PipelineStageDto?> UpdateStageAsync(Guid stageId, UpdatePipelineStageRequest request, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var stage = await _db.PipelineStages.FirstOrDefaultAsync(s => s.Id == stageId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var stage = await db.PipelineStages.FirstOrDefaultAsync(s => s.Id == stageId, cancellationToken);
         if (stage is null)
         {
             return null;
@@ -142,15 +151,16 @@ public sealed class PipelineService : IPipelineService
         stage.Name = request.Name.Trim();
         stage.IsClosedWon = request.IsClosedWon;
         stage.IsClosedLost = request.IsClosedLost;
-        _audit.Write(actorUserId, "pipeline-stage.update", nameof(PipelineStage), stage.Id,
+        _audit.Write(db, actorUserId, "pipeline-stage.update", nameof(PipelineStage), stage.Id,
             previousValue: null, newValue: new { stage.Name, stage.IsClosedWon, stage.IsClosedLost }, tenantId: stage.TenantId);
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return new PipelineStageDto(stage.Id, stage.Name, stage.SortOrder, stage.IsClosedWon, stage.IsClosedLost);
     }
 
     public async Task ReorderStagesAsync(ReorderStagesRequest request, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var stages = await _db.PipelineStages.ToListAsync(cancellationToken);
+        using var db = _dbFactory.Create();
+        var stages = await db.PipelineStages.ToListAsync(cancellationToken);
         var order = 0;
         foreach (var id in request.OrderedStageIds)
         {
@@ -160,33 +170,37 @@ public sealed class PipelineService : IPipelineService
                 stage.SortOrder = order++;
             }
         }
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<bool> DeleteStageAsync(Guid stageId, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var stage = await _db.PipelineStages.FirstOrDefaultAsync(s => s.Id == stageId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var stage = await db.PipelineStages.FirstOrDefaultAsync(s => s.Id == stageId, cancellationToken);
         if (stage is null)
         {
             return false;
         }
-        if (await _db.Leads.AnyAsync(l => l.StageId == stageId, cancellationToken))
+        if (await db.Leads.AnyAsync(l => l.StageId == stageId, cancellationToken))
         {
             return false; // no se puede borrar una etapa con leads
         }
-        _db.PipelineStages.Remove(stage); // los campos caen por cascade
-        _audit.Write(actorUserId, "pipeline-stage.delete", nameof(PipelineStage), stage.Id,
+        db.PipelineStages.Remove(stage); // los campos caen por cascade
+        _audit.Write(db, actorUserId, "pipeline-stage.delete", nameof(PipelineStage), stage.Id,
             previousValue: new { stage.Name }, newValue: null, tenantId: stage.TenantId);
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return true;
     }
 
-    public async Task<IReadOnlyList<PipelineFieldDto>> ListFieldsAsync(CancellationToken cancellationToken = default) =>
-        await _db.PipelineFieldDefinitions
+    public async Task<IReadOnlyList<PipelineFieldDto>> ListFieldsAsync(CancellationToken cancellationToken = default)
+    {
+        using var db = _dbFactory.Create();
+        return await db.PipelineFieldDefinitions
             .AsNoTracking()
             .OrderBy(f => f.SortOrder)
             .Select(f => new PipelineFieldDto(f.Id, f.StageId, f.FieldKey, f.Label, f.FieldType, f.Column, f.SortOrder, f.Options, f.Description, f.AllowMultiple, f.RepeatWithFieldKey, f.MultiWithDetail, f.TotalSourceKeys))
             .ToListAsync(cancellationToken);
+    }
 
     public async Task<PipelineFieldDto?> CreateFieldAsync(CreatePipelineFieldRequest request, Guid actorUserId, CancellationToken cancellationToken = default)
     {
@@ -194,7 +208,8 @@ public sealed class PipelineService : IPipelineService
         {
             return null;
         }
-        if (!await _db.PipelineStages.AnyAsync(s => s.Id == request.StageId, cancellationToken))
+        using var db = _dbFactory.Create();
+        if (!await db.PipelineStages.AnyAsync(s => s.Id == request.StageId, cancellationToken))
         {
             return null;
         }
@@ -206,10 +221,10 @@ public sealed class PipelineService : IPipelineService
         {
             return null;
         }
-        var existingKeys = await _db.PipelineFieldDefinitions.Where(f => f.StageId == request.StageId).Select(f => f.FieldKey).ToListAsync(cancellationToken);
+        var existingKeys = await db.PipelineFieldDefinitions.Where(f => f.StageId == request.StageId).Select(f => f.FieldKey).ToListAsync(cancellationToken);
         key = EnsureUniqueKey(key, existingKeys);
 
-        var maxOrder = await _db.PipelineFieldDefinitions.Where(f => f.StageId == request.StageId).Select(f => (int?)f.SortOrder).MaxAsync(cancellationToken) ?? -1;
+        var maxOrder = await db.PipelineFieldDefinitions.Where(f => f.StageId == request.StageId).Select(f => (int?)f.SortOrder).MaxAsync(cancellationToken) ?? -1;
         var field = new PipelineFieldDefinition
         {
             TenantId = tenantId,
@@ -226,16 +241,17 @@ public sealed class PipelineService : IPipelineService
             MultiWithDetail = request.AllowMultiple && request.MultiWithDetail,
             TotalSourceKeys = request.FieldType == PipelineFieldType.Total && !string.IsNullOrWhiteSpace(request.TotalSourceKeys) ? request.TotalSourceKeys.Trim() : null
         };
-        _db.PipelineFieldDefinitions.Add(field);
-        _audit.Write(actorUserId, "pipeline-field.create", nameof(PipelineFieldDefinition), field.Id,
+        db.PipelineFieldDefinitions.Add(field);
+        _audit.Write(db, actorUserId, "pipeline-field.create", nameof(PipelineFieldDefinition), field.Id,
             previousValue: null, newValue: new { field.StageId, field.FieldKey, field.Label }, tenantId: tenantId);
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return new PipelineFieldDto(field.Id, field.StageId, field.FieldKey, field.Label, field.FieldType, field.Column, field.SortOrder, field.Options, field.Description, field.AllowMultiple, field.RepeatWithFieldKey, field.MultiWithDetail, field.TotalSourceKeys);
     }
 
     public async Task<PipelineFieldDto?> UpdateFieldAsync(Guid fieldId, UpdatePipelineFieldRequest request, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var field = await _db.PipelineFieldDefinitions.FirstOrDefaultAsync(f => f.Id == fieldId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var field = await db.PipelineFieldDefinitions.FirstOrDefaultAsync(f => f.Id == fieldId, cancellationToken);
         if (field is null)
         {
             return null;
@@ -249,27 +265,28 @@ public sealed class PipelineService : IPipelineService
         field.RepeatWithFieldKey = string.IsNullOrWhiteSpace(request.RepeatWithFieldKey) ? null : request.RepeatWithFieldKey.Trim();
         field.MultiWithDetail = request.AllowMultiple && request.MultiWithDetail;
         field.TotalSourceKeys = request.FieldType == PipelineFieldType.Total && !string.IsNullOrWhiteSpace(request.TotalSourceKeys) ? request.TotalSourceKeys.Trim() : null;
-        _audit.Write(actorUserId, "pipeline-field.update", nameof(PipelineFieldDefinition), field.Id,
+        _audit.Write(db, actorUserId, "pipeline-field.update", nameof(PipelineFieldDefinition), field.Id,
             previousValue: null, newValue: new { field.Label, field.FieldType }, tenantId: field.TenantId);
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return new PipelineFieldDto(field.Id, field.StageId, field.FieldKey, field.Label, field.FieldType, field.Column, field.SortOrder, field.Options, field.Description, field.AllowMultiple, field.RepeatWithFieldKey, field.MultiWithDetail, field.TotalSourceKeys);
     }
 
     public async Task<PipelineFieldDto?> MoveFieldToStageAsync(Guid fieldId, Guid targetStageId, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var field = await _db.PipelineFieldDefinitions.FirstOrDefaultAsync(f => f.Id == fieldId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var field = await db.PipelineFieldDefinitions.FirstOrDefaultAsync(f => f.Id == fieldId, cancellationToken);
         if (field is null) { return null; }
         if (field.StageId == targetStageId) { return Map(field); }
         // La etapa destino debe existir (y por filtro de tenant, pertenecer a la agencia).
-        if (!await _db.PipelineStages.AnyAsync(s => s.Id == targetStageId, cancellationToken)) { return null; }
+        if (!await db.PipelineStages.AnyAsync(s => s.Id == targetStageId, cancellationToken)) { return null; }
 
-        var maxOrder = await _db.PipelineFieldDefinitions.Where(f => f.StageId == targetStageId)
+        var maxOrder = await db.PipelineFieldDefinitions.Where(f => f.StageId == targetStageId)
             .Select(f => (int?)f.SortOrder).MaxAsync(cancellationToken) ?? -1;
         field.StageId = targetStageId;
         field.SortOrder = maxOrder + 1;
-        _audit.Write(actorUserId, "pipeline-field.move-stage", nameof(PipelineFieldDefinition), field.Id,
+        _audit.Write(db, actorUserId, "pipeline-field.move-stage", nameof(PipelineFieldDefinition), field.Id,
             previousValue: null, newValue: new { field.FieldKey, TargetStageId = targetStageId }, tenantId: field.TenantId);
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return Map(field);
     }
 
@@ -278,27 +295,29 @@ public sealed class PipelineService : IPipelineService
 
     public async Task ReorderFieldsAsync(ReorderFieldsRequest request, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var fields = await _db.PipelineFieldDefinitions.ToListAsync(cancellationToken);
+        using var db = _dbFactory.Create();
+        var fields = await db.PipelineFieldDefinitions.ToListAsync(cancellationToken);
         var order = 0;
         foreach (var id in request.OrderedFieldIds)
         {
             var field = fields.FirstOrDefault(f => f.Id == id);
             if (field is not null) { field.SortOrder = order++; }
         }
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     public async Task<bool> DeleteFieldAsync(Guid fieldId, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var field = await _db.PipelineFieldDefinitions.FirstOrDefaultAsync(f => f.Id == fieldId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var field = await db.PipelineFieldDefinitions.FirstOrDefaultAsync(f => f.Id == fieldId, cancellationToken);
         if (field is null)
         {
             return false;
         }
-        _db.PipelineFieldDefinitions.Remove(field);
-        _audit.Write(actorUserId, "pipeline-field.delete", nameof(PipelineFieldDefinition), field.Id,
+        db.PipelineFieldDefinitions.Remove(field);
+        _audit.Write(db, actorUserId, "pipeline-field.delete", nameof(PipelineFieldDefinition), field.Id,
             previousValue: new { field.FieldKey, field.Label }, newValue: null, tenantId: field.TenantId);
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return true;
     }
 

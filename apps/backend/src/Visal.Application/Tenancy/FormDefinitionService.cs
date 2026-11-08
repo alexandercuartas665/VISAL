@@ -7,22 +7,24 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class FormDefinitionService : IFormDefinitionService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenantContext;
     private readonly IAuditWriter _audit;
 
-    public FormDefinitionService(IApplicationDbContext db, ITenantContext tenantContext, IAuditWriter audit)
+    public FormDefinitionService(IApplicationDbContextFactory dbFactory, ITenantContext tenantContext, IAuditWriter audit)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenantContext = tenantContext;
         _audit = audit;
     }
 
     public async Task<IReadOnlyList<FormDefinitionDto>> ListAsync(CancellationToken cancellationToken = default)
     {
-        return await _db.FormDefinitions
+        using var db = _dbFactory.Create();
+        return await db.FormDefinitions
             .AsNoTracking()
             .OrderBy(f => f.Nombre)
             .Select(f => new FormDefinitionDto(f.Id, f.Codigo, f.Nombre, f.Version, f.Tipo, f.Activo, f.UpdatedAt, f.CodigoSecundario))
@@ -31,7 +33,8 @@ public sealed class FormDefinitionService : IFormDefinitionService
 
     public async Task<FormDefinitionDetailDto?> GetAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        return await _db.FormDefinitions
+        using var db = _dbFactory.Create();
+        return await db.FormDefinitions
             .AsNoTracking()
             .Where(f => f.Id == id)
             .Select(f => new FormDefinitionDetailDto(f.Id, f.Codigo, f.Nombre, f.Version, f.Tipo, f.Activo, f.SchemaJson, f.PrefillRoutesJson, f.CodigoSecundario, f.FormatoEvolucionCodigo, f.MesesPuente))
@@ -42,7 +45,8 @@ public sealed class FormDefinitionService : IFormDefinitionService
     {
         if (string.IsNullOrWhiteSpace(tipo)) { return null; }
         var t = tipo.Trim();
-        return await _db.FormDefinitions
+        using var db = _dbFactory.Create();
+        return await db.FormDefinitions
             .AsNoTracking()
             .Where(f => f.Activo && f.Tipo == t)
             .OrderByDescending(f => f.UpdatedAt ?? f.CreatedAt)
@@ -54,7 +58,8 @@ public sealed class FormDefinitionService : IFormDefinitionService
     {
         if (string.IsNullOrWhiteSpace(codigoSecundario)) { return null; }
         var c = codigoSecundario.Trim();
-        return await _db.FormDefinitions
+        using var db = _dbFactory.Create();
+        return await db.FormDefinitions
             .AsNoTracking()
             .Where(f => f.Activo && f.CodigoSecundario == c)
             .OrderByDescending(f => f.UpdatedAt ?? f.CreatedAt)
@@ -71,18 +76,19 @@ public sealed class FormDefinitionService : IFormDefinitionService
             throw new InvalidOperationException("El codigo y el nombre del formulario son obligatorios.");
         }
 
+        using var db = _dbFactory.Create();
         FormDefinition entity;
 
         if (request.Id is Guid id)
         {
             // El filtro global garantiza que solo se edita un formulario del tenant activo.
-            var existing = await _db.FormDefinitions.FirstOrDefaultAsync(f => f.Id == id, cancellationToken);
+            var existing = await db.FormDefinitions.FirstOrDefaultAsync(f => f.Id == id, cancellationToken);
             if (existing is null)
             {
                 return null;
             }
 
-            var clash = await _db.FormDefinitions.AnyAsync(f => f.Codigo == codigo && f.Id != id, cancellationToken);
+            var clash = await db.FormDefinitions.AnyAsync(f => f.Codigo == codigo && f.Id != id, cancellationToken);
             if (clash)
             {
                 throw new InvalidOperationException($"Ya existe otro formulario con el codigo '{codigo}'.");
@@ -100,7 +106,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
             existing.MesesPuente = request.MesesPuente is int mp && mp > 0 ? mp : null;
             entity = existing;
 
-            _audit.Write(actorUserId, "form-definition.update", nameof(FormDefinition), entity.Id,
+            _audit.Write(db, actorUserId, "form-definition.update", nameof(FormDefinition), entity.Id,
                 previousValue: null, newValue: new { entity.Codigo, entity.Nombre }, tenantId: entity.TenantId);
         }
         else
@@ -110,7 +116,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
                 return null;
             }
 
-            var clash = await _db.FormDefinitions.AnyAsync(f => f.Codigo == codigo, cancellationToken);
+            var clash = await db.FormDefinitions.AnyAsync(f => f.Codigo == codigo, cancellationToken);
             if (clash)
             {
                 throw new InvalidOperationException($"Ya existe un formulario con el codigo '{codigo}'.");
@@ -130,24 +136,25 @@ public sealed class FormDefinitionService : IFormDefinitionService
                 FormatoEvolucionCodigo = string.IsNullOrWhiteSpace(request.FormatoEvolucionCodigo) ? null : request.FormatoEvolucionCodigo.Trim(),
                 MesesPuente = request.MesesPuente is int mp && mp > 0 ? mp : null
             };
-            _db.FormDefinitions.Add(entity);
+            db.FormDefinitions.Add(entity);
 
-            _audit.Write(actorUserId, "form-definition.create", nameof(FormDefinition), entity.Id,
+            _audit.Write(db, actorUserId, "form-definition.create", nameof(FormDefinition), entity.Id,
                 previousValue: null, newValue: new { entity.Codigo, entity.Nombre }, tenantId: tenantId);
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return new FormDefinitionDetailDto(entity.Id, entity.Codigo, entity.Nombre, entity.Version, entity.Tipo, entity.Activo, entity.SchemaJson, entity.PrefillRoutesJson, entity.CodigoSecundario, entity.FormatoEvolucionCodigo, entity.MesesPuente);
     }
 
     public async Task<bool> UpdatePrefillRoutesAsync(Guid id, string? prefillRoutesJson, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var existing = await _db.FormDefinitions.FirstOrDefaultAsync(f => f.Id == id, cancellationToken);
+        using var db = _dbFactory.Create();
+        var existing = await db.FormDefinitions.FirstOrDefaultAsync(f => f.Id == id, cancellationToken);
         if (existing is null) { return false; }
         existing.PrefillRoutesJson = string.IsNullOrWhiteSpace(prefillRoutesJson) ? null : prefillRoutesJson;
-        _audit.Write(actorUserId, "form-definition.update-prefill-routes", nameof(FormDefinition), existing.Id,
+        _audit.Write(db, actorUserId, "form-definition.update-prefill-routes", nameof(FormDefinition), existing.Id,
             previousValue: null, newValue: new { existing.Codigo }, tenantId: existing.TenantId);
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return true;
     }
 
@@ -158,9 +165,10 @@ public sealed class FormDefinitionService : IFormDefinitionService
             throw new InvalidOperationException("Sin tenant activo.");
         }
 
+        using var db = _dbFactory.Create();
         // Cargamos solo los formularios del tenant activo. Si en el futuro queremos
         // filtrar (ej: solo Activo o solo Tipo=historia), se hace aqui.
-        var forms = await _db.FormDefinitions
+        var forms = await db.FormDefinitions
             .Where(f => f.TenantId == tid)
             .ToListAsync(cancellationToken);
 
@@ -169,7 +177,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
         foreach (var f in forms)
         {
             revisados++;
-            var res = ProcesarAutoEnlazarPacienteForm(f, tid, actorUserId);
+            var res = ProcesarAutoEnlazarPacienteForm(db, f, tid, actorUserId);
             if (res.MapeosAgregados == 0) { sinCambios++; continue; }
             actualizados++;
             mapeosAgregados += res.MapeosAgregados;
@@ -177,7 +185,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
 
         if (actualizados > 0)
         {
-            await _db.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
         }
 
         return new AutoEnlazarPacienteResultDto(revisados, actualizados, mapeosAgregados, sinCambios);
@@ -191,15 +199,16 @@ public sealed class FormDefinitionService : IFormDefinitionService
             throw new InvalidOperationException("Sin tenant activo.");
         }
 
-        var f = await _db.FormDefinitions
+        using var db = _dbFactory.Create();
+        var f = await db.FormDefinitions
             .Where(x => x.TenantId == tid && x.Id == formDefinitionId)
             .FirstOrDefaultAsync(cancellationToken);
         if (f is null) { return null; }
 
-        var res = ProcesarAutoEnlazarPacienteForm(f, tid, actorUserId);
+        var res = ProcesarAutoEnlazarPacienteForm(db, f, tid, actorUserId);
         if (res.MapeosAgregados > 0)
         {
-            await _db.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
             return new AutoEnlazarPacienteResultDto(1, 1, res.MapeosAgregados, 0);
         }
         return new AutoEnlazarPacienteResultDto(1, 0, 0, 1);
@@ -209,7 +218,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
     /// PrefillRoutesJson en memoria. NO llama a SaveChangesAsync — el caller decide
     /// cuando persistir. Devuelve cuantos mapeos se agregaron.</summary>
     private (int MapeosAgregados, int TargetsPreexistentes) ProcesarAutoEnlazarPacienteForm(
-        FormDefinition f, Guid tid, Guid actorUserId)
+        IApplicationDbContext db, FormDefinition f, Guid tid, Guid actorUserId)
     {
         {
             // Names presentes en el schema (recursivo por secciones).
@@ -360,7 +369,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
             var nuevoJson = new JsonObject { ["routes"] = routes }.ToJsonString();
             f.PrefillRoutesJson = nuevoJson;
 
-            _audit.Write(actorUserId, "form-definition.auto-enlazar-paciente", nameof(FormDefinition), f.Id,
+            _audit.Write(db, actorUserId, "form-definition.auto-enlazar-paciente", nameof(FormDefinition), f.Id,
                 previousValue: null, newValue: new { f.Codigo, agregados = agregadosEnEsteForm }, tenantId: tid);
 
             return (agregadosEnEsteForm, targetsExistentes.Count);
@@ -936,16 +945,17 @@ public sealed class FormDefinitionService : IFormDefinitionService
 
     public async Task<bool> DeleteAsync(Guid id, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var existing = await _db.FormDefinitions.FirstOrDefaultAsync(f => f.Id == id, cancellationToken);
+        using var db = _dbFactory.Create();
+        var existing = await db.FormDefinitions.FirstOrDefaultAsync(f => f.Id == id, cancellationToken);
         if (existing is null)
         {
             return false;
         }
 
-        _db.FormDefinitions.Remove(existing);
-        _audit.Write(actorUserId, "form-definition.delete", nameof(FormDefinition), existing.Id,
+        db.FormDefinitions.Remove(existing);
+        _audit.Write(db, actorUserId, "form-definition.delete", nameof(FormDefinition), existing.Id,
             previousValue: new { existing.Codigo, existing.Nombre }, newValue: null, tenantId: existing.TenantId);
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return true;
     }
 
@@ -964,7 +974,8 @@ public sealed class FormDefinitionService : IFormDefinitionService
 
     public async Task<byte[]?> ExportarJsonAsync(Guid id, bool incluirRutasPrefill = true, CancellationToken cancellationToken = default)
     {
-        var e = await _db.FormDefinitions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        using var db = _dbFactory.Create();
+        var e = await db.FormDefinitions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
         if (e is null) { return null; }
 
         // Deserializamos schema y prefill a JsonNode para que se re-serialicen
@@ -1005,7 +1016,8 @@ public sealed class FormDefinitionService : IFormDefinitionService
 
     public async Task<string?> GetExportFileNameAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var codigo = await _db.FormDefinitions.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var codigo = await db.FormDefinitions.AsNoTracking()
             .Where(x => x.Id == id)
             .Select(x => x.Codigo)
             .FirstOrDefaultAsync(cancellationToken);
@@ -1061,9 +1073,10 @@ public sealed class FormDefinitionService : IFormDefinitionService
         var traeRutasPrefill = root.ContainsKey("prefillRoutes");
         var prefillRoutesJson = traeRutasPrefill ? NodeToJsonString(root["prefillRoutes"]) : null;
 
+        using var db = _dbFactory.Create();
         // Sufijo para evitar colision cuando no se pide sobrescribir.
         var codigoFinal = codigo;
-        var existente = await _db.FormDefinitions
+        var existente = await db.FormDefinitions
             .FirstOrDefaultAsync(x => x.Codigo == codigo, cancellationToken);
         if (existente is not null)
         {
@@ -1081,9 +1094,10 @@ public sealed class FormDefinitionService : IFormDefinitionService
                 }
                 // Si no trae la clave, NO tocamos existente.PrefillRoutesJson
                 // — preservamos la configuracion del tenant destino.
-                await _db.SaveChangesAsync(cancellationToken);
-                _audit.Write(actorUserId, "form-definition.import.overwrite", nameof(FormDefinition), existente.Id,
+                await db.SaveChangesAsync(cancellationToken);
+                _audit.Write(db, actorUserId, "form-definition.import.overwrite", nameof(FormDefinition), existente.Id,
                     previousValue: new { codigo = existente.Codigo }, newValue: new { codigo, tipo }, tenantId: tenantId);
+                await db.SaveChangesAsync(cancellationToken);
                 return await GetAsync(existente.Id, cancellationToken);
             }
             // Encuentra un codigo libre agregando -import, -import-2, etc.
@@ -1092,7 +1106,7 @@ public sealed class FormDefinitionService : IFormDefinitionService
             {
                 codigoFinal = i == 1 ? $"{codigo}-import" : $"{codigo}-import-{i}";
                 i++;
-            } while (await _db.FormDefinitions.AnyAsync(x => x.Codigo == codigoFinal, cancellationToken));
+            } while (await db.FormDefinitions.AnyAsync(x => x.Codigo == codigoFinal, cancellationToken));
         }
 
         var nuevo = new FormDefinition
@@ -1107,12 +1121,13 @@ public sealed class FormDefinitionService : IFormDefinitionService
             SchemaJson = schemaJson,
             PrefillRoutesJson = prefillRoutesJson
         };
-        _db.FormDefinitions.Add(nuevo);
-        await _db.SaveChangesAsync(cancellationToken);
-        _audit.Write(actorUserId, "form-definition.import.new", nameof(FormDefinition), nuevo.Id,
+        db.FormDefinitions.Add(nuevo);
+        await db.SaveChangesAsync(cancellationToken);
+        _audit.Write(db, actorUserId, "form-definition.import.new", nameof(FormDefinition), nuevo.Id,
             previousValue: null,
             newValue: new { codigo = codigoFinal, codigoOriginal = codigo, tipo, colision = existente is not null && !sobrescribir },
             tenantId: tenantId);
+        await db.SaveChangesAsync(cancellationToken);
         return await GetAsync(nuevo.Id, cancellationToken);
     }
 
@@ -1122,7 +1137,8 @@ public sealed class FormDefinitionService : IFormDefinitionService
 
     public async Task<IReadOnlyList<FormDefinitionLiteDto>> ListLiteAsync(CancellationToken cancellationToken = default)
     {
-        return await _db.FormDefinitions.AsNoTracking()
+        using var db = _dbFactory.Create();
+        return await db.FormDefinitions.AsNoTracking()
             .OrderBy(f => f.Codigo)
             .Select(f => new FormDefinitionLiteDto(f.Id, f.Codigo, f.Nombre, f.Tipo))
             .ToListAsync(cancellationToken);
@@ -1130,7 +1146,8 @@ public sealed class FormDefinitionService : IFormDefinitionService
 
     public async Task<IReadOnlyList<SeccionResumenDto>> ListSeccionesAsync(Guid formDefinitionId, CancellationToken cancellationToken = default)
     {
-        var f = await _db.FormDefinitions.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var f = await db.FormDefinitions.AsNoTracking()
             .Where(x => x.Id == formDefinitionId)
             .Select(x => x.SchemaJson)
             .FirstOrDefaultAsync(cancellationToken);
@@ -1148,9 +1165,10 @@ public sealed class FormDefinitionService : IFormDefinitionService
     {
         if (seccionIds.Count == 0) { throw new InvalidOperationException("Debes seleccionar al menos una seccion para copiar."); }
 
-        var destino = await _db.FormDefinitions.FirstOrDefaultAsync(x => x.Id == destinoId, cancellationToken)
+        using var db = _dbFactory.Create();
+        var destino = await db.FormDefinitions.FirstOrDefaultAsync(x => x.Id == destinoId, cancellationToken)
             ?? throw new InvalidOperationException("Formulario destino no existe.");
-        var origen = await _db.FormDefinitions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == origenId, cancellationToken)
+        var origen = await db.FormDefinitions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == origenId, cancellationToken)
             ?? throw new InvalidOperationException("Formulario origen no existe.");
 
         var destinoSchema = FormSchema.FromJson(destino.SchemaJson);
@@ -1234,11 +1252,11 @@ public sealed class FormDefinitionService : IFormDefinitionService
 
         destino.SchemaJson = destinoSchema.ToJson();
         destino.PrefillRoutesJson = destinoRutas.Routes.Count == 0 ? null : destinoRutas.ToJson();
-        _audit.Write(actorUserId, "form-definition.copiar-secciones", nameof(FormDefinition), destino.Id,
+        _audit.Write(db, actorUserId, "form-definition.copiar-secciones", nameof(FormDefinition), destino.Id,
             previousValue: new { destino = destino.Codigo, origen = origen.Codigo },
             newValue: new { seccionesCopiadas = seccionesEncontradas.Count, camposCopiados, rutasCopiadas, rutasOmitidas },
             tenantId: destino.TenantId);
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
 
         return new CopiarSeccionesResultDto(
             seccionesEncontradas.Count, camposCopiados, rutasCopiadas, rutasOmitidas, duplicados);

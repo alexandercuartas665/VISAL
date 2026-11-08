@@ -7,7 +7,9 @@ namespace Visal.Application.Tenancy.Alertas;
 
 public sealed class AlertaInformeAutoResponder : IAlertaInformeAutoResponder
 {
-    private readonly IApplicationDbContext _db;
+    // Ola 4c estabilizacion (P0): contexto CORTO por operacion (using var db = _dbFactory.Create();)
+    // en vez del IApplicationDbContext scoped.
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly IChatService _chat;
     private readonly IInformeTerapiasService _informe;
     private readonly ILogger<AlertaInformeAutoResponder> _log;
@@ -18,10 +20,10 @@ public sealed class AlertaInformeAutoResponder : IAlertaInformeAutoResponder
     private static readonly TimeSpan Dedupe = TimeSpan.FromSeconds(30);
 
     public AlertaInformeAutoResponder(
-        IApplicationDbContext db, IChatService chat,
+        IApplicationDbContextFactory dbFactory, IChatService chat,
         IInformeTerapiasService informe, ILogger<AlertaInformeAutoResponder> log)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _chat = chat;
         _informe = informe;
         _log = log;
@@ -31,6 +33,8 @@ public sealed class AlertaInformeAutoResponder : IAlertaInformeAutoResponder
     {
         var digits = Normalizar(contactPhone);
         if (digits is null) { return 0; }
+
+        using var db = _dbFactory.Create();
 
         var ahora = DateTimeOffset.UtcNow;
         var corte = ahora - Ventana;
@@ -42,7 +46,7 @@ public sealed class AlertaInformeAutoResponder : IAlertaInformeAutoResponder
         // no haya quedado en el outbox (test / telefono de prueba).
         if (exigirAlertaPrevia)
         {
-            var esDestinatarioAlerta = await _db.AlertaEnvios.AsNoTracking().IgnoreQueryFilters()
+            var esDestinatarioAlerta = await db.AlertaEnvios.AsNoTracking().IgnoreQueryFilters()
                 .AnyAsync(e => e.TenantId == tenantId
                                && e.Canal == AlertaCanal.WhatsApp
                                && e.Exito
@@ -52,12 +56,12 @@ public sealed class AlertaInformeAutoResponder : IAlertaInformeAutoResponder
         }
 
         // Dedupe: si ya mandamos un enlace de informe a este telefono hace <30s, no repetir.
-        var conv = await _db.Conversations.IgnoreQueryFilters()
+        var conv = await db.Conversations.IgnoreQueryFilters()
             .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.ContactPhone == digits, ct);
         if (conv is not null)
         {
             var corteDedupe = ahora - Dedupe;
-            var yaEnviado = await _db.Messages.AsNoTracking()
+            var yaEnviado = await db.Messages.AsNoTracking()
                 .Where(m => m.ConversationId == conv.Id
                             && m.Direction == MessageDirection.Outbound
                             && m.SentAt >= corteDedupe
@@ -70,7 +74,7 @@ public sealed class AlertaInformeAutoResponder : IAlertaInformeAutoResponder
         {
             var chatConv = await _chat.GetOrCreateByPhoneAsync(digits, null, ct);
             if (chatConv is null) { return 0; }
-            conv = await _db.Conversations.IgnoreQueryFilters()
+            conv = await db.Conversations.IgnoreQueryFilters()
                 .FirstOrDefaultAsync(c => c.Id == chatConv.Id, ct);
             if (conv is null) { return 0; }
         }
@@ -80,7 +84,7 @@ public sealed class AlertaInformeAutoResponder : IAlertaInformeAutoResponder
         // todos. Se resuelve por coincidencia de los ultimos 10 digitos del celular
         // (el Celular en ficha puede venir con o sin indicativo/espacios). Si no hay
         // match (ej. el numero no es de un profesional), el enlace queda tenant-wide.
-        var profesionalId = await ResolverProfesionalPorTelefonoAsync(tenantId, digits, ct);
+        var profesionalId = await ResolverProfesionalPorTelefonoAsync(db, tenantId, digits, ct);
 
         string url;
         try { url = _informe.GenerarEnlace(baseUri, tenantId, profesionalId); }
@@ -107,12 +111,12 @@ public sealed class AlertaInformeAutoResponder : IAlertaInformeAutoResponder
     ///    incluso con el telefono de prueba del simulador). 2) Fallback: el profesional
     ///    cuyo celular coincide (ultimos 10 digitos). Null si nada coincide (informe
     ///    tenant-wide).</summary>
-    private async Task<Guid?> ResolverProfesionalPorTelefonoAsync(Guid tenantId, string digits, CancellationToken ct)
+    private static async Task<Guid?> ResolverProfesionalPorTelefonoAsync(IApplicationDbContext db, Guid tenantId, string digits, CancellationToken ct)
     {
         var corte = DateTimeOffset.UtcNow - Ventana;
 
         // 1) Desde el AlertaEnvio mas reciente a este numero -> su asignacion -> profesional del turno.
-        var asigId = await _db.AlertaEnvios.AsNoTracking().IgnoreQueryFilters()
+        var asigId = await db.AlertaEnvios.AsNoTracking().IgnoreQueryFilters()
             .Where(e => e.TenantId == tenantId && e.Canal == AlertaCanal.WhatsApp && e.Exito
                         && e.Contacto == digits && e.FechaEnvio >= corte)
             .OrderByDescending(e => e.FechaEnvio)
@@ -120,7 +124,7 @@ public sealed class AlertaInformeAutoResponder : IAlertaInformeAutoResponder
             .FirstOrDefaultAsync(ct);
         if (asigId is Guid aid)
         {
-            var profId = await _db.AsignacionTurnos.AsNoTracking().IgnoreQueryFilters()
+            var profId = await db.AsignacionTurnos.AsNoTracking().IgnoreQueryFilters()
                 .Where(t => t.TenantId == tenantId && t.AsignacionId == aid && t.ProfesionalId != Guid.Empty)
                 .Select(t => (Guid?)t.ProfesionalId)
                 .FirstOrDefaultAsync(ct);
@@ -130,7 +134,7 @@ public sealed class AlertaInformeAutoResponder : IAlertaInformeAutoResponder
         // 2) Fallback: por celular (ultimos 10 digitos, tolera indicativo/formato).
         var local = digits.Length >= 10 ? digits[^10..] : digits;
         if (local.Length < 7) { return null; }
-        var profs = await _db.Profesionales.AsNoTracking().IgnoreQueryFilters()
+        var profs = await db.Profesionales.AsNoTracking().IgnoreQueryFilters()
             .Where(p => p.TenantId == tenantId && p.Celular != null && p.Celular != "")
             .Select(p => new { p.Id, p.Celular })
             .ToListAsync(ct);

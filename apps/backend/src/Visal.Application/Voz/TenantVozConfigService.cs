@@ -4,22 +4,24 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Voz;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = _dbFactory.Create();) en vez del IApplicationDbContext scoped.
 public sealed class TenantVozConfigService : ITenantVozConfigService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenant;
     private readonly ISecretProtector _protector;
 
-    public TenantVozConfigService(IApplicationDbContext db, ITenantContext tenant, ISecretProtector protector)
+    public TenantVozConfigService(IApplicationDbContextFactory dbFactory, ITenantContext tenant, ISecretProtector protector)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenant = tenant;
         _protector = protector;
     }
 
     public async Task<VozConfigDto> GetAsync(CancellationToken ct = default)
     {
-        var cfg = await _db.TenantRetellConfigs.AsNoTracking().FirstOrDefaultAsync(ct);
+        using var db = _dbFactory.Create();
+        var cfg = await db.TenantRetellConfigs.AsNoTracking().FirstOrDefaultAsync(ct);
         if (cfg is null) { return new VozConfigDto(null, null, null, null, false, true); }
         return ToDto(cfg);
     }
@@ -28,11 +30,12 @@ public sealed class TenantVozConfigService : ITenantVozConfigService
     {
         if (_tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
 
-        var cfg = await _db.TenantRetellConfigs.FirstOrDefaultAsync(ct);
+        using var db = _dbFactory.Create();
+        var cfg = await db.TenantRetellConfigs.FirstOrDefaultAsync(ct);
         if (cfg is null)
         {
             cfg = new TenantRetellConfig { TenantId = tid };
-            _db.TenantRetellConfigs.Add(cfg);
+            db.TenantRetellConfigs.Add(cfg);
         }
 
         cfg.AgentId = Trim(req.AgentId);
@@ -49,21 +52,22 @@ public sealed class TenantVozConfigService : ITenantVozConfigService
             cfg.WebhookToken = Guid.NewGuid().ToString("N");
         }
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return ToDto(cfg);
     }
 
     public async Task<string> RegenerarTokenAsync(Guid actor, CancellationToken ct = default)
     {
         if (_tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
-        var cfg = await _db.TenantRetellConfigs.FirstOrDefaultAsync(ct);
+        using var db = _dbFactory.Create();
+        var cfg = await db.TenantRetellConfigs.FirstOrDefaultAsync(ct);
         if (cfg is null)
         {
             cfg = new TenantRetellConfig { TenantId = tid };
-            _db.TenantRetellConfigs.Add(cfg);
+            db.TenantRetellConfigs.Add(cfg);
         }
         cfg.WebhookToken = Guid.NewGuid().ToString("N");
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return cfg.WebhookToken;
     }
 

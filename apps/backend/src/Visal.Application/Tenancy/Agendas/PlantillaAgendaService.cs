@@ -4,10 +4,12 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy.Agendas;
 
-public sealed class PlantillaAgendaService(IApplicationDbContext db, ITenantContext tenant) : IPlantillaAgendaService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class PlantillaAgendaService(IApplicationDbContextFactory dbFactory, ITenantContext tenant) : IPlantillaAgendaService
 {
     public async Task<IReadOnlyList<PlantillaAgendaDto>> ListarAsync(bool incluirInactivas = false, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var q = db.PlantillasAgenda.AsNoTracking();
         if (!incluirInactivas) { q = q.Where(p => p.Activa); }
         var rows = await q.OrderBy(p => p.Nombre).ToListAsync(ct);
@@ -17,6 +19,7 @@ public sealed class PlantillaAgendaService(IApplicationDbContext db, ITenantCont
 
     public async Task<PlantillaAgendaDto?> ObtenerAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var p = await db.PlantillasAgenda.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (p is null) { return null; }
         var turnos = await db.PlantillaAgendaTurnos.AsNoTracking()
@@ -28,6 +31,7 @@ public sealed class PlantillaAgendaService(IApplicationDbContext db, ITenantCont
 
     public async Task<PlantillaAgendaDto> GuardarAsync(GuardarPlantillaAgendaCmd cmd, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         var nombre = (cmd.Nombre ?? string.Empty).Trim();
         if (nombre.Length == 0) { throw new InvalidOperationException("El nombre es obligatorio."); }
@@ -68,6 +72,7 @@ public sealed class PlantillaAgendaService(IApplicationDbContext db, ITenantCont
 
     public async Task<bool> EliminarAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var entity = await db.PlantillasAgenda.FirstOrDefaultAsync(p => p.Id == id, ct);
         if (entity is null) { return false; }
         db.PlantillasAgenda.Remove(entity); // los turnos caen por cascade
@@ -77,6 +82,7 @@ public sealed class PlantillaAgendaService(IApplicationDbContext db, ITenantCont
 
     public async Task<PlantillaAgendaTurnoDto> GuardarTurnoAsync(Guid plantillaId, GuardarPlantillaAgendaTurnoCmd cmd, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         Validar(cmd);
 
@@ -113,6 +119,7 @@ public sealed class PlantillaAgendaService(IApplicationDbContext db, ITenantCont
 
     public async Task<bool> EliminarTurnoAsync(Guid turnoId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var turno = await db.PlantillaAgendaTurnos.FirstOrDefaultAsync(t => t.Id == turnoId, ct);
         if (turno is null) { return false; }
         db.PlantillaAgendaTurnos.Remove(turno);

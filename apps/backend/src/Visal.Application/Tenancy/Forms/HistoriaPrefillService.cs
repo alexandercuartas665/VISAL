@@ -11,10 +11,12 @@ namespace Visal.Application.Tenancy.Forms;
 /// CertificacionService, OrdenServicioService) inmediatamente despues del
 /// SaveChanges del item — mismo scope, misma transaccion EF Core.
 /// </summary>
-public sealed class HistoriaPrefillService(IApplicationDbContext db) : IHistoriaPrefillService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class HistoriaPrefillService(IApplicationDbContextFactory dbFactory) : IHistoriaPrefillService
 {
     public async Task ActualizarValoresAsync(Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var hc = await db.HistoriasClinicas
             .Where(h => h.Id == historiaId)
             .FirstOrDefaultAsync(ct);

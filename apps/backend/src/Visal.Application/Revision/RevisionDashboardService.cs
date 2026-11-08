@@ -18,9 +18,10 @@ namespace Visal.Application.Revision;
 /// abre desde el tab Kanban y no cambia por segundo — un minuto de latencia
 /// es aceptable para KPIs y quita 4 queries pesadas por render.
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class RevisionDashboardService : IRevisionDashboardService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenant;
     private readonly TimeProvider _clock;
     private readonly IMemoryCache _cache;
@@ -28,9 +29,9 @@ public sealed class RevisionDashboardService : IRevisionDashboardService
     private const string CacheKeyPrefix = "revision-dashboard:";
     private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(60);
 
-    public RevisionDashboardService(IApplicationDbContext db, ITenantContext tenant, TimeProvider clock, IMemoryCache cache)
+    public RevisionDashboardService(IApplicationDbContextFactory dbFactory, ITenantContext tenant, TimeProvider clock, IMemoryCache cache)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenant = tenant;
         _clock = clock;
         _cache = cache;
@@ -57,16 +58,17 @@ public sealed class RevisionDashboardService : IRevisionDashboardService
 
     private async Task<RevisionDashboardDto> BuildAsync(CancellationToken ct)
     {
-        var resumen = await CalcularResumenAsync(ct);
-        var topRechazos = await CalcularTopRechazosPorProfesionalAsync(ct);
-        var adopcion = await CalcularAdopcionAgenteAsync(ct);
-        var tiempos = await CalcularTiemposPorColumnaAsync(ct);
+        using var db = _dbFactory.Create();
+        var resumen = await CalcularResumenAsync(db, ct);
+        var topRechazos = await CalcularTopRechazosPorProfesionalAsync(db, ct);
+        var adopcion = await CalcularAdopcionAgenteAsync(db, ct);
+        var tiempos = await CalcularTiemposPorColumnaAsync(db, ct);
         return new RevisionDashboardDto(resumen, topRechazos, adopcion, tiempos);
     }
 
-    private async Task<RevisionDashboardResumenDto> CalcularResumenAsync(CancellationToken ct)
+    private async Task<RevisionDashboardResumenDto> CalcularResumenAsync(IApplicationDbContext db, CancellationToken ct)
     {
-        var porEstado = await _db.RevisionesClinica.AsNoTracking()
+        var porEstado = await db.RevisionesClinica.AsNoTracking()
             .GroupBy(r => r.EstadoAgregado)
             .Select(g => new { Estado = g.Key, N = g.Count() })
             .ToListAsync(ct);
@@ -105,19 +107,19 @@ public sealed class RevisionDashboardService : IRevisionDashboardService
             PorcentajeRechazoGlobal: Math.Round(pct, 1));
     }
 
-    private async Task<IReadOnlyList<RevisionRechazoPorProfesionalDto>> CalcularTopRechazosPorProfesionalAsync(CancellationToken ct)
+    private async Task<IReadOnlyList<RevisionRechazoPorProfesionalDto>> CalcularTopRechazosPorProfesionalAsync(IApplicationDbContext db, CancellationToken ct)
     {
         // JOIN eventos con HC (via revision) para saber quien es el profesional
         // (EspecialistaNombre denormalizado). Agrupa por especialista, cuenta
         // rechazos absolutos y calcula porcentaje sobre sus veredictos humanos.
-        var rows = await _db.RevisionClinicaEventos.AsNoTracking()
+        var rows = await db.RevisionClinicaEventos.AsNoTracking()
             .Where(e => e.ActorTipo == RevisionActorTipo.Humano
                      && (e.Resultado == RevisionResultado.Rechazado
                          || e.Resultado == RevisionResultado.Aprobado))
-            .Join(_db.RevisionesClinica.AsNoTracking(),
+            .Join(db.RevisionesClinica.AsNoTracking(),
                 e => e.RevisionClinicaId, r => r.Id,
                 (e, r) => new { e.Resultado, r.HistoriaClinicaId })
-            .Join(_db.HistoriasClinicas.AsNoTracking(),
+            .Join(db.HistoriasClinicas.AsNoTracking(),
                 x => x.HistoriaClinicaId, h => h.Id,
                 (x, h) => new { x.Resultado, h.EspecialistaNombre })
             .Where(x => x.EspecialistaNombre != null && x.EspecialistaNombre != "")
@@ -141,11 +143,11 @@ public sealed class RevisionDashboardService : IRevisionDashboardService
         .ToList();
     }
 
-    private async Task<RevisionAdopcionAgenteDto> CalcularAdopcionAgenteAsync(CancellationToken ct)
+    private async Task<RevisionAdopcionAgenteDto> CalcularAdopcionAgenteAsync(IApplicationDbContext db, CancellationToken ct)
     {
         // Aprobaciones totales (humano + sistema) vs aprobaciones automaticas
         // (ActorTipo = Sistema, marcado en Ola 6 RC6c por AprobarPorSistemaAsync).
-        var contadores = await _db.RevisionClinicaEventos.AsNoTracking()
+        var contadores = await db.RevisionClinicaEventos.AsNoTracking()
             .Where(e => e.Tipo == RevisionTipoEvento.Aprobado)
             .GroupBy(e => e.ActorTipo)
             .Select(g => new { Actor = g.Key, N = g.Count() })
@@ -161,14 +163,14 @@ public sealed class RevisionDashboardService : IRevisionDashboardService
             PorcentajeAdopcion: pct);
     }
 
-    private async Task<IReadOnlyList<RevisionTiempoEnColumnaDto>> CalcularTiemposPorColumnaAsync(CancellationToken ct)
+    private async Task<IReadOnlyList<RevisionTiempoEnColumnaDto>> CalcularTiemposPorColumnaAsync(IApplicationDbContext db, CancellationToken ct)
     {
         // Simplificacion pragmatica: para cada columna Kanban activa se calcula
         // el tiempo que las HCs llevan en su estado actual (UltimaAccionEn a ahora).
         // No es tan preciso como reconstruir el timeline de eventos, pero es una
         // buena aproximacion del "tiempo hasta la proxima accion humana".
         var now = _clock.GetUtcNow();
-        var rows = await _db.RevisionesClinica.AsNoTracking()
+        var rows = await db.RevisionesClinica.AsNoTracking()
             .Where(r => r.EstadoAgregado != RevisionEstadoAgregado.ArchivadaOk
                      && r.EstadoAgregado != RevisionEstadoAgregado.Inactivada)
             .Select(r => new { r.EstadoAgregado, r.UltimaAccionEn })

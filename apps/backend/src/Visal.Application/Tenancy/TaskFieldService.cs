@@ -11,8 +11,9 @@ namespace Visal.Application.Tenancy;
 /// Campos dinamicos de un tablero (portado del pipeline de CUBOT.travels) + valores por
 /// tarjeta. Reusa el gate de acceso de <see cref="ITaskBoardService"/> (owner o miembro).
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class TaskFieldService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     ITaskBoardService boards) : ITaskFieldService
 {
@@ -20,6 +21,7 @@ public sealed class TaskFieldService(
 
     public async Task<IReadOnlyList<TaskFieldDto>> ListFieldsAsync(Guid boardId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (!await boards.HasAccessAsync(boardId, actor, ct)) { return []; }
         return await db.TaskFieldDefinitions.AsNoTracking()
             .Where(f => f.BoardId == boardId)
@@ -30,6 +32,7 @@ public sealed class TaskFieldService(
 
     public async Task<TaskFieldDto?> CreateFieldAsync(CreateTaskFieldRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { return null; }
         if (!await boards.HasAccessAsync(req.BoardId, actor, ct)) { return null; }
         if (string.IsNullOrWhiteSpace(req.Label)) { return null; }
@@ -66,6 +69,7 @@ public sealed class TaskFieldService(
 
     public async Task<TaskFieldDto?> UpdateFieldAsync(Guid fieldId, UpdateTaskFieldRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var f = await db.TaskFieldDefinitions.FirstOrDefaultAsync(x => x.Id == fieldId, ct);
         if (f is null) { return null; }
         if (!await boards.HasAccessAsync(f.BoardId, actor, ct)) { return null; }
@@ -87,6 +91,7 @@ public sealed class TaskFieldService(
 
     public async Task<bool> DeleteFieldAsync(Guid fieldId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var f = await db.TaskFieldDefinitions.FirstOrDefaultAsync(x => x.Id == fieldId, ct);
         if (f is null) { return false; }
         if (!await boards.HasAccessAsync(f.BoardId, actor, ct)) { return false; }
@@ -97,6 +102,7 @@ public sealed class TaskFieldService(
 
     public async Task<bool> ReorderFieldsAsync(Guid boardId, IReadOnlyList<Guid> orderedFieldIds, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (!await boards.HasAccessAsync(boardId, actor, ct)) { return false; }
         var fields = await db.TaskFieldDefinitions.Where(f => f.BoardId == boardId).ToListAsync(ct);
         var pos = 0;
@@ -113,6 +119,7 @@ public sealed class TaskFieldService(
 
     public async Task<Dictionary<string, string?>> GetCardValuesAsync(Guid cardId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var card = await db.TaskCards.AsNoTracking()
             .Where(c => c.Id == cardId)
             .Select(c => new { c.BoardId, c.FieldValuesJson })
@@ -124,6 +131,7 @@ public sealed class TaskFieldService(
 
     public async Task<bool> SaveCardValuesAsync(Guid cardId, IReadOnlyDictionary<string, string?> values, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var card = await db.TaskCards.FirstOrDefaultAsync(c => c.Id == cardId, ct);
         if (card is null) { return false; }
         if (!await boards.HasAccessAsync(card.BoardId, actor, ct)) { return false; }

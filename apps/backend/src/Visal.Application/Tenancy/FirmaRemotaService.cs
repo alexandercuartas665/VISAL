@@ -8,12 +8,13 @@ using Microsoft.Extensions.Logging;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class FirmaRemotaService : IFirmaRemotaService
 {
     /// <summary>Duracion del link de firma. 2 horas (acordado con negocio).</summary>
     private static readonly TimeSpan _vigencia = TimeSpan.FromHours(2);
 
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenant;
     private readonly IChatService _chat;
     private readonly Common.IUploadStorage _storage;
@@ -23,12 +24,12 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
     private readonly ILogger<FirmaRemotaService> _log;
 
     public FirmaRemotaService(
-        IApplicationDbContext db, ITenantContext tenant, IChatService chat,
+        IApplicationDbContextFactory dbFactory, ITenantContext tenant, IChatService chat,
         Common.IUploadStorage storage, TimeProvider time,
         IWhatsAppTemplateBindingService bindings, IHsmTemplateService hsm,
         ILogger<FirmaRemotaService> log)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenant = tenant;
         _chat = chat;
         _storage = storage;
@@ -49,13 +50,14 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
 
     public async Task<FirmaRequestDto?> CrearOReutilizarAsync(Guid notaMedicaId, Guid pacienteId, string telefono, string? nombreContacto, Guid actorTenantUserId, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         if (_tenant.TenantId is not Guid tenantId) { return null; }
         var digits = Digits(telefono);
         if (digits.Length == 0) { return null; }
 
         // Si ya hay una pendiente sin expirar para esta nota, la devolvemos.
         var ahora = _time.GetUtcNow();
-        var existente = await _db.FirmaPacienteRequests
+        var existente = await db.FirmaPacienteRequests
             .FirstOrDefaultAsync(r => r.NotaMedicaId == notaMedicaId
                                       && r.Status == FirmaRequestStatus.Pendiente
                                       && r.ExpiresAt > ahora, ct);
@@ -77,14 +79,15 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
             ExpiresAt = ahora + _vigencia,
             Status = FirmaRequestStatus.Pendiente
         };
-        _db.FirmaPacienteRequests.Add(req);
-        await _db.SaveChangesAsync(ct);
+        db.FirmaPacienteRequests.Add(req);
+        await db.SaveChangesAsync(ct);
         return Map(req);
     }
 
     public async Task<ChatSendResult> EnviarPorWhatsAppAsync(Guid solicitudId, Guid lineaId, string urlAbsoluta, Guid actorTenantUserId, CancellationToken ct = default)
     {
-        var req = await _db.FirmaPacienteRequests.FirstOrDefaultAsync(r => r.Id == solicitudId, ct);
+        using var db = _dbFactory.Create();
+        var req = await db.FirmaPacienteRequests.FirstOrDefaultAsync(r => r.Id == solicitudId, ct);
         if (req is null)
         {
             _log.LogWarning("FirmaWA envio solicitud={SolicitudId} linea={LineaId} — solicitud no encontrada", solicitudId, lineaId);
@@ -96,7 +99,7 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
             return new ChatSendResult(false, null, "La solicitud ya no esta pendiente.");
         }
 
-        var linea = await _db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineaId, ct);
+        var linea = await db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineaId, ct);
         if (linea is null)
         {
             _log.LogWarning("FirmaWA envio solicitud={SolicitudId} linea={LineaId} — linea no encontrada", solicitudId, lineaId);
@@ -121,7 +124,7 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         // directo al texto de sesion con el link.
         if (linea.Provider == WhatsAppProvider.Gupshup)
         {
-            var ventanaAbierta = await SesionAbiertaAsync(req.Telefono, ct);
+            var ventanaAbierta = await SesionAbiertaAsync(db, req.Telefono, ct);
             var binding = ventanaAbierta ? null : await _bindings.GetAsync(WhatsAppTemplateRole.SolicitudFirma, ct);
             // LogDebug: flujo feliz. En operacion normal no queremos ruido; si
             // se necesita diagnosticar se sube el nivel a Debug via env var
@@ -138,7 +141,7 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
                 // Si la plantilla exige mas placeholders, pasa cadenas vacias — Meta
                 // rechazara y la UI mostrara el mensaje. El operador reasigna.
                 var recipient = string.IsNullOrWhiteSpace(req.NombreContacto) ? "paciente" : req.NombreContacto!;
-                var profesional = await ResolverNombreProfesionalAsync(actorTenantUserId, ct);
+                var profesional = await ResolverNombreProfesionalAsync(db, actorTenantUserId, ct);
                 var parms = BuildTemplateParams(binding.ParameterCount, recipient, profesional);
                 var digits = new string(req.Telefono.Where(char.IsDigit).ToArray());
                 var hsmRes = await _hsm.SendTestAsync(binding.LineId, binding.TemplateId, digits, parms, actorTenantUserId, ct: ct);
@@ -212,12 +215,12 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
     /// (no 24) como margen para no chocar con el corte exacto de Meta si el
     /// servidor y Meta desfasan por segundos. Retorna false si no hay conversacion
     /// o si el ultimo Inbound es mas viejo.</summary>
-    private async Task<bool> SesionAbiertaAsync(string telefono, CancellationToken ct)
+    private async Task<bool> SesionAbiertaAsync(IApplicationDbContext db, string telefono, CancellationToken ct)
     {
         var digits = new string((telefono ?? "").Where(char.IsDigit).ToArray());
         if (digits.Length == 0) { return false; }
         var corte = _time.GetUtcNow() - TimeSpan.FromHours(23);
-        return await _db.Messages.AsNoTracking()
+        return await db.Messages.AsNoTracking()
             .Where(m => m.Conversation != null
                         && m.Conversation.ContactPhone == digits
                         && m.Direction == Visal.Domain.Enums.MessageDirection.Inbound
@@ -237,6 +240,7 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         string baseUri,
         CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         var digits = new string((telefonoDigits ?? "").Where(char.IsDigit).ToArray());
         if (digits.Length == 0)
         {
@@ -245,7 +249,7 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         }
 
         var ahora = _time.GetUtcNow();
-        var pendientes = await _db.FirmaPacienteRequests
+        var pendientes = await db.FirmaPacienteRequests
             .IgnoreQueryFilters()
             .Where(r => r.TenantId == tenantId
                         && r.Telefono == digits
@@ -266,12 +270,12 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         // Idempotencia: si acabamos de enviar el link a este telefono hace <30s
         // (por retry del webhook o doble click del cliente), no re-enviamos.
         var corteDedupe = ahora - _autoResponseDedupeWindow;
-        var conv = await _db.Conversations
+        var conv = await db.Conversations
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.ContactPhone == digits, ct);
         if (conv is not null)
         {
-            var recienteOutbound = await _db.Messages.AsNoTracking()
+            var recienteOutbound = await db.Messages.AsNoTracking()
                 .Where(m => m.ConversationId == conv.Id
                             && m.Direction == MessageDirection.Outbound
                             && m.SentAt >= corteDedupe
@@ -296,7 +300,7 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
                 _log.LogWarning("AutoResponderConLink telefono={Telefono} — no se pudo obtener conversacion", MaskPhone(digits));
                 return 0;
             }
-            conv = await _db.Conversations
+            conv = await db.Conversations
                 .IgnoreQueryFilters()
                 .FirstOrDefaultAsync(c => c.Id == chatConv.Id, ct);
             if (conv is null) { return 0; }
@@ -332,10 +336,10 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
     /// <summary>Nombre a mostrar del profesional que solicita la firma. Preferencia:
     /// nombres del Profesional vinculado > DisplayName del PlatformUser > fallback
     /// generico. Cae al fallback si no hay TenantUser (webhook, cron, etc).</summary>
-    private async Task<string> ResolverNombreProfesionalAsync(Guid actorTenantUserId, CancellationToken ct)
+    private async Task<string> ResolverNombreProfesionalAsync(IApplicationDbContext db, Guid actorTenantUserId, CancellationToken ct)
     {
         if (actorTenantUserId == Guid.Empty) { return "su equipo medico"; }
-        var user = await _db.TenantUsers.AsNoTracking()
+        var user = await db.TenantUsers.AsNoTracking()
             .Include(u => u.Profesional)
             .Include(u => u.PlatformUser)
             .FirstOrDefaultAsync(u => u.Id == actorTenantUserId, ct);
@@ -363,24 +367,26 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
 
     public async Task<bool> CancelarAsync(Guid solicitudId, Guid actorTenantUserId, CancellationToken ct = default)
     {
-        var req = await _db.FirmaPacienteRequests.FirstOrDefaultAsync(r => r.Id == solicitudId, ct);
+        using var db = _dbFactory.Create();
+        var req = await db.FirmaPacienteRequests.FirstOrDefaultAsync(r => r.Id == solicitudId, ct);
         if (req is null || req.Status != FirmaRequestStatus.Pendiente) { return false; }
         req.Status = FirmaRequestStatus.Cancelada;
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 
     public async Task<FirmaRequestStateDto?> ObtenerEstadoAsync(Guid solicitudId, CancellationToken ct = default)
     {
-        var req = await _db.FirmaPacienteRequests.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var req = await db.FirmaPacienteRequests.AsNoTracking()
             .FirstOrDefaultAsync(r => r.Id == solicitudId, ct);
         if (req is null) { return null; }
         // Si esta pendiente pero ya expiro, marcamos antes de devolver (tracking).
         if (req.Status == FirmaRequestStatus.Pendiente && req.ExpiresAt < _time.GetUtcNow())
         {
-            var tracked = await _db.FirmaPacienteRequests.FirstAsync(r => r.Id == solicitudId, ct);
+            var tracked = await db.FirmaPacienteRequests.FirstAsync(r => r.Id == solicitudId, ct);
             tracked.Status = FirmaRequestStatus.Expirada;
-            await _db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct);
             req = tracked;
         }
         return new FirmaRequestStateDto(req.Id, req.Status, req.CompletedAt, req.ImageDataUrl);
@@ -388,8 +394,9 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
 
     public async Task<FirmaRequestDto?> ObtenerActivaPorNotaAsync(Guid notaMedicaId, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         var ahora = _time.GetUtcNow();
-        var req = await _db.FirmaPacienteRequests.AsNoTracking()
+        var req = await db.FirmaPacienteRequests.AsNoTracking()
             .Where(r => r.NotaMedicaId == notaMedicaId
                         && (r.Status == FirmaRequestStatus.Pendiente || r.Status == FirmaRequestStatus.Completada))
             .OrderByDescending(r => r.CreatedAt)
@@ -399,13 +406,14 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
 
     public async Task<FirmaRequestDto?> CrearLibreParaPacienteAsync(Guid pacienteId, string telefono, string? nombreContacto, Guid actorTenantUserId, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         if (_tenant.TenantId is not Guid tenantId) { return null; }
         var digits = Digits(telefono);
         if (digits.Length == 0) { return null; }
 
         // Reutiliza la solicitud "libre" (NotaMedicaId == null) si todavia esta vigente.
         var ahora = _time.GetUtcNow();
-        var existente = await _db.FirmaPacienteRequests
+        var existente = await db.FirmaPacienteRequests
             .FirstOrDefaultAsync(r => r.PacienteId == pacienteId
                                       && r.NotaMedicaId == null
                                       && r.Status == FirmaRequestStatus.Pendiente
@@ -425,14 +433,15 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
             ExpiresAt = ahora + _vigencia,
             Status = FirmaRequestStatus.Pendiente
         };
-        _db.FirmaPacienteRequests.Add(req);
-        await _db.SaveChangesAsync(ct);
+        db.FirmaPacienteRequests.Add(req);
+        await db.SaveChangesAsync(ct);
         return Map(req);
     }
 
     public async Task<FirmaRequestDto?> ObtenerActivaLibrePorPacienteAsync(Guid pacienteId, CancellationToken ct = default)
     {
-        var req = await _db.FirmaPacienteRequests.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var req = await db.FirmaPacienteRequests.AsNoTracking()
             .Where(r => r.PacienteId == pacienteId
                         && r.NotaMedicaId == null
                         && r.ContactoEmergenciaId == null
@@ -444,10 +453,11 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
 
     public async Task<IReadOnlyList<FirmaRequestDto>> ListarActivasLibresPorPacienteAsync(Guid pacienteId, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         // Traemos la MAS RECIENTE por destinatario (paciente o cada pariente).
         // Asi el modal muestra estado unico por tarjeta aunque el doctor haya
         // pedido firma multiples veces al mismo destinatario.
-        var todas = await _db.FirmaPacienteRequests.AsNoTracking()
+        var todas = await db.FirmaPacienteRequests.AsNoTracking()
             .Where(r => r.PacienteId == pacienteId
                         && r.NotaMedicaId == null
                         && (r.Status == FirmaRequestStatus.Pendiente || r.Status == FirmaRequestStatus.Completada))
@@ -461,12 +471,13 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
 
     public async Task<FirmaRequestPublicDto?> ObtenerPorTokenPublicoAsync(string token, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         if (string.IsNullOrWhiteSpace(token)) { return null; }
 
         // Token es globalmente unico. IgnoreQueryFilters porque la pagina /firma/{token}
         // se sirve anonimamente (sin claim tenant_id). El tenant lo obtenemos del propio
         // registro de la solicitud, no del usuario.
-        var req = await _db.FirmaPacienteRequests
+        var req = await db.FirmaPacienteRequests
             .IgnoreQueryFilters()
             .Where(r => r.Token == token)
             .Select(r => new
@@ -481,12 +492,12 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         // Si esta pendiente pero ya expiro, marcamos antes de devolver.
         if (req.Status == FirmaRequestStatus.Pendiente && req.ExpiresAt < _time.GetUtcNow())
         {
-            var tracked = await _db.FirmaPacienteRequests.IgnoreQueryFilters().FirstAsync(r => r.Id == req.Id, ct);
+            var tracked = await db.FirmaPacienteRequests.IgnoreQueryFilters().FirstAsync(r => r.Id == req.Id, ct);
             tracked.Status = FirmaRequestStatus.Expirada;
-            await _db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct);
         }
 
-        var paciente = await _db.Pacientes.IgnoreQueryFilters()
+        var paciente = await db.Pacientes.IgnoreQueryFilters()
             .Where(p => p.Id == req.PacienteId)
             .Select(p => p.NombreCompleto)
             .FirstOrDefaultAsync(ct);
@@ -494,13 +505,13 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         string? profesional = null;
         if (req.SolicitadaPorTenantUserId is Guid uid)
         {
-            profesional = await _db.TenantUsers.IgnoreQueryFilters()
+            profesional = await db.TenantUsers.IgnoreQueryFilters()
                 .Where(u => u.Id == uid)
                 .Select(u => u.PlatformUser != null ? u.PlatformUser.DisplayName : null)
                 .FirstOrDefaultAsync(ct);
         }
 
-        var tenantInfo = await _db.Tenants.IgnoreQueryFilters()
+        var tenantInfo = await db.Tenants.IgnoreQueryFilters()
             .Where(t => t.Id == req.TenantId)
             .Select(t => new { t.Name, t.LogoUrl })
             .FirstOrDefaultAsync(ct);
@@ -513,7 +524,7 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         string? rolSig = null;
         if (req.ContactoEmergenciaId is Guid cid)
         {
-            var contacto = await _db.PacienteContactosEmergencia.IgnoreQueryFilters()
+            var contacto = await db.PacienteContactosEmergencia.IgnoreQueryFilters()
                 .Where(c => c.Id == cid)
                 .Select(c => new { c.Nombre, c.Parentesco })
                 .FirstOrDefaultAsync(ct);
@@ -542,11 +553,12 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
 
     public async Task<bool> GuardarFirmaPorTokenAsync(string token, string imageDataUrl, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(imageDataUrl)) { return false; }
         // Validacion basica del formato data URL.
         if (!imageDataUrl.StartsWith("data:image/", StringComparison.OrdinalIgnoreCase)) { return false; }
 
-        var req = await _db.FirmaPacienteRequests
+        var req = await db.FirmaPacienteRequests
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(r => r.Token == token, ct);
         if (req is null) { return false; }
@@ -554,7 +566,7 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         if (req.ExpiresAt < _time.GetUtcNow())
         {
             req.Status = FirmaRequestStatus.Expirada;
-            await _db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct);
             return false;
         }
 
@@ -571,7 +583,7 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         var notaIdParaDoc = req.NotaMedicaId;
         if (req.NotaMedicaId is Guid notaId)
         {
-            var nota = await _db.NotasMedicas.IgnoreQueryFilters()
+            var nota = await db.NotasMedicas.IgnoreQueryFilters()
                 .FirstOrDefaultAsync(n => n.Id == notaId, ct);
             if (nota is not null)
             {
@@ -585,7 +597,7 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         // remota mas reciente sin depender de que el admin abra /admision.
         if (req.ContactoEmergenciaId is Guid contactoId)
         {
-            var contacto = await _db.PacienteContactosEmergencia.IgnoreQueryFilters()
+            var contacto = await db.PacienteContactosEmergencia.IgnoreQueryFilters()
                 .FirstOrDefaultAsync(c => c.Id == contactoId, ct);
             if (contacto is not null)
             {
@@ -609,7 +621,7 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
                 string categoria, nombreOriginal, anotaciones;
                 if (req.ContactoEmergenciaId is Guid cid2)
                 {
-                    var info = await _db.PacienteContactosEmergencia.IgnoreQueryFilters()
+                    var info = await db.PacienteContactosEmergencia.IgnoreQueryFilters()
                         .Where(c => c.Id == cid2)
                         .Select(c => new { c.Nombre, c.Parentesco })
                         .FirstOrDefaultAsync(ct);
@@ -625,7 +637,7 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
                     anotaciones = "Firma capturada remotamente por WhatsApp.";
                 }
 
-                _db.NotaMedicaDocumentos.Add(new NotaMedicaDocumento
+                db.NotaMedicaDocumentos.Add(new NotaMedicaDocumento
                 {
                     TenantId = req.TenantId,
                     NotaMedicaId = notaIdParaDoc, // nullable ahora — null cuando la firma no viene de una nota
@@ -641,7 +653,7 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         }
         catch { /* el doc externo es secundario: si falla, la firma del campo ya quedo */ }
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 
@@ -673,6 +685,7 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
         Guid actorTenantUserId,
         CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         if (_tenant.TenantId is not Guid tenantId) { return Array.Empty<FirmaRequestDto>(); }
         if (destinatarios is null || destinatarios.Count == 0) { return Array.Empty<FirmaRequestDto>(); }
 
@@ -687,7 +700,7 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
             // Reutilizamos solo si el destinatario coincide EXACTAMENTE (paciente o
             // mismo pariente). Asi cada firma queda desacoplada aunque haya varias
             // solicitudes libres en curso.
-            var existente = await _db.FirmaPacienteRequests
+            var existente = await db.FirmaPacienteRequests
                 .FirstOrDefaultAsync(r => r.PacienteId == pacienteId
                                           && r.NotaMedicaId == null
                                           && r.ContactoEmergenciaId == d.ContactoEmergenciaId
@@ -713,13 +726,13 @@ public sealed class FirmaRemotaService : IFirmaRemotaService
                 ExpiresAt = ahora + _vigencia,
                 Status = FirmaRequestStatus.Pendiente
             };
-            _db.FirmaPacienteRequests.Add(req);
+            db.FirmaPacienteRequests.Add(req);
             resultado.Add(Map(req));
         }
 
         if (resultado.Count > 0)
         {
-            await _db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct);
         }
         return resultado;
     }

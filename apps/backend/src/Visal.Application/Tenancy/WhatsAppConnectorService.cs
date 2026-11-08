@@ -7,9 +7,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = _dbFactory.Create();) en vez del IApplicationDbContext scoped.
 public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenantContext;
     private readonly ISecretProtector _secretProtector;
     private readonly IEvolutionApiClient _client;
@@ -18,7 +19,7 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
     private readonly TimeProvider _timeProvider;
 
     public WhatsAppConnectorService(
-        IApplicationDbContext db,
+        IApplicationDbContextFactory dbFactory,
         ITenantContext tenantContext,
         ISecretProtector secretProtector,
         IEvolutionApiClient client,
@@ -26,7 +27,7 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
         IAuditWriter audit,
         TimeProvider timeProvider)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenantContext = tenantContext;
         _secretProtector = secretProtector;
         _client = client;
@@ -37,8 +38,9 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
 
     public async Task<EvolutionServerSettingDto> GetServerAsync(CancellationToken cancellationToken = default)
     {
-        var cfg = await _db.TenantEvolutionConfigs.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
-        var master = await _db.EvolutionMasterConfigs.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        using var db = _dbFactory.Create();
+        var cfg = await db.TenantEvolutionConfigs.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
+        var master = await db.EvolutionMasterConfigs.AsNoTracking().FirstOrDefaultAsync(cancellationToken);
         var masterReady = master is not null && !string.IsNullOrWhiteSpace(master.BaseUrl) && !string.IsNullOrWhiteSpace(master.ApiKeyEncrypted);
 
         return new EvolutionServerSettingDto(
@@ -57,11 +59,12 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
             return null;
         }
 
-        var cfg = await _db.TenantEvolutionConfigs.FirstOrDefaultAsync(cancellationToken);
+        using var db = _dbFactory.Create();
+        var cfg = await db.TenantEvolutionConfigs.FirstOrDefaultAsync(cancellationToken);
         if (cfg is null)
         {
             cfg = new TenantEvolutionConfig { TenantId = tenantId };
-            _db.TenantEvolutionConfigs.Add(cfg);
+            db.TenantEvolutionConfigs.Add(cfg);
         }
 
         cfg.UseMasterServer = request.UseMasterServer;
@@ -75,21 +78,22 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
         }
         cfg.IsActive = true;
 
-        _audit.Write(actorUserId, "evolution.server.set", nameof(TenantEvolutionConfig), cfg.Id,
+        _audit.Write(db, actorUserId, "evolution.server.set", nameof(TenantEvolutionConfig), cfg.Id,
             previousValue: null, newValue: new { cfg.UseMasterServer, cfg.BaseUrl }, tenantId: tenantId);
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return await GetServerAsync(cancellationToken);
     }
 
     public async Task<LineConnectResult> ConnectLineAsync(Guid lineId, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var line = await _db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var line = await db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineId, cancellationToken);
         if (line is null)
         {
             return new LineConnectResult(false, null, "La linea no existe.");
         }
-        var server = await ResolveServerAsync(cancellationToken);
+        var server = await ResolveServerAsync(db, cancellationToken);
         if (server is null)
         {
             return new LineConnectResult(false, null, "No hay servidor Evolution configurado (ni maestro ni propio).");
@@ -101,18 +105,18 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
         {
             line.Status = WhatsAppLineStatus.Failed;
             line.LastStatusAt = _timeProvider.GetUtcNow();
-            await _db.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
             return new LineConnectResult(false, null, result.Error);
         }
 
         line.Status = WhatsAppLineStatus.Connecting;
         line.LastStatusAt = _timeProvider.GetUtcNow();
-        _audit.Write(actorUserId, "whatsapp-line.connect", nameof(WhatsAppLine), line.Id,
+        _audit.Write(db, actorUserId, "whatsapp-line.connect", nameof(WhatsAppLine), line.Id,
             previousValue: null, newValue: new { instance = EvoInstance(line) }, tenantId: line.TenantId);
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
 
         // Configura el webhook entrante para recibir mensajes en caliente (si esta configurado).
-        var (webhookUrl, webhookToken) = await EffectiveWebhookAsync(cancellationToken);
+        var (webhookUrl, webhookToken) = await EffectiveWebhookAsync(db, cancellationToken);
         if (webhookUrl is not null && webhookToken is not null)
         {
             await _client.SetWebhookAsync(baseUrl, apiKey, EvoInstance(line), webhookUrl, webhookToken, cancellationToken);
@@ -123,12 +127,13 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
 
     public async Task<WhatsAppLineDto?> RefreshAsync(Guid lineId, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var line = await _db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var line = await db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineId, cancellationToken);
         if (line is null)
         {
             return null;
         }
-        var server = await ResolveServerAsync(cancellationToken);
+        var server = await ResolveServerAsync(db, cancellationToken);
         if (server is null)
         {
             return Map(line);
@@ -151,7 +156,7 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
                 line.Status = mapped;
                 line.LastStatusAt = now;
                 if (mapped == WhatsAppLineStatus.Connected) { line.LastConnectedAt = now; }
-                await _db.SaveChangesAsync(cancellationToken);
+                await db.SaveChangesAsync(cancellationToken);
             }
         }
         return Map(line);
@@ -159,12 +164,13 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
 
     public async Task<bool> DisconnectAsync(Guid lineId, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var line = await _db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var line = await db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineId, cancellationToken);
         if (line is null)
         {
             return false;
         }
-        var server = await ResolveServerAsync(cancellationToken);
+        var server = await ResolveServerAsync(db, cancellationToken);
         if (server is not null)
         {
             var (baseUrl, apiKey) = server.Value;
@@ -173,22 +179,23 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
 
         line.Status = WhatsAppLineStatus.Disconnected;
         line.LastStatusAt = _timeProvider.GetUtcNow();
-        _audit.Write(actorUserId, "whatsapp-line.disconnect", nameof(WhatsAppLine), line.Id,
+        _audit.Write(db, actorUserId, "whatsapp-line.disconnect", nameof(WhatsAppLine), line.Id,
             previousValue: null, newValue: new { instance = EvoInstance(line) }, tenantId: line.TenantId);
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return true;
     }
 
     public async Task<bool> DeleteLineAsync(Guid lineId, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var line = await _db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var line = await db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineId, cancellationToken);
         if (line is null)
         {
             return false;
         }
 
         // Borra la instancia en Evolution (best-effort) antes de quitar la fila.
-        var server = await ResolveServerAsync(cancellationToken);
+        var server = await ResolveServerAsync(db, cancellationToken);
         if (server is not null)
         {
             var (baseUrl, apiKey) = server.Value;
@@ -196,11 +203,11 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
             catch { /* la instancia puede no existir */ }
         }
 
-        _audit.Write(actorUserId, "whatsapp-line.delete", nameof(WhatsAppLine), line.Id,
+        _audit.Write(db, actorUserId, "whatsapp-line.delete", nameof(WhatsAppLine), line.Id,
             previousValue: new { line.InstanceName, line.Status }, newValue: null, tenantId: line.TenantId);
 
-        _db.WhatsAppLines.Remove(line);
-        await _db.SaveChangesAsync(cancellationToken);
+        db.WhatsAppLines.Remove(line);
+        await db.SaveChangesAsync(cancellationToken);
         return true;
     }
 
@@ -210,10 +217,11 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
         {
             return new LineSendResult(false, "Indica el numero y el mensaje.");
         }
+        using var db = _dbFactory.Create();
         // IgnoreQueryFilters: SendTestAsync se llama tambien desde flujos sin
         // tenant scope (webhook auto-respuesta al Quick Reply). El caller ya
         // paso el lineId correcto — la linea siempre tiene un solo TenantId.
-        var line = await _db.WhatsAppLines
+        var line = await db.WhatsAppLines
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(l => l.Id == lineId, cancellationToken);
         if (line is null)
@@ -229,12 +237,13 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
         var provider = _providers.ForLine(line);
         var result = await provider.SendTextAsync(line, digits, text.Trim(), cancellationToken);
 
-        _audit.Write(actorUserId, "whatsapp-line.test-send", nameof(WhatsAppLine), line.Id,
+        _audit.Write(db, actorUserId, "whatsapp-line.test-send", nameof(WhatsAppLine), line.Id,
             previousValue: null, newValue: new { to = digits, ok = result.Ok, provider = provider.Kind.ToString() }, tenantId: line.TenantId);
+        await db.SaveChangesAsync(cancellationToken);
 
         if (!result.Ok)
         {
-            await MaybeMarkLineDisconnectedAsync(line, result.Error, cancellationToken);
+            await MaybeMarkLineDisconnectedAsync(db, line, result.Error, cancellationToken);
             return new LineSendResult(false, HumanizeEvolutionError(result.Error, line));
         }
         return new LineSendResult(true, null);
@@ -242,7 +251,8 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
 
     public async Task<LineSendResult> SendMediaAsync(Guid lineId, string phone, MessageMediaType mediaType, string base64, string? mimeType, string? fileName, string? caption, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var ready = await ReadyLineAsync(lineId, phone, cancellationToken);
+        using var db = _dbFactory.Create();
+        var ready = await ReadyLineAsync(db, lineId, phone, cancellationToken);
         if (ready.Error is not null) { return new LineSendResult(false, ready.Error); }
         var (line, digits) = ready.Value;
 
@@ -251,7 +261,7 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
         var result = await provider.SendMediaAsync(line, digits, mediaType, media, caption, cancellationToken);
         if (!result.Ok)
         {
-            await MaybeMarkLineDisconnectedAsync(line, result.Error, cancellationToken);
+            await MaybeMarkLineDisconnectedAsync(db, line, result.Error, cancellationToken);
             return new LineSendResult(false, HumanizeEvolutionError(result.Error, line));
         }
         return new LineSendResult(true, null);
@@ -259,14 +269,15 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
 
     public async Task<LineSendResult> SendLocationAsync(Guid lineId, string phone, double latitude, double longitude, string? name, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var ready = await ReadyLineAsync(lineId, phone, cancellationToken);
+        using var db = _dbFactory.Create();
+        var ready = await ReadyLineAsync(db, lineId, phone, cancellationToken);
         if (ready.Error is not null) { return new LineSendResult(false, ready.Error); }
         var (line, digits) = ready.Value;
         var provider = _providers.ForLine(line);
         var result = await provider.SendLocationAsync(line, digits, latitude, longitude, name, address: null, cancellationToken);
         if (!result.Ok)
         {
-            await MaybeMarkLineDisconnectedAsync(line, result.Error, cancellationToken);
+            await MaybeMarkLineDisconnectedAsync(db, line, result.Error, cancellationToken);
             return new LineSendResult(false, HumanizeEvolutionError(result.Error, line));
         }
         return new LineSendResult(true, null);
@@ -275,10 +286,10 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
     // Resuelve linea conectada + numero normalizado. Error no nulo si algo falta.
     // El resolver de servidor ya no vive aca: cada IWhatsAppProvider sabe como
     // levantar sus propias credenciales.
-    private async Task<(string Error, (WhatsAppLine line, string digits) Value)> ReadyLineAsync(Guid lineId, string phone, CancellationToken ct)
+    private async Task<(string Error, (WhatsAppLine line, string digits) Value)> ReadyLineAsync(IApplicationDbContext db, Guid lineId, string phone, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(phone)) { return ("Indica el numero.", default); }
-        var line = await _db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineId, ct);
+        var line = await db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineId, ct);
         if (line is null) { return ("La linea no existe.", default); }
         if (line.Status != WhatsAppLineStatus.Connected) { return (FormatLineNotConnected(line), default); }
         var digits = new string(phone.Where(char.IsDigit).ToArray());
@@ -319,14 +330,14 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
     // operativa: marcamos la linea como Disconnected para que los siguientes
     // envios fallen rapido con el mensaje claro arriba en vez de seguir
     // golpeando al servidor remoto.
-    private async Task MaybeMarkLineDisconnectedAsync(WhatsAppLine line, string? error, CancellationToken ct)
+    private async Task MaybeMarkLineDisconnectedAsync(IApplicationDbContext db, WhatsAppLine line, string? error, CancellationToken ct)
     {
         if (error is null) { return; }
         if (!error.Contains("Connection Closed", StringComparison.OrdinalIgnoreCase)) { return; }
         if (line.Status == WhatsAppLineStatus.Disconnected) { return; }
         line.Status = WhatsAppLineStatus.Disconnected;
         line.UpdatedAt = _timeProvider.GetUtcNow();
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
     }
 
     private static string FormatLineNotConnected(WhatsAppLine line)
@@ -339,13 +350,14 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
 
     public async Task<int> ApplyWebhookToConnectedLinesAsync(Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var (webhookUrl, webhookToken) = await EffectiveWebhookAsync(cancellationToken);
+        using var db = _dbFactory.Create();
+        var (webhookUrl, webhookToken) = await EffectiveWebhookAsync(db, cancellationToken);
         if (webhookUrl is null || webhookToken is null) { return 0; }
-        var server = await ResolveServerAsync(cancellationToken);
+        var server = await ResolveServerAsync(db, cancellationToken);
         if (server is null) { return 0; }
         var (baseUrl, apiKey) = server.Value;
 
-        var lines = await _db.WhatsAppLines.Where(l => l.Status == WhatsAppLineStatus.Connected).ToListAsync(cancellationToken);
+        var lines = await db.WhatsAppLines.Where(l => l.Status == WhatsAppLineStatus.Connected).ToListAsync(cancellationToken);
         var applied = 0;
         foreach (var line in lines)
         {
@@ -356,9 +368,9 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
     }
 
     // URL + token efectivos del webhook segun el modo configurado (dev usa la URL activa del tunel).
-    private async Task<(string? Url, string? Token)> EffectiveWebhookAsync(CancellationToken ct)
+    private async Task<(string? Url, string? Token)> EffectiveWebhookAsync(IApplicationDbContext db, CancellationToken ct)
     {
-        var master = await _db.EvolutionMasterConfigs.AsNoTracking().FirstOrDefaultAsync(ct);
+        var master = await db.EvolutionMasterConfigs.AsNoTracking().FirstOrDefaultAsync(ct);
         if (master is null || string.IsNullOrWhiteSpace(master.WebhookToken)) { return (null, null); }
         var baseUrl = string.Equals(master.WebhookMode, "Production", StringComparison.OrdinalIgnoreCase)
             ? master.WebhookPublicUrl
@@ -368,15 +380,15 @@ public sealed class WhatsAppConnectorService : IWhatsAppConnectorService
     }
 
     // Servidor efectivo (URL + API key descifrada) segun la eleccion del tenant.
-    private async Task<(string baseUrl, string apiKey)?> ResolveServerAsync(CancellationToken ct)
+    private async Task<(string baseUrl, string apiKey)?> ResolveServerAsync(IApplicationDbContext db, CancellationToken ct)
     {
-        var cfg = await _db.TenantEvolutionConfigs.AsNoTracking().FirstOrDefaultAsync(ct);
+        var cfg = await db.TenantEvolutionConfigs.AsNoTracking().FirstOrDefaultAsync(ct);
         if (cfg is not null && !cfg.UseMasterServer)
         {
             if (string.IsNullOrWhiteSpace(cfg.BaseUrl) || string.IsNullOrWhiteSpace(cfg.ApiTokenEncrypted)) { return null; }
             return (cfg.BaseUrl!, _secretProtector.Unprotect(cfg.ApiTokenEncrypted!));
         }
-        var master = await _db.EvolutionMasterConfigs.AsNoTracking().FirstOrDefaultAsync(ct);
+        var master = await db.EvolutionMasterConfigs.AsNoTracking().FirstOrDefaultAsync(ct);
         if (master is null || string.IsNullOrWhiteSpace(master.BaseUrl) || string.IsNullOrWhiteSpace(master.ApiKeyEncrypted)) { return null; }
         return (master.BaseUrl!, _secretProtector.Unprotect(master.ApiKeyEncrypted!));
     }

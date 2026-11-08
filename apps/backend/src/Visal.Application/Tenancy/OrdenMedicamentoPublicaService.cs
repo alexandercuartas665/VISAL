@@ -12,8 +12,9 @@ namespace Visal.Application.Tenancy;
 /// codigo corto legible que se codifica en un QR. La verificacion publica busca por
 /// codigo sin tenant scope (IgnoreQueryFilters) y solo expone datos seguros.
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class OrdenMedicamentoPublicaService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     IAuditWriter audit,
     TimeProvider clock) : IOrdenMedicamentoPublicaService
@@ -32,6 +33,7 @@ public sealed class OrdenMedicamentoPublicaService(
     public async Task<EmitirOrdenResultDto> EmitirAsync(
         EmitirOrdenRequest req, Guid actorUserId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid)
         {
             throw new InvalidOperationException("Sin tenant activo.");
@@ -49,7 +51,7 @@ public sealed class OrdenMedicamentoPublicaService(
         var tipoOrden = string.IsNullOrWhiteSpace(req.TipoOrden) ? "MED" : req.TipoOrden.Trim().ToUpperInvariant();
 
         var now = clock.GetUtcNow();
-        var codigo = await GenerarCodigoUnicoAsync(ct);
+        var codigo = await GenerarCodigoUnicoAsync(db, ct);
 
         // Inyectar el codigo en el bag para que el nodo qr lo pinte.
         var bag = DeserializarBag(req.BagJson);
@@ -77,7 +79,7 @@ public sealed class OrdenMedicamentoPublicaService(
         };
         db.OrdenesMedicamentosPublicas.Add(orden);
 
-        audit.Write(actorUserId, "orden-publica.emitir", nameof(OrdenMedicamentoPublica),
+        audit.Write(db, actorUserId, "orden-publica.emitir", nameof(OrdenMedicamentoPublica),
             orden.Id, previousValue: null,
             newValue: new { orden.CodigoVerificacion, orden.HistoriaClinicaId },
             tenantId: tid);
@@ -89,6 +91,7 @@ public sealed class OrdenMedicamentoPublicaService(
     public async Task<bool> RevocarAsync(
         Guid ordenPublicaId, Guid actorUserId, string? motivo, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var orden = await db.OrdenesMedicamentosPublicas
             .FirstOrDefaultAsync(o => o.Id == ordenPublicaId, ct);
         if (orden is null || orden.RevocadaAt is not null)
@@ -100,7 +103,7 @@ public sealed class OrdenMedicamentoPublicaService(
         orden.RevocadaPor = actorUserId;
         orden.RevocacionMotivo = string.IsNullOrWhiteSpace(motivo) ? null : motivo.Trim();
 
-        audit.Write(actorUserId, "orden-medicamentos.revocar", nameof(OrdenMedicamentoPublica),
+        audit.Write(db, actorUserId, "orden-medicamentos.revocar", nameof(OrdenMedicamentoPublica),
             orden.Id, previousValue: null,
             newValue: new { orden.CodigoVerificacion, orden.HistoriaClinicaId },
             tenantId: orden.TenantId, reason: orden.RevocacionMotivo);
@@ -116,6 +119,7 @@ public sealed class OrdenMedicamentoPublicaService(
     public async Task<OrdenPublicaResumenDto?> ObtenerEmisionActivaAsync(
         Guid historiaClinicaId, string tipoOrden, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var tipo = string.IsNullOrWhiteSpace(tipoOrden) ? "MED" : tipoOrden.Trim().ToUpperInvariant();
         var orden = await db.OrdenesMedicamentosPublicas.AsNoTracking()
             .Where(o => o.HistoriaClinicaId == historiaClinicaId && o.TipoOrden == tipo && o.RevocadaAt == null)
@@ -131,6 +135,7 @@ public sealed class OrdenMedicamentoPublicaService(
     public async Task<OrdenPublicaResumenDto?> ObtenerEmisionActivaAsync(
         Guid historiaClinicaId, string tipoOrden, int numeroOrden, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var tipo = string.IsNullOrWhiteSpace(tipoOrden) ? "MED" : tipoOrden.Trim().ToUpperInvariant();
         var num = numeroOrden <= 0 ? 1 : numeroOrden;
         var orden = await db.OrdenesMedicamentosPublicas.AsNoTracking()
@@ -150,6 +155,7 @@ public sealed class OrdenMedicamentoPublicaService(
 
     public async Task<bool> TieneEmisionActivaAsync(Guid historiaClinicaId, string tipoOrden, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var tipo = string.IsNullOrWhiteSpace(tipoOrden) ? "MED" : tipoOrden.Trim().ToUpperInvariant();
         return await db.OrdenesMedicamentosPublicas
             .AnyAsync(o => o.HistoriaClinicaId == historiaClinicaId && o.TipoOrden == tipo && o.RevocadaAt == null, ct);
@@ -159,6 +165,7 @@ public sealed class OrdenMedicamentoPublicaService(
         string codigo, string? ip, string? userAgent, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(codigo)) { return null; }
+        using var db = dbFactory.Create();
         var norm = codigo.Trim().ToUpperInvariant();
 
         // Publico: sin tenant scope. El codigo es globalmente unico.
@@ -202,7 +209,7 @@ public sealed class OrdenMedicamentoPublicaService(
 
     // ── Helpers ──
 
-    private async Task<string> GenerarCodigoUnicoAsync(CancellationToken ct)
+    private async Task<string> GenerarCodigoUnicoAsync(IApplicationDbContext db, CancellationToken ct)
     {
         for (var intento = 0; intento < 8; intento++)
         {

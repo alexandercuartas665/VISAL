@@ -71,7 +71,7 @@ public sealed class RevisionMcpToolsIsolationTests
         dbA.HistoriaClinicaDocumentos.Add(new HistoriaClinicaDocumento { TenantId = TenantA, HistoriaClinicaId = hc.Id, Tipo = "CONSENTIMIENTO", FormDefinitionId = form.Id, FechaApertura = now.AddHours(-3), ValoresJson = "{}" });
         dbA.SaveChanges();
 
-        var svcB = new RevisionMcpToolsService(dbB);
+        var svcB = new RevisionMcpToolsService(new TestDbContextFactory(dbB, tenantB));
         return (dbA, dbB, svcB, hc.Id, form.Id, paciente.Id, asignacion.Id);
     }
 

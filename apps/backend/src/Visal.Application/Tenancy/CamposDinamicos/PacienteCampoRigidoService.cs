@@ -4,12 +4,14 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy.CamposDinamicos;
 
-public sealed class PacienteCampoRigidoService(IApplicationDbContext db, ITenantContext tenant)
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class PacienteCampoRigidoService(IApplicationDbContextFactory dbFactory, ITenantContext tenant)
     : IPacienteCampoRigidoService
 {
     public async Task EnsureDefaultsAsync(CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { return; }
+        using var db = dbFactory.Create();
 
         // Siembra TOLERANTE A ADICIONES: en vez de "sembrar solo si la tabla esta vacia", sembramos
         // las claves del catalogo que aun no tienen fila para este tenant. Asi, cuando el catalogo
@@ -67,6 +69,7 @@ public sealed class PacienteCampoRigidoService(IApplicationDbContext db, ITenant
 
     public async Task<IReadOnlyList<PacienteCampoRigidoDto>> ListAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var rows = await db.PacienteCampoRigidoDefs.AsNoTracking()
             .OrderBy(r => r.TabKey).ThenBy(r => r.Orden)
             .ToListAsync(ct);
@@ -75,6 +78,7 @@ public sealed class PacienteCampoRigidoService(IApplicationDbContext db, ITenant
 
     public async Task<IReadOnlyList<PacienteCampoRigidoDto>> ListByTabAsync(string tabKey, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var rows = await db.PacienteCampoRigidoDefs.AsNoTracking()
             .Where(r => r.TabKey == tabKey)
             .OrderBy(r => r.Orden)
@@ -84,6 +88,7 @@ public sealed class PacienteCampoRigidoService(IApplicationDbContext db, ITenant
 
     public async Task MoverATabAsync(string campoKey, string tabKey, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.PacienteCampoRigidoDefs.FirstOrDefaultAsync(r => r.CampoKey == campoKey, ct);
         if (e is null) { return; }
         var destino = (tabKey ?? "").Trim();
@@ -92,12 +97,13 @@ public sealed class PacienteCampoRigidoService(IApplicationDbContext db, ITenant
             throw new InvalidOperationException("El tab destino no existe.");
         }
         e.TabKey = destino;
-        e.Orden = await NextOrdenEnTabAsync(destino, ct);
+        e.Orden = await NextOrdenEnTabAsync(db, destino, ct);
         await db.SaveChangesAsync(ct);
     }
 
     public async Task CicloAnchoAsync(string campoKey, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var info = CamposRigidosCatalogo.Find(campoKey);
         if (info is null || info.Compuesto) { return; }
         var e = await db.PacienteCampoRigidoDefs.FirstOrDefaultAsync(r => r.CampoKey == campoKey, ct);
@@ -108,6 +114,7 @@ public sealed class PacienteCampoRigidoService(IApplicationDbContext db, ITenant
 
     public async Task SetOcultoAsync(string campoKey, bool oculto, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var info = CamposRigidosCatalogo.Find(campoKey);
         if (info is null) { return; }
         if (oculto && !info.Ocultable)
@@ -122,6 +129,7 @@ public sealed class PacienteCampoRigidoService(IApplicationDbContext db, ITenant
 
     public async Task ReordenarTabAsync(string tabKey, IReadOnlyList<ItemColocacion> items, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var rigidos = await db.PacienteCampoRigidoDefs.Where(r => r.TabKey == tabKey).ToListAsync(ct);
         var dinamicos = await db.PacienteCampoDefs.Where(c => c.TabKey == tabKey).ToListAsync(ct);
         var orden = 0;
@@ -142,7 +150,7 @@ public sealed class PacienteCampoRigidoService(IApplicationDbContext db, ITenant
     }
 
     /// <summary>Siguiente orden libre en un tab, considerando fijos Y dinamicos (orden unificado).</summary>
-    private async Task<int> NextOrdenEnTabAsync(string tabKey, CancellationToken ct)
+    private async Task<int> NextOrdenEnTabAsync(IApplicationDbContext db, string tabKey, CancellationToken ct)
     {
         var maxRig = await db.PacienteCampoRigidoDefs.Where(r => r.TabKey == tabKey).MaxAsync(r => (int?)r.Orden, ct) ?? -1;
         var maxDin = await db.PacienteCampoDefs.Where(c => c.TabKey == tabKey).MaxAsync(c => (int?)c.Orden, ct) ?? -1;

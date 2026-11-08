@@ -5,7 +5,7 @@
 @using Visal.Application.Common
 @using Microsoft.EntityFrameworkCore
 @inject IReporteService ReportSvc
-@inject IApplicationDbContext Db
+@inject IApplicationDbContextFactory DbFactory
 
 <PageTitle>Reportes - Visal</PageTitle>
 
@@ -177,7 +177,8 @@
     protected override async Task OnInitializedAsync()
     {
         await RecargarAsync();
-        _usuarios = await ((DbContext)Db).Set<Visal.Domain.Entities.PlatformUser>().AsNoTracking()
+        using var db = DbFactory.Create();
+        _usuarios = await ((DbContext)db).Set<Visal.Domain.Entities.PlatformUser>().AsNoTracking()
             .OrderBy(u => u.DisplayName ?? u.Username)
             .Select(u => new UsuarioItem(u.Id, u.DisplayName ?? u.Username ?? "(sin nombre)", u.Email ?? ""))
             .ToListAsync();

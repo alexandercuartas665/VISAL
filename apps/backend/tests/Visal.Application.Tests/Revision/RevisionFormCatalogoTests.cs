@@ -31,7 +31,8 @@ public sealed class RevisionFormCatalogoTests
     {
         var opts = new DbContextOptionsBuilder<VisalDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
-        var db = new VisalDbContext(opts, new FakeTenantContext { TenantId = Tenant });
+        var tenant = new FakeTenantContext { TenantId = Tenant };
+        var db = new VisalDbContext(opts, tenant);
 
         // Formato con 2 campos requeridos (motivo, plan), 1 opcional (obs) dentro de una seccion,
         // y un bloque de texto estatico (que NO es campo de captura). SIN campo de signos vitales.
@@ -62,7 +63,7 @@ public sealed class RevisionFormCatalogoTests
         db.HistoriasClinicas.Add(hc);
         await db.SaveChangesAsync();
 
-        var svc = new RevisionMcpToolsService(db);
+        var svc = new RevisionMcpToolsService(new TestDbContextFactory(db, tenant));
         var r = await svc.EjecutarToolAsync(RevisionMcpToolNames.GetFormDefinition, hc.Id, RevisionMcpToolNames.Todas, 30);
 
         Assert.True(r.Ok);
@@ -102,7 +103,8 @@ public sealed class RevisionFormCatalogoTests
     {
         var opts = new DbContextOptionsBuilder<VisalDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
-        var db = new VisalDbContext(opts, new FakeTenantContext { TenantId = Tenant });
+        var tenant = new FakeTenantContext { TenantId = Tenant };
+        var db = new VisalDbContext(opts, tenant);
 
         const string schema = """
         {
@@ -126,7 +128,7 @@ public sealed class RevisionFormCatalogoTests
         db.HistoriasClinicas.Add(hc);
         await db.SaveChangesAsync();
 
-        var svc = new RevisionMcpToolsService(db);
+        var svc = new RevisionMcpToolsService(new TestDbContextFactory(db, tenant));
         var r = await svc.EjecutarToolAsync(RevisionMcpToolNames.GetFormDefinition, hc.Id, RevisionMcpToolNames.Todas, 30);
         Assert.True(r.Ok);
 
@@ -154,7 +156,8 @@ public sealed class RevisionFormCatalogoTests
     {
         var opts = new DbContextOptionsBuilder<VisalDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
-        var db = new VisalDbContext(opts, new FakeTenantContext { TenantId = Tenant });
+        var tenant = new FakeTenantContext { TenantId = Tenant };
+        var db = new VisalDbContext(opts, tenant);
 
         var form = new FormDefinition { TenantId = Tenant, Codigo = "PP-FO-85_O", Nombre = "Evol", Tipo = "HC", SchemaJson = "{}" };
         var paciente = new Paciente { TenantId = Tenant, NombreCompleto = "PAC", TipoDocumento = "CC", NumeroDocumento = "3" };
@@ -171,7 +174,7 @@ public sealed class RevisionFormCatalogoTests
         db.HistoriasClinicas.Add(hc);
         await db.SaveChangesAsync();
 
-        var svc = new RevisionMcpToolsService(db);
+        var svc = new RevisionMcpToolsService(new TestDbContextFactory(db, tenant));
         var r = await svc.EjecutarToolAsync(RevisionMcpToolNames.GetHistoriaClinica, hc.Id, RevisionMcpToolNames.Todas, 30);
         Assert.True(r.Ok);
 

@@ -30,12 +30,17 @@ namespace Visal.Application.Facturacion.Selectors;
 /// Todo con lookups en memoria por PK — no hay joins EF Core en cadena tras
 /// query filters (patron heredado).
 /// </summary>
-public sealed class RelacionFacturasSelector(IApplicationDbContext db) : IRelacionFacturasSelector
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class RelacionFacturasSelector(IApplicationDbContextFactory dbFactory) : IRelacionFacturasSelector
 {
     public async Task<IReadOnlyList<RelacionFacturasHecho>> SelectAsync(
         RelacionFacturasFiltros filtros,
         CancellationToken ct = default)
     {
+        // Contexto corto por operacion: el selector materializa todo (ToListAsync) antes de
+        // devolver, asi que nada queda como IQueryable diferido fuera de este using.
+        using var db = dbFactory.Create();
+
         // 1) Aseguradora + sus contratos.
         var aseguradora = await db.Aseguradoras.AsNoTracking()
             .FirstOrDefaultAsync(a => a.Id == filtros.AseguradoraId, ct);

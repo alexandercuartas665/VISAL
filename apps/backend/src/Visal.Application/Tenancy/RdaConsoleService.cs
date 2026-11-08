@@ -9,13 +9,15 @@ namespace Visal.Application.Tenancy;
 /// Lecturas y acciones de mantenimiento sobre la tabla rda_eventos. NO construye Bundles
 /// (eso es del RdaBuilderService) ni envia (eso sera del IhceSenderService en Ola 5).
 /// </summary>
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class RdaConsoleService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ISecretProtector secrets,
     ILogger<RdaConsoleService> log) : IRdaConsoleService
 {
     public async Task<IReadOnlyList<RdaEventoRowDto>> ListarAsync(RdaConsoleFiltro filtro, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Join contra paciente, profesional y sucursal para sacar nombres legibles.
         // Ademas hacemos un LEFT JOIN a interoperabilidad_credenciales_sede para
         // saber POR FILA si (SucursalId, Ambiente) del evento tiene credencial usable
@@ -136,6 +138,7 @@ public sealed class RdaConsoleService(
     public async Task<IReadOnlyList<RdaEventoHistorialItemDto>> ListarHistorialAsync(
         Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // El caso lo define (HistoriaClinica, Tipo). Resolvemos ese par desde el evento clickeado
         // y traemos TODOS sus eventos del mas reciente al mas viejo. El vigente es el primero.
         var clave = await db.RdaEventos.AsNoTracking()
@@ -193,6 +196,7 @@ public sealed class RdaConsoleService(
 
     public async Task<RdaEventoDetailDto?> ObtenerAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.RdaEventos.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (e is null) { return null; }
         return new RdaEventoDetailDto(e.Id, e.BundleJson, e.BundleHash, e.Estado,
@@ -201,6 +205,7 @@ public sealed class RdaConsoleService(
 
     public async Task<RdaEventoCredencialesDto?> ObtenerCredencialesUsadasAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Devuelve las credenciales EXACTAS que uso (o usaria) este envio. Descifra
         // ClientSecret y APIMsubskey con ISecretProtector — se hace on-demand y NO se
         // persiste en logs (los strings sensibles nunca se pasan a log.Log*).
@@ -261,6 +266,7 @@ public sealed class RdaConsoleService(
 
     public async Task<IReadOnlyList<HcCandidataRdaDto>> ListarHcCandidatasAsync(string? buscar, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var q = from h in db.HistoriasClinicas.AsNoTracking()
                 join p in db.Pacientes.AsNoTracking() on h.PacienteId equals p.Id
                 join fd in db.FormDefinitions.AsNoTracking() on h.FormDefinitionId equals fd.Id into fdg
@@ -287,6 +293,7 @@ public sealed class RdaConsoleService(
 
     public async Task<IReadOnlyList<RdaReprocesoItemDto>> ListarPendientesReprocesoAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Todos los eventos del tenant que NO estan Aceptado, EXCLUYENDO los de una HC+Tipo
         // que ya tiene un Aceptado (no reabrir lo confirmado). El LEFT JOIN a credenciales
         // es el mismo de ListarAsync: sin credencial de sede no se puede enviar.
@@ -331,6 +338,7 @@ public sealed class RdaConsoleService(
 
     public async Task<bool> EliminarAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.RdaEventos.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (e is null) { return false; }
         if (e.Estado != EstadoRdaEvento.Borrador)

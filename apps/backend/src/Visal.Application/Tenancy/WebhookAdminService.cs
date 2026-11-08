@@ -5,30 +5,33 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class WebhookAdminService : IWebhookAdminService
 {
     private const int AppPort = 8080;
 
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly IDevTunnel _tunnel;
     private readonly IWhatsAppConnectorService _connector;
 
-    public WebhookAdminService(IApplicationDbContext db, IDevTunnel tunnel, IWhatsAppConnectorService connector)
+    public WebhookAdminService(IApplicationDbContextFactory dbFactory, IDevTunnel tunnel, IWhatsAppConnectorService connector)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tunnel = tunnel;
         _connector = connector;
     }
 
     public async Task<WebhookConfigDto> GetAsync(CancellationToken cancellationToken = default)
     {
-        var cfg = await GetOrCreateAsync(cancellationToken);
+        using var db = _dbFactory.Create();
+        var cfg = await GetOrCreateAsync(db, cancellationToken);
         return Map(cfg);
     }
 
     public async Task<WebhookConfigDto> SaveAsync(string mode, string? publicUrl, string? token, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var cfg = await GetOrCreateAsync(cancellationToken);
+        using var db = _dbFactory.Create();
+        var cfg = await GetOrCreateAsync(db, cancellationToken);
         cfg.WebhookMode = string.Equals(mode, "Production", StringComparison.OrdinalIgnoreCase) ? "Production" : "Development";
         cfg.WebhookPublicUrl = string.IsNullOrWhiteSpace(publicUrl) ? null : publicUrl.Trim().TrimEnd('/');
         if (string.IsNullOrWhiteSpace(token))
@@ -39,7 +42,7 @@ public sealed class WebhookAdminService : IWebhookAdminService
         {
             cfg.WebhookToken = token.Trim();
         }
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
 
         // Re-registrar el webhook en las instancias conectadas (igual que al iniciar el tunel en
         // modo desarrollo). Sin esto, cambiar a Produccion solo actualizaba la BD y Evolution seguia
@@ -50,13 +53,14 @@ public sealed class WebhookAdminService : IWebhookAdminService
 
     public async Task<WebhookConfigDto> StartTunnelAsync(Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var cfg = await GetOrCreateAsync(cancellationToken);
+        using var db = _dbFactory.Create();
+        var cfg = await GetOrCreateAsync(db, cancellationToken);
         cfg.WebhookToken ??= GenerateToken();
         cfg.WebhookMode = "Development";
 
         var url = await _tunnel.StartAsync(AppPort, cancellationToken);
         cfg.WebhookActiveUrl = url;
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
 
         if (!string.IsNullOrWhiteSpace(url))
         {
@@ -67,21 +71,22 @@ public sealed class WebhookAdminService : IWebhookAdminService
 
     public async Task<WebhookConfigDto> StopTunnelAsync(Guid actorUserId, CancellationToken cancellationToken = default)
     {
+        using var db = _dbFactory.Create();
         _tunnel.Stop();
-        var cfg = await GetOrCreateAsync(cancellationToken);
+        var cfg = await GetOrCreateAsync(db, cancellationToken);
         cfg.WebhookActiveUrl = null;
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return Map(cfg);
     }
 
-    private async Task<EvolutionMasterConfig> GetOrCreateAsync(CancellationToken ct)
+    private async Task<EvolutionMasterConfig> GetOrCreateAsync(IApplicationDbContext db, CancellationToken ct)
     {
-        var cfg = await _db.EvolutionMasterConfigs.FirstOrDefaultAsync(ct);
+        var cfg = await db.EvolutionMasterConfigs.FirstOrDefaultAsync(ct);
         if (cfg is null)
         {
             cfg = new EvolutionMasterConfig { WebhookMode = "Development" };
-            _db.EvolutionMasterConfigs.Add(cfg);
-            await _db.SaveChangesAsync(ct);
+            db.EvolutionMasterConfigs.Add(cfg);
+            await db.SaveChangesAsync(ct);
         }
         return cfg;
     }

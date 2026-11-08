@@ -4,10 +4,12 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy.CamposDinamicos;
 
-public sealed class PacienteCampoService(IApplicationDbContext db, ITenantContext tenant) : IPacienteCampoService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class PacienteCampoService(IApplicationDbContextFactory dbFactory, ITenantContext tenant) : IPacienteCampoService
 {
     public async Task<IReadOnlyList<PacienteCampoDto>> ListAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var rows = await db.PacienteCampoDefs.AsNoTracking()
             .OrderBy(c => c.TabKey).ThenBy(c => c.Orden)
             .ToListAsync(ct);
@@ -16,6 +18,7 @@ public sealed class PacienteCampoService(IApplicationDbContext db, ITenantContex
 
     public async Task<IReadOnlyList<PacienteCampoDto>> ListByTabAsync(string tabKey, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var rows = await db.PacienteCampoDefs.AsNoTracking()
             .Where(c => c.TabKey == tabKey)
             .OrderBy(c => c.Orden)
@@ -25,6 +28,7 @@ public sealed class PacienteCampoService(IApplicationDbContext db, ITenantContex
 
     public async Task<IReadOnlyList<PacienteCampoDto>> ListActivosAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var rows = await db.PacienteCampoDefs.AsNoTracking()
             .Where(c => c.Activo)
             .OrderBy(c => c.TabKey).ThenBy(c => c.Orden)
@@ -34,6 +38,7 @@ public sealed class PacienteCampoService(IApplicationDbContext db, ITenantContex
 
     public async Task<PacienteCampoDto> CreateAsync(CrearCampoRequest req, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         var label = (req.Label ?? "").Trim();
         if (label.Length == 0) { throw new InvalidOperationException("El campo necesita una etiqueta."); }
@@ -43,7 +48,7 @@ public sealed class PacienteCampoService(IApplicationDbContext db, ITenantContex
             throw new InvalidOperationException("El tab indicado no existe.");
         }
 
-        var campoKey = await UniqueCampoKeyAsync(CamposDinamicosSlug.Make(label, "campo"), ct);
+        var campoKey = await UniqueCampoKeyAsync(db, CamposDinamicosSlug.Make(label, "campo"), ct);
         var maxOrden = await db.PacienteCampoDefs.Where(c => c.TabKey == tabKey).MaxAsync(c => (int?)c.Orden, ct) ?? -1;
         var e = new PacienteCampoDef
         {
@@ -66,6 +71,7 @@ public sealed class PacienteCampoService(IApplicationDbContext db, ITenantContex
 
     public async Task<PacienteCampoDto?> UpdateAsync(Guid id, ActualizarCampoRequest req, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.PacienteCampoDefs.FirstOrDefaultAsync(c => c.Id == id, ct);
         if (e is null) { return null; }
         var label = (req.Label ?? "").Trim();
@@ -84,6 +90,7 @@ public sealed class PacienteCampoService(IApplicationDbContext db, ITenantContex
 
     public async Task ReorderAsync(string tabKey, ReordenarCamposRequest req, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var campos = await db.PacienteCampoDefs.Where(c => c.TabKey == tabKey).ToListAsync(ct);
         var orden = 0;
         foreach (var cid in req.OrdenIds)
@@ -96,6 +103,7 @@ public sealed class PacienteCampoService(IApplicationDbContext db, ITenantContex
 
     public async Task CicloAnchoAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.PacienteCampoDefs.FirstOrDefaultAsync(c => c.Id == id, ct);
         if (e is null) { return; }
         e.Ancho = e.Ancho >= 3 ? 1 : e.Ancho + 1;
@@ -104,6 +112,7 @@ public sealed class PacienteCampoService(IApplicationDbContext db, ITenantContex
 
     public async Task MoverATabAsync(Guid id, string tabKey, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.PacienteCampoDefs.FirstOrDefaultAsync(c => c.Id == id, ct);
         if (e is null) { return; }
         var destino = (tabKey ?? "").Trim();
@@ -121,13 +130,14 @@ public sealed class PacienteCampoService(IApplicationDbContext db, ITenantContex
 
     public async Task DeleteAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.PacienteCampoDefs.FirstOrDefaultAsync(c => c.Id == id, ct);
         if (e is null) { return; }
         db.PacienteCampoDefs.Remove(e);
         await db.SaveChangesAsync(ct);
     }
 
-    private async Task<string> UniqueCampoKeyAsync(string baseKey, CancellationToken ct)
+    private async Task<string> UniqueCampoKeyAsync(IApplicationDbContext db, string baseKey, CancellationToken ct)
     {
         var key = baseKey;
         var n = 2;

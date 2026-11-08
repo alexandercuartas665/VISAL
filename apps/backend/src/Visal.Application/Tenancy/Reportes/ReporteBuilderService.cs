@@ -6,8 +6,9 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy.Reportes;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class ReporteBuilderService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     IReportSemanticModel semantic,
     IReportePackService pack,
@@ -65,6 +66,7 @@ public sealed class ReporteBuilderService(
 
     public async Task<IReadOnlyList<ReportePlantillaDto>> ListarAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.ReportePlantillas.AsNoTracking()
             .OrderBy(p => p.Orden).ThenBy(p => p.Nombre)
             .Select(p => new ReportePlantillaDto(
@@ -75,6 +77,7 @@ public sealed class ReporteBuilderService(
 
     public async Task<ReportePlantillaDetalleDto?> ObtenerAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var p = await db.ReportePlantillas.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (p is null) { return null; }
 
@@ -91,6 +94,7 @@ public sealed class ReporteBuilderService(
 
     public async Task<Guid> CrearCensoAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var req = CensoBlueprint.Crear();
         // Upsert por nombre: si el tenant ya tiene el CENSO, se REGENERA en vez de duplicarlo
         // (GuardarAsync con el id reemplaza sus hojas por las del blueprint actual). Antes se
@@ -106,6 +110,7 @@ public sealed class ReporteBuilderService(
 
     public async Task<Guid> GuardarAsync(Guid? id, GuardarPlantillaRequest req, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid)
         {
             throw new InvalidOperationException("Sin tenant activo.");
@@ -164,6 +169,7 @@ public sealed class ReporteBuilderService(
 
     public async Task<bool> EliminarAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var p = await db.ReportePlantillas.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (p is null) { return false; }
         // Las hojas caen por FK cascade.
@@ -186,6 +192,7 @@ public sealed class ReporteBuilderService(
         IReadOnlyDictionary<string, IReadOnlyList<string>>? parametros = null,
         CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var p = await db.ReportePlantillas.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct)
             ?? throw new InvalidOperationException("Reporte no encontrado.");
         var hojas = await db.ReporteHojas.AsNoTracking()
@@ -218,6 +225,7 @@ public sealed class ReporteBuilderService(
 
     public async Task<IReadOnlyList<SedeOpcionDto>> ListarSedesAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // El query filter de tenant limita las sucursales al tenant actual.
         return await db.Sucursales.AsNoTracking()
             .OrderBy(s => s.Nombre)
@@ -240,6 +248,7 @@ public sealed class ReporteBuilderService(
 
     public async Task<ImportarPlantillaResultado> ImportarAsync(string json, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (string.IsNullOrWhiteSpace(json))
         {
             throw new InvalidOperationException("El archivo esta vacio.");

@@ -5,11 +5,13 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class MedicamentoService(IApplicationDbContext db, ITenantContext tenant, IAuditWriter audit) : IMedicamentoService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class MedicamentoService(IApplicationDbContextFactory dbFactory, ITenantContext tenant, IAuditWriter audit) : IMedicamentoService
 {
     public async Task<(IReadOnlyList<MedicamentoDto> rows, int total)> SearchAsync(
         string? termino, int skip, int take, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var q = db.Medicamentos.AsNoTracking();
         if (!string.IsNullOrWhiteSpace(termino))
         {
@@ -43,6 +45,7 @@ public sealed class MedicamentoService(IApplicationDbContext db, ITenantContext 
 
     public async Task<MedicamentoDetailDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.Medicamentos.AsNoTracking()
             .Where(m => m.Id == id)
             .Select(m => new MedicamentoDetailDto(
@@ -58,6 +61,7 @@ public sealed class MedicamentoService(IApplicationDbContext db, ITenantContext 
 
     public async Task<MedicamentoDetailDto?> SaveAsync(SaveMedicamentoRequest r, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
 
         Medicamento entity;
@@ -102,7 +106,7 @@ public sealed class MedicamentoService(IApplicationDbContext db, ITenantContext 
         entity.Modalidad = Norm(r.Modalidad);
         entity.Ium = Norm(r.Ium);
 
-        audit.Write(actor,
+        audit.Write(db, actor,
             r.Id is null ? "medicamento.create" : "medicamento.update",
             nameof(Medicamento), entity.Id,
             previousValue: null, newValue: new { entity.Producto, entity.RegistroSanitario }, tenantId: tid);
@@ -113,10 +117,11 @@ public sealed class MedicamentoService(IApplicationDbContext db, ITenantContext 
 
     public async Task<bool> DeleteAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.Medicamentos.FirstOrDefaultAsync(m => m.Id == id, ct);
         if (e is null) { return false; }
         db.Medicamentos.Remove(e);
-        audit.Write(actor, "medicamento.delete", nameof(Medicamento), e.Id,
+        audit.Write(db, actor, "medicamento.delete", nameof(Medicamento), e.Id,
             previousValue: new { e.Producto, e.RegistroSanitario }, newValue: null, tenantId: e.TenantId);
         await db.SaveChangesAsync(ct);
         return true;
@@ -128,6 +133,7 @@ public sealed class MedicamentoService(IApplicationDbContext db, ITenantContext 
         IProgress<MedicamentoImportProgress>? progress = null,
         CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (rows.Count == 0) { return 0; }
 
@@ -200,8 +206,9 @@ public sealed class MedicamentoService(IApplicationDbContext db, ITenantContext 
             ct.ThrowIfCancellationRequested();
         }
 
-        audit.Write(actor, "medicamento.import", nameof(Medicamento), Guid.Empty,
+        audit.Write(db, actor, "medicamento.import", nameof(Medicamento), Guid.Empty,
             previousValue: null, newValue: new { count = insertados }, tenantId: tid);
+        await db.SaveChangesAsync(ct);
 
         progress?.Report(new MedicamentoImportProgress("Listo", insertados, insertados));
         return insertados;
@@ -209,10 +216,12 @@ public sealed class MedicamentoService(IApplicationDbContext db, ITenantContext 
 
     public async Task<int> ClearAllAsync(Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         var n = await db.Medicamentos.ExecuteDeleteAsync(ct);
-        audit.Write(actor, "medicamento.clear-all", nameof(Medicamento), Guid.Empty,
+        audit.Write(db, actor, "medicamento.clear-all", nameof(Medicamento), Guid.Empty,
             previousValue: new { count = n }, newValue: null, tenantId: tid);
+        await db.SaveChangesAsync(ct);
         return n;
     }
 

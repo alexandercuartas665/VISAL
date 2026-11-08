@@ -4,14 +4,16 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class DocumentoNotaService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     TimeProvider clock) : IDocumentoNotaService
 {
     public async Task<IReadOnlyList<DocumentoNotaDto>> ListarPorDocumentoAsync(
         Guid documentoId, bool incluirArchivadas, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var q = db.DocumentoNotas.AsNoTracking()
             .Where(n => n.NotaMedicaDocumentoId == documentoId);
         if (!incluirArchivadas)
@@ -49,6 +51,7 @@ public sealed class DocumentoNotaService(
     public async Task<DocumentoNotaDto> AgregarAsync(
         Guid documentoId, string texto, Guid autorUserId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         var t = (texto ?? "").Trim();
         if (t.Length == 0) { throw new ArgumentException("El texto de la nota no puede estar vacio.", nameof(texto)); }
@@ -79,6 +82,7 @@ public sealed class DocumentoNotaService(
 
     public async Task<bool> ArchivarAsync(Guid notaId, Guid actorUserId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var n = await db.DocumentoNotas.FirstOrDefaultAsync(x => x.Id == notaId, ct);
         if (n is null) { return false; }
         if (n.Archivada) { return true; }
@@ -91,6 +95,7 @@ public sealed class DocumentoNotaService(
 
     public async Task<bool> DesarchivarAsync(Guid notaId, Guid actorUserId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var n = await db.DocumentoNotas.FirstOrDefaultAsync(x => x.Id == notaId, ct);
         if (n is null) { return false; }
         if (!n.Archivada) { return true; }

@@ -39,6 +39,21 @@ public sealed class PreRevisionIaServiceTests
         public required Guid AgenteId { get; init; }
     }
 
+    // Ola 4c: AiUsageService ahora abre contexto corto via IApplicationDbContextFactory.
+    // En tests la factory crea un VisalDbContext nuevo sobre el MISMO store InMemory
+    // (misma key), asi el using/dispose del servicio no borra los datos sembrados.
+    private sealed class SingleStoreDbContextFactory : IApplicationDbContextFactory
+    {
+        private readonly DbContextOptions<VisalDbContext> _opts;
+        private readonly ITenantContext _tenant;
+        public SingleStoreDbContextFactory(DbContextOptions<VisalDbContext> opts, ITenantContext tenant)
+        {
+            _opts = opts;
+            _tenant = tenant;
+        }
+        public IApplicationDbContext Create() => new VisalDbContext(_opts, _tenant);
+    }
+
     private static async Task<Fixture> BuildAsync(
         Guid tenantId,
         AiChatResult aiResponse,
@@ -95,7 +110,7 @@ public sealed class PreRevisionIaServiceTests
         }
         await db.SaveChangesAsync();
 
-        var revisionSvc = new RevisionClinicaService(db, tenant, clock);
+        var revisionSvc = new RevisionClinicaService(new SingleStoreDbContextFactory(opts, tenant), tenant, clock);
         var rev = await revisionSvc.SolicitarAsync(new SolicitarRevisionCmd(hc.Id, Actor, null));
 
         if (sembrarCupoAgotadoDuro)
@@ -133,12 +148,12 @@ public sealed class PreRevisionIaServiceTests
         }
         await db.SaveChangesAsync();
 
-        var usage = new AiUsageService(db, tenant);
+        var usage = new AiUsageService(new SingleStoreDbContextFactory(opts, tenant), tenant);
         var protector = new FakeSecretProtector();
-        var tools = new RevisionMcpToolsService(db);
-        var policy = new RevisionPolicyService(db, tenant, new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()));
+        var tools = new RevisionMcpToolsService(new SingleStoreDbContextFactory(opts, tenant));
+        var policy = new RevisionPolicyService(new SingleStoreDbContextFactory(opts, tenant), tenant, new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()));
         var aiClient = new FakeAiClient(aiResponse);
-        var svc = new PreRevisionIaService(db, aiClient, usage, protector, tools, revisionSvc, policy);
+        var svc = new PreRevisionIaService(new SingleStoreDbContextFactory(opts, tenant), aiClient, usage, protector, tools, revisionSvc, policy);
 
         return new Fixture { Db = db, Svc = svc, AiClient = aiClient, RevisionId = rev.Id, AgenteId = agenteId };
     }

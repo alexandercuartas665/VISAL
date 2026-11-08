@@ -13,26 +13,28 @@ public interface IQuoteRenderService
     Task<string?> RenderHtmlAsync(Guid leadId, Guid? templateId = null, CancellationToken cancellationToken = default);
 }
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class QuoteRenderService : IQuoteRenderService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
 
-    public QuoteRenderService(IApplicationDbContext db)
+    public QuoteRenderService(IApplicationDbContextFactory dbFactory)
     {
-        _db = db;
+        _dbFactory = dbFactory;
     }
 
     public async Task<string?> RenderHtmlAsync(Guid leadId, Guid? templateId = null, CancellationToken cancellationToken = default)
     {
-        var lead = await _db.Leads.IgnoreQueryFilters().FirstOrDefaultAsync(l => l.Id == leadId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var lead = await db.Leads.IgnoreQueryFilters().FirstOrDefaultAsync(l => l.Id == leadId, cancellationToken);
         if (lead is null) { return null; }
 
-        var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.Id == lead.TenantId, cancellationToken);
+        var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.Id == lead.TenantId, cancellationToken);
 
         var template = templateId is Guid tid
-            ? await _db.QuoteTemplates.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.Id == tid && t.TenantId == lead.TenantId, cancellationToken)
+            ? await db.QuoteTemplates.IgnoreQueryFilters().FirstOrDefaultAsync(t => t.Id == tid && t.TenantId == lead.TenantId, cancellationToken)
             : null;
-        template ??= await _db.QuoteTemplates.IgnoreQueryFilters()
+        template ??= await db.QuoteTemplates.IgnoreQueryFilters()
             .Where(t => t.TenantId == lead.TenantId)
             .OrderByDescending(t => t.IsDefault).ThenBy(t => t.Name)
             .FirstOrDefaultAsync(cancellationToken);

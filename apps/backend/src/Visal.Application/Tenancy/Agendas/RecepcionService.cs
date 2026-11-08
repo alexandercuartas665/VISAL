@@ -3,8 +3,9 @@ using Visal.Application.Common;
 
 namespace Visal.Application.Tenancy.Agendas;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class RecepcionService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     IAsignacionAgendasService agendas) : IRecepcionService
 {
     public Task<IReadOnlyList<CitaRecepcionDto>> ListarCitasDelDiaAsync(DateOnly fecha, Guid? sucursalId, CancellationToken ct = default)
@@ -12,6 +13,7 @@ public sealed class RecepcionService(
 
     public async Task<IReadOnlyList<CitaRecepcionDto>> ListarCitasRangoAsync(DateOnly desde, DateOnly hasta, Guid? sucursalId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var turnos = await db.AsignacionTurnos.AsNoTracking()
             .Where(t => t.FechaInicio != null && t.FechaInicio >= desde && t.FechaInicio <= hasta && t.HoraInicio != null)
             .ToListAsync(ct);
@@ -58,6 +60,7 @@ public sealed class RecepcionService(
 
     public async Task<bool> MarcarLlegadaAsync(Guid asignacionTurnoId, bool llego, bool tarde, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var turno = await db.AsignacionTurnos.FirstOrDefaultAsync(t => t.Id == asignacionTurnoId, ct);
         if (turno is null) { return false; }
         turno.LlegoEn = llego ? DateTimeOffset.UtcNow : null;
@@ -68,6 +71,7 @@ public sealed class RecepcionService(
 
     public async Task<ContactosCitaDto?> ObtenerContactosCitaAsync(Guid asignacionTurnoId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var turno = await db.AsignacionTurnos.AsNoTracking()
             .Where(t => t.Id == asignacionTurnoId)
             .Select(t => new { t.AsignacionId })
@@ -99,6 +103,7 @@ public sealed class RecepcionService(
 
     public async Task<IReadOnlyList<TimeOnly>> SlotsParaReprogramarAsync(Guid asignacionTurnoId, DateOnly nuevaFecha, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var turno = await db.AsignacionTurnos.AsNoTracking().FirstOrDefaultAsync(t => t.Id == asignacionTurnoId, ct);
         if (turno is null) { return Array.Empty<TimeOnly>(); }
         return await agendas.SlotsDisponiblesAsync(turno.ProfesionalId, nuevaFecha, ct);
@@ -109,6 +114,7 @@ public sealed class RecepcionService(
 
     public async Task ReprogramarConDoctorAsync(Guid asignacionTurnoId, Guid? nuevoProfesionalId, DateOnly nuevaFecha, TimeOnly nuevaHora, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var turno = await db.AsignacionTurnos.FirstOrDefaultAsync(t => t.Id == asignacionTurnoId, ct)
             ?? throw new InvalidOperationException("La cita no existe.");
         // Doctor destino: el nuevo elegido, o el mismo si no se cambia.
@@ -143,6 +149,7 @@ public sealed class RecepcionService(
 
     public async Task<IReadOnlyList<AfectadoRecepcionDto>> ListarAfectadosAsync(Guid profesionalId, DateOnly fecha, TimeOnly? horaDesde, TimeOnly? horaHasta, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Citas de ese doctor ese dia, filtradas por la franja de la novedad (si se dio).
         var turnos = (await db.AsignacionTurnos.AsNoTracking()
             .Where(t => t.ProfesionalId == profesionalId && t.FechaInicio == fecha && t.HoraInicio != null)
@@ -196,6 +203,7 @@ public sealed class RecepcionService(
 
     public async Task<IReadOnlyList<NovedadResumenDto>> ListarNovedadesConAfectadosAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var desde = DateOnly.FromDateTime(DateTime.Today).AddDays(-30);
         var novs = await db.NovedadesProfesional.AsNoTracking()
             .Where(n => n.FechaHasta >= desde)
@@ -228,6 +236,7 @@ public sealed class RecepcionService(
 
     public async Task<IReadOnlyList<DoctorSimpleDto>> ListarDoctoresConAgendaAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var profIds = await db.AgendaProfesionalTurnos.AsNoTracking().Select(a => a.ProfesionalId).Distinct().ToListAsync(ct);
         if (profIds.Count == 0) { return Array.Empty<DoctorSimpleDto>(); }
         return await db.Profesionales.AsNoTracking()

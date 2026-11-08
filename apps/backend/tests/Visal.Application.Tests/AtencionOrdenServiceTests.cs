@@ -139,7 +139,7 @@ public sealed class AtencionOrdenServiceTests
         var ctx = NewCtx();
         var (userId, sesionIds) = await SembrarAsync(ctx, TenantRole.Advisor, totalSesiones: 3, completadasHasta: 0);
 
-        var sut = new AtencionOrdenService(ctx);
+        var sut = new AtencionOrdenService(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }));
         var bloqueo = await sut.ValidarAperturaAsync(sesionIds[0], userId);
 
         Assert.Null(bloqueo);
@@ -151,7 +151,7 @@ public sealed class AtencionOrdenServiceTests
         var ctx = NewCtx();
         var (userId, sesionIds) = await SembrarAsync(ctx, TenantRole.Advisor, totalSesiones: 3, completadasHasta: 0);
 
-        var sut = new AtencionOrdenService(ctx);
+        var sut = new AtencionOrdenService(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }));
         var bloqueo = await sut.ValidarAperturaAsync(sesionIds[1], userId);
 
         Assert.NotNull(bloqueo);
@@ -165,7 +165,7 @@ public sealed class AtencionOrdenServiceTests
         var ctx = NewCtx();
         var (userId, sesionIds) = await SembrarAsync(ctx, TenantRole.Advisor, totalSesiones: 3, completadasHasta: 1);
 
-        var sut = new AtencionOrdenService(ctx);
+        var sut = new AtencionOrdenService(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }));
         var bloqueo = await sut.ValidarAperturaAsync(sesionIds[1], userId);
 
         Assert.Null(bloqueo);
@@ -177,7 +177,7 @@ public sealed class AtencionOrdenServiceTests
         var ctx = NewCtx();
         var (userId, sesionIds) = await SembrarAsync(ctx, TenantRole.Advisor, totalSesiones: 3, completadasHasta: 1);
 
-        var sut = new AtencionOrdenService(ctx);
+        var sut = new AtencionOrdenService(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }));
         var bloqueo = await sut.ValidarAperturaAsync(sesionIds[2], userId);
 
         Assert.NotNull(bloqueo);
@@ -192,7 +192,7 @@ public sealed class AtencionOrdenServiceTests
         var ctx = NewCtx();
         var (userId, sesionIds) = await SembrarAsync(ctx, TenantRole.Owner, totalSesiones: 3, completadasHasta: 0);
 
-        var sut = new AtencionOrdenService(ctx);
+        var sut = new AtencionOrdenService(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }));
         var bloqueo = await sut.ValidarAperturaAsync(sesionIds[2], userId);
 
         Assert.NotNull(bloqueo);
@@ -206,7 +206,7 @@ public sealed class AtencionOrdenServiceTests
         var ctx = NewCtx();
         var (userId, sesionIds) = await SembrarAsync(ctx, TenantRole.Admin, totalSesiones: 3, completadasHasta: 0);
 
-        var sut = new AtencionOrdenService(ctx);
+        var sut = new AtencionOrdenService(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }));
         var bloqueo = await sut.ValidarAperturaAsync(sesionIds[2], userId);
 
         Assert.NotNull(bloqueo);
@@ -220,7 +220,7 @@ public sealed class AtencionOrdenServiceTests
         var (userId, sesionIds) = await SembrarAsync(ctx, TenantRole.Advisor,
             totalSesiones: 3, completadasHasta: 0, conPermisoSaltarOrden: true);
 
-        var sut = new AtencionOrdenService(ctx);
+        var sut = new AtencionOrdenService(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }));
         var bloqueo = await sut.ValidarAperturaAsync(sesionIds[2], userId);
 
         Assert.Null(bloqueo);
@@ -257,7 +257,7 @@ public sealed class AtencionOrdenServiceTests
 
         var userDesconocido = Guid.NewGuid();
 
-        var sut = new AtencionOrdenService(ctx);
+        var sut = new AtencionOrdenService(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }));
         var bloqueo = await sut.ValidarAperturaAsync(sesionIds[1], userDesconocido);
 
         // Sin TenantUser -> fail-open (super admin o servicio de sistema).
@@ -314,7 +314,7 @@ public sealed class AtencionOrdenServiceTests
         }
         await ctx.SaveChangesAsync();
 
-        var sut = new AtencionOrdenService(ctx);
+        var sut = new AtencionOrdenService(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }));
 
         // Sesion 3 (primera de Mariano) pasa aunque 1 y 2 (Juan) esten pendientes.
         Assert.Null(await sut.ValidarAperturaAsync(sesionIds[2], pu.Id));
@@ -338,7 +338,7 @@ public sealed class AtencionOrdenServiceTests
         var ctx = NewCtx();
         var (userId, _) = await SembrarAsync(ctx, TenantRole.Advisor, totalSesiones: 1, completadasHasta: 0);
 
-        var sut = new AtencionOrdenService(ctx);
+        var sut = new AtencionOrdenService(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }));
         var bloqueo = await sut.ValidarAperturaAsync(Guid.NewGuid(), userId);
 
         Assert.Null(bloqueo);

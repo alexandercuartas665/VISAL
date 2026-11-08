@@ -4,13 +4,15 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy.Agendas;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class AgendaProfesionalService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     IProfesionalConfigService profesionales) : IAgendaProfesionalService
 {
     public async Task<IReadOnlyList<ProfesionalAgendaResumenDto>> ListarResumenAsync(string? filtro, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var profs = await profesionales.ListProfesionalesAsync(filtro, ct);
         // Todos los turnos del tenant en una sola consulta, agrupados por profesional.
         var turnos = await db.AgendaProfesionalTurnos.AsNoTracking().ToListAsync(ct);
@@ -27,6 +29,7 @@ public sealed class AgendaProfesionalService(
 
     public async Task<AgendaProfesionalDto> ObtenerAsync(Guid profesionalId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var turnos = await db.AgendaProfesionalTurnos.AsNoTracking()
             .Where(t => t.ProfesionalId == profesionalId)
             .OrderBy(t => t.DiaSemana).ThenBy(t => t.HoraInicio)
@@ -37,6 +40,7 @@ public sealed class AgendaProfesionalService(
 
     public async Task<int> ImportarPlantillaAsync(Guid profesionalId, Guid plantillaId, bool reemplazar, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
 
         var plantilla = await db.PlantillasAgenda.AsNoTracking().FirstOrDefaultAsync(p => p.Id == plantillaId, ct)
@@ -72,6 +76,7 @@ public sealed class AgendaProfesionalService(
 
     public async Task<AgendaProfesionalTurnoDto> GuardarTurnoAsync(Guid profesionalId, GuardarAgendaProfesionalTurnoCmd cmd, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (cmd.HoraFin <= cmd.HoraInicio) { throw new InvalidOperationException("La hora 'Hasta' debe ser mayor que 'Desde'."); }
         if (cmd.IntervaloMinutos <= 0) { throw new InvalidOperationException("El intervalo debe ser mayor a 0."); }
@@ -107,6 +112,7 @@ public sealed class AgendaProfesionalService(
 
     public async Task<bool> EliminarTurnoAsync(Guid turnoId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var turno = await db.AgendaProfesionalTurnos.FirstOrDefaultAsync(t => t.Id == turnoId, ct);
         if (turno is null) { return false; }
         db.AgendaProfesionalTurnos.Remove(turno);
@@ -116,6 +122,7 @@ public sealed class AgendaProfesionalService(
 
     public async Task<int> LimpiarAsync(Guid profesionalId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var existentes = await db.AgendaProfesionalTurnos.Where(t => t.ProfesionalId == profesionalId).ToListAsync(ct);
         if (existentes.Count == 0) { return 0; }
         db.AgendaProfesionalTurnos.RemoveRange(existentes);

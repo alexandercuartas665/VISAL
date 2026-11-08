@@ -4,22 +4,24 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class PacienteService : IPacienteService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenant;
     private readonly IAuditWriter _audit;
 
-    public PacienteService(IApplicationDbContext db, ITenantContext tenant, IAuditWriter audit)
+    public PacienteService(IApplicationDbContextFactory dbFactory, ITenantContext tenant, IAuditWriter audit)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenant = tenant;
         _audit = audit;
     }
 
     public async Task<IReadOnlyList<PacienteDto>> ListAsync(string? filtro, CancellationToken ct = default)
     {
-        var q = _db.Pacientes.AsNoTracking();
+        using var db = _dbFactory.Create();
+        var q = db.Pacientes.AsNoTracking();
         if (!string.IsNullOrWhiteSpace(filtro))
         {
             var f = filtro.Trim().ToLower();
@@ -36,18 +38,19 @@ public sealed class PacienteService : IPacienteService
 
     public async Task<PacienteDetailDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
-        var p = await _db.Pacientes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+        using var db = _dbFactory.Create();
+        var p = await db.Pacientes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (p is null) { return null; }
-        var contactos = await _db.PacienteContactosEmergencia.AsNoTracking()
+        var contactos = await db.PacienteContactosEmergencia.AsNoTracking()
             .Where(c => c.PacienteId == id)
             .OrderBy(c => c.Orden).ThenBy(c => c.Nombre)
             .Select(c => new PacienteContactoEmergenciaDto(c.Id, c.Nombre, c.Parentesco, c.CodigoPais, c.Telefono, c.Orden, c.FirmaUrl))
             .ToListAsync(ct);
         // Traigo la lista N de contratos con nombre/codigo del contrato+aseguradora
         // (no solo el Id) para pintarlos en la tabla mini de /admision sin round-trips.
-        var contratos = await (from pc in _db.PacienteContratos.AsNoTracking()
-                               join c in _db.ContratosAseguradora.AsNoTracking() on pc.ContratoAseguradoraId equals c.Id
-                               join a in _db.Aseguradoras.AsNoTracking() on c.AseguradoraId equals a.Id
+        var contratos = await (from pc in db.PacienteContratos.AsNoTracking()
+                               join c in db.ContratosAseguradora.AsNoTracking() on pc.ContratoAseguradoraId equals c.Id
+                               join a in db.Aseguradoras.AsNoTracking() on c.AseguradoraId equals a.Id
                                where pc.PacienteId == id
                                orderby pc.Orden
                                select new PacienteContratoDto(
@@ -100,6 +103,7 @@ public sealed class PacienteService : IPacienteService
 
     public async Task<PacienteDetailDto?> SaveAsync(SavePacienteRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         var doc = (req.NumeroDocumento ?? "").Trim();
         if (doc.Length == 0) { throw new InvalidOperationException("El numero de documento es obligatorio."); }
         var nombre = string.IsNullOrWhiteSpace(req.NombreCompleto)
@@ -111,15 +115,15 @@ public sealed class PacienteService : IPacienteService
         Paciente p;
         if (req.Id is Guid id)
         {
-            p = await _db.Pacientes.FirstOrDefaultAsync(x => x.Id == id, ct) ?? throw new InvalidOperationException("Paciente no encontrado.");
-            if (await _db.Pacientes.AnyAsync(x => x.NumeroDocumento == doc && x.Id != id, ct)) { throw new InvalidOperationException($"Ya existe un paciente con documento '{doc}'."); }
+            p = await db.Pacientes.FirstOrDefaultAsync(x => x.Id == id, ct) ?? throw new InvalidOperationException("Paciente no encontrado.");
+            if (await db.Pacientes.AnyAsync(x => x.NumeroDocumento == doc && x.Id != id, ct)) { throw new InvalidOperationException($"Ya existe un paciente con documento '{doc}'."); }
         }
         else
         {
             if (_tenant.TenantId is not Guid tid) { return null; }
-            if (await _db.Pacientes.AnyAsync(x => x.NumeroDocumento == doc, ct)) { throw new InvalidOperationException($"Ya existe un paciente con documento '{doc}'."); }
+            if (await db.Pacientes.AnyAsync(x => x.NumeroDocumento == doc, ct)) { throw new InvalidOperationException($"Ya existe un paciente con documento '{doc}'."); }
             p = new Paciente { TenantId = tid };
-            _db.Pacientes.Add(p);
+            db.Pacientes.Add(p);
         }
 
         // Identificacion
@@ -213,7 +217,7 @@ public sealed class PacienteService : IPacienteService
         p.UsuarioIngresoId = req.UsuarioIngresoId;
         if (req.UsuarioIngresoId is Guid uid)
         {
-            var u = await _db.PlatformUsers.AsNoTracking().IgnoreQueryFilters()
+            var u = await db.PlatformUsers.AsNoTracking().IgnoreQueryFilters()
                 .FirstOrDefaultAsync(x => x.Id == uid, ct);
             p.UsuarioIngresoNombre = u is null ? null : NombreUsuario(u);
         }
@@ -238,17 +242,17 @@ public sealed class PacienteService : IPacienteService
         }
 
         p.Activo = req.Activo;
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
 
         // Sincronizar lista de contactos. Estrategia simple: borrar todos los
         // existentes y reescribir desde la request. Es seguro porque la entidad
         // no tiene FKs entrantes (no rompe datos clinicos).
         if (_tenant.TenantId is Guid tidSync)
         {
-            var anteriores = await _db.PacienteContactosEmergencia
+            var anteriores = await db.PacienteContactosEmergencia
                 .Where(c => c.PacienteId == p.Id)
                 .ToListAsync(ct);
-            if (anteriores.Count > 0) { _db.PacienteContactosEmergencia.RemoveRange(anteriores); }
+            if (anteriores.Count > 0) { db.PacienteContactosEmergencia.RemoveRange(anteriores); }
 
             var nuevos = req.ContactosEmergencia
                 .Where(c => !string.IsNullOrWhiteSpace(c.Nombre))
@@ -264,8 +268,8 @@ public sealed class PacienteService : IPacienteService
                     FirmaUrl = string.IsNullOrWhiteSpace(c.FirmaUrl) ? null : c.FirmaUrl
                 })
                 .ToList();
-            if (nuevos.Count > 0) { _db.PacienteContactosEmergencia.AddRange(nuevos); }
-            await _db.SaveChangesAsync(ct);
+            if (nuevos.Count > 0) { db.PacienteContactosEmergencia.AddRange(nuevos); }
+            await db.SaveChangesAsync(ct);
         }
 
         // Sincronizar lista N de contratos. Estrategia simple: borrar todos
@@ -273,10 +277,10 @@ public sealed class PacienteService : IPacienteService
         // no hay FKs entrantes a paciente_contratos.
         if (_tenant.TenantId is Guid tidCtr)
         {
-            var anteriores = await _db.PacienteContratos
+            var anteriores = await db.PacienteContratos
                 .Where(x => x.PacienteId == p.Id)
                 .ToListAsync(ct);
-            if (anteriores.Count > 0) { _db.PacienteContratos.RemoveRange(anteriores); }
+            if (anteriores.Count > 0) { db.PacienteContratos.RemoveRange(anteriores); }
 
             var nuevos = req.Contratos
                 .Where(c => c.ContratoAseguradoraId != Guid.Empty)
@@ -290,7 +294,7 @@ public sealed class PacienteService : IPacienteService
                 .GroupBy(c => c.ContratoAseguradoraId) // dedup por unique (paciente, contrato)
                 .Select(g => g.First())
                 .ToList();
-            if (nuevos.Count > 0) { _db.PacienteContratos.AddRange(nuevos); }
+            if (nuevos.Count > 0) { db.PacienteContratos.AddRange(nuevos); }
 
             // Contrato principal (CENSO): nombre de la aseguradora del contrato de Orden 1. La tabla
             // pivote no se puede cruzar como un FK en el constructor, asi que se desnormaliza aqui.
@@ -299,13 +303,13 @@ public sealed class PacienteService : IPacienteService
                 .Select(c => (Guid?)c.ContratoAseguradoraId)
                 .FirstOrDefault();
             p.ContratoPrincipal = principalId is Guid pcid
-                ? await (from c in _db.ContratosAseguradora.AsNoTracking()
-                         join a in _db.Aseguradoras.AsNoTracking() on c.AseguradoraId equals a.Id
+                ? await (from c in db.ContratosAseguradora.AsNoTracking()
+                         join a in db.Aseguradoras.AsNoTracking() on c.AseguradoraId equals a.Id
                          where c.Id == pcid
                          select a.Nombre).FirstOrDefaultAsync(ct)
                 : null;
 
-            await _db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(ct);
         }
 
         return await GetAsync(p.Id, ct);
@@ -313,7 +317,8 @@ public sealed class PacienteService : IPacienteService
 
     public async Task<bool> DeleteAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
-        var p = await _db.Pacientes.FirstOrDefaultAsync(x => x.Id == id, ct);
+        using var db = _dbFactory.Create();
+        var p = await db.Pacientes.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (p is null) { return false; }
 
         // Las FK a pacientes en asignaciones / historias_clinicas / notas_medicas
@@ -321,9 +326,9 @@ public sealed class PacienteService : IPacienteService
         // error crudo de Postgres si el paciente ya tiene datos clinicos. Aqui
         // lo chequeamos antes y devolvemos un mensaje legible. Si necesita
         // desactivarlo, el usuario tiene el flag Activo en la UI.
-        var hcs    = await _db.HistoriasClinicas.AsNoTracking().CountAsync(x => x.PacienteId == id, ct);
-        var notas  = await _db.NotasMedicas.AsNoTracking().CountAsync(x => x.PacienteId == id, ct);
-        var asigs  = await _db.Asignaciones.AsNoTracking().CountAsync(x => x.PacienteId == id, ct);
+        var hcs    = await db.HistoriasClinicas.AsNoTracking().CountAsync(x => x.PacienteId == id, ct);
+        var notas  = await db.NotasMedicas.AsNoTracking().CountAsync(x => x.PacienteId == id, ct);
+        var asigs  = await db.Asignaciones.AsNoTracking().CountAsync(x => x.PacienteId == id, ct);
         if (hcs + notas + asigs > 0)
         {
             var partes = new List<string>();
@@ -336,24 +341,26 @@ public sealed class PacienteService : IPacienteService
                 + ". Usa el switch \"Activo\" para desactivarlo.");
         }
 
-        _db.Pacientes.Remove(p);
-        await _db.SaveChangesAsync(ct);
+        db.Pacientes.Remove(p);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 
     public async Task<bool> DesactivarAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
-        var p = await _db.Pacientes.FirstOrDefaultAsync(x => x.Id == id, ct);
+        using var db = _dbFactory.Create();
+        var p = await db.Pacientes.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (p is null) { return false; }
         if (!p.Activo) { return true; }
         p.Activo = false;
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 
     public async Task<string?> UpdateTelefonoAsync(Guid pacienteId, string telefono, Guid actor, CancellationToken ct = default)
     {
-        var p = await _db.Pacientes.FirstOrDefaultAsync(x => x.Id == pacienteId, ct);
+        using var db = _dbFactory.Create();
+        var p = await db.Pacientes.FirstOrDefaultAsync(x => x.Id == pacienteId, ct);
         if (p is null) { return null; }
         // Normalizamos a solo digitos (descartamos +, espacios, guiones).
         var digits = new string((telefono ?? string.Empty).Where(char.IsDigit).ToArray());
@@ -379,14 +386,15 @@ public sealed class PacienteService : IPacienteService
         nuevaLista.AddRange(existentes);
         p.Telefono = PacienteTelefonoHelper.Empaquetar(nuevaLista);
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         // Devolvemos {codigoPaisSinPlus}{local} para que el chat lo use como ContactPhone.
         return codigoPais + local;
     }
 
     public async Task<IReadOnlyList<PacienteContactoEmergenciaDto>> ListContactosEmergenciaAsync(Guid pacienteId, CancellationToken ct = default)
     {
-        return await _db.PacienteContactosEmergencia.AsNoTracking()
+        using var db = _dbFactory.Create();
+        return await db.PacienteContactosEmergencia.AsNoTracking()
             .Where(c => c.PacienteId == pacienteId)
             .OrderBy(c => c.Orden).ThenBy(c => c.Nombre)
             .Select(c => new PacienteContactoEmergenciaDto(
@@ -396,21 +404,22 @@ public sealed class PacienteService : IPacienteService
 
     public async Task<PacienteContactoEmergenciaDto?> UpsertContactoEmergenciaAsync(Guid pacienteId, PacienteContactoEmergenciaDto contacto, Guid actor, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         if (_tenant.TenantId is not Guid tenantId) { return null; }
-        var paciente = await _db.Pacientes.FirstOrDefaultAsync(p => p.Id == pacienteId, ct);
+        var paciente = await db.Pacientes.FirstOrDefaultAsync(p => p.Id == pacienteId, ct);
         if (paciente is null) { return null; }
 
         PacienteContactoEmergencia entidad;
         if (contacto.Id is Guid existingId)
         {
-            entidad = await _db.PacienteContactosEmergencia
+            entidad = await db.PacienteContactosEmergencia
                 .FirstOrDefaultAsync(c => c.Id == existingId && c.PacienteId == pacienteId, ct)
                 ?? throw new InvalidOperationException("Contacto no encontrado.");
         }
         else
         {
             // Nuevo contacto: le damos el siguiente Orden libre.
-            var siguienteOrden = 1 + (await _db.PacienteContactosEmergencia
+            var siguienteOrden = 1 + (await db.PacienteContactosEmergencia
                 .Where(c => c.PacienteId == pacienteId)
                 .Select(c => (int?)c.Orden)
                 .MaxAsync(ct) ?? 0);
@@ -421,7 +430,7 @@ public sealed class PacienteService : IPacienteService
                 PacienteId = pacienteId,
                 Orden = siguienteOrden
             };
-            _db.PacienteContactosEmergencia.Add(entidad);
+            db.PacienteContactosEmergencia.Add(entidad);
         }
         entidad.Nombre = (contacto.Nombre ?? string.Empty).Trim();
         entidad.Parentesco = string.IsNullOrWhiteSpace(contacto.Parentesco) ? null : contacto.Parentesco!.Trim();
@@ -430,7 +439,7 @@ public sealed class PacienteService : IPacienteService
             ? null
             : new string(contacto.Telefono!.Where(char.IsDigit).ToArray());
         if (contacto.FirmaUrl is not null) { entidad.FirmaUrl = contacto.FirmaUrl; }
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return new PacienteContactoEmergenciaDto(
             entidad.Id, entidad.Nombre, entidad.Parentesco, entidad.CodigoPais,
             entidad.Telefono, entidad.Orden, entidad.FirmaUrl);
@@ -467,13 +476,14 @@ public sealed class PacienteService : IPacienteService
     /// </summary>
     public async Task<CerrarPacienteResult> CerrarAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
-        var p = await _db.Pacientes
+        using var db = _dbFactory.Create();
+        var p = await db.Pacientes
             .Include(x => x.ContactosEmergencia)
             .FirstOrDefaultAsync(x => x.Id == id, ct);
         if (p is null) { return new CerrarPacienteResult(false, new[] { "Paciente no existe" }); }
 
         // PC-4: al menos un contrato en paciente_contratos (reemplaza check Contrato1Id).
-        var tieneContrato = await _db.PacienteContratos.AsNoTracking()
+        var tieneContrato = await db.PacienteContratos.AsNoTracking()
             .AnyAsync(pc => pc.PacienteId == p.Id, ct);
         var faltantes = ValidarCamposObligatorios(p, tieneContrato);
         if (faltantes.Count > 0)
@@ -484,11 +494,11 @@ public sealed class PacienteService : IPacienteService
         var estadoPrev = p.EstadoAdmision;
         p.EstadoAdmision = "Cerrado";
         p.FechaCierreAdmision = DateTimeOffset.UtcNow;
-        _audit.Write(actor, "paciente.cerrar", nameof(Paciente), p.Id,
+        _audit.Write(db, actor, "paciente.cerrar", nameof(Paciente), p.Id,
             previousValue: new { estadoAdmision = estadoPrev },
             newValue: new { estadoAdmision = p.EstadoAdmision, fechaCierre = p.FechaCierreAdmision, documento = p.NumeroDocumento, nombre = p.NombreCompleto },
             tenantId: p.TenantId);
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return new CerrarPacienteResult(true, Array.Empty<string>());
     }
 
@@ -496,7 +506,8 @@ public sealed class PacienteService : IPacienteService
     /// reapertura permite editar y eliminar de nuevo — es una accion administrativa.</summary>
     public async Task<bool> ReabrirAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
-        var p = await _db.Pacientes.FirstOrDefaultAsync(x => x.Id == id, ct);
+        using var db = _dbFactory.Create();
+        var p = await db.Pacientes.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (p is null) { return false; }
         if (!string.Equals(p.EstadoAdmision, "Cerrado", StringComparison.OrdinalIgnoreCase))
         {
@@ -505,11 +516,11 @@ public sealed class PacienteService : IPacienteService
         var fechaCierrePrev = p.FechaCierreAdmision;
         p.EstadoAdmision = "Abierto";
         p.FechaCierreAdmision = null;
-        _audit.Write(actor, "paciente.reabrir", nameof(Paciente), p.Id,
+        _audit.Write(db, actor, "paciente.reabrir", nameof(Paciente), p.Id,
             previousValue: new { estadoAdmision = "Cerrado", fechaCierre = fechaCierrePrev },
             newValue: new { estadoAdmision = p.EstadoAdmision, documento = p.NumeroDocumento, nombre = p.NombreCompleto },
             tenantId: p.TenantId);
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 
@@ -520,7 +531,8 @@ public sealed class PacienteService : IPacienteService
     /// </summary>
     public async Task<bool> RegistrarDecesoAsync(RegistrarDecesoRequest req, Guid actor, CancellationToken ct = default)
     {
-        var p = await _db.Pacientes.FirstOrDefaultAsync(x => x.Id == req.PacienteId, ct);
+        using var db = _dbFactory.Create();
+        var p = await db.Pacientes.FirstOrDefaultAsync(x => x.Id == req.PacienteId, ct);
         if (p is null) { return false; }
 
         var estadoPrev = p.Estado;
@@ -541,7 +553,7 @@ public sealed class PacienteService : IPacienteService
             p.FechaCierreAdmision = DateTimeOffset.UtcNow;
         }
 
-        _audit.Write(actor, "paciente.deceso", nameof(Paciente), p.Id,
+        _audit.Write(db, actor, "paciente.deceso", nameof(Paciente), p.Id,
             previousValue: new { estado = estadoPrev, estadoAdmision = estadoAdmPrev },
             newValue: new
             {
@@ -554,7 +566,7 @@ public sealed class PacienteService : IPacienteService
                 nombre = p.NombreCompleto,
             },
             tenantId: p.TenantId);
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 

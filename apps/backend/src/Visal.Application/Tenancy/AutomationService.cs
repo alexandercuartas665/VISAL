@@ -5,17 +5,18 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class AutomationService : IAutomationService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenantContext;
     private readonly IChatService _chat;
     private readonly IAuditWriter _audit;
     private readonly TimeProvider _timeProvider;
 
-    public AutomationService(IApplicationDbContext db, ITenantContext tenantContext, IChatService chat, IAuditWriter audit, TimeProvider timeProvider)
+    public AutomationService(IApplicationDbContextFactory dbFactory, ITenantContext tenantContext, IChatService chat, IAuditWriter audit, TimeProvider timeProvider)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenantContext = tenantContext;
         _chat = chat;
         _audit = audit;
@@ -24,10 +25,11 @@ public sealed class AutomationService : IAutomationService
 
     public async Task<IReadOnlyList<AutomationRuleDto>> ListAsync(CancellationToken cancellationToken = default)
     {
+        using var db = _dbFactory.Create();
         // Join opcional con AiAgent para incluir el nombre del agente en la tarjeta.
-        var rows = await _db.AutomationRules.AsNoTracking()
+        var rows = await db.AutomationRules.AsNoTracking()
             .OrderBy(r => r.SortOrder).ThenBy(r => r.Name)
-            .GroupJoin(_db.AiAgents.AsNoTracking(),
+            .GroupJoin(db.AiAgents.AsNoTracking(),
                 r => r.AiAgentId, a => a.Id,
                 (r, ags) => new { r, ags })
             .SelectMany(x => x.ags.DefaultIfEmpty(),
@@ -45,38 +47,42 @@ public sealed class AutomationService : IAutomationService
     public async Task<AutomationRuleDto?> CreateAsync(SaveAutomationRuleRequest request, Guid actorUserId, CancellationToken cancellationToken = default)
     {
         if (_tenantContext.TenantId is not Guid tenantId) { return null; }
-        var nextOrder = (await _db.AutomationRules.Select(r => (int?)r.SortOrder).MaxAsync(cancellationToken) ?? -1) + 1;
+        using var db = _dbFactory.Create();
+        var nextOrder = (await db.AutomationRules.Select(r => (int?)r.SortOrder).MaxAsync(cancellationToken) ?? -1) + 1;
         var rule = new AutomationRule { TenantId = tenantId, SortOrder = nextOrder, IsActive = false };
         Apply(rule, request);
-        _db.AutomationRules.Add(rule);
-        await _db.SaveChangesAsync(cancellationToken);
+        db.AutomationRules.Add(rule);
+        await db.SaveChangesAsync(cancellationToken);
         return Map(rule);
     }
 
     public async Task<AutomationRuleDto?> UpdateAsync(Guid id, SaveAutomationRuleRequest request, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var rule = await _db.AutomationRules.FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+        using var db = _dbFactory.Create();
+        var rule = await db.AutomationRules.FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
         if (rule is null) { return null; }
         Apply(rule, request);
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return Map(rule);
     }
 
     public async Task<AutomationRuleDto?> SetActiveAsync(Guid id, bool active, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var rule = await _db.AutomationRules.FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+        using var db = _dbFactory.Create();
+        var rule = await db.AutomationRules.FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
         if (rule is null) { return null; }
         rule.IsActive = active;
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return Map(rule);
     }
 
     public async Task<bool> DeleteAsync(Guid id, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var rule = await _db.AutomationRules.FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+        using var db = _dbFactory.Create();
+        var rule = await db.AutomationRules.FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
         if (rule is null) { return false; }
-        _db.AutomationRules.Remove(rule);
-        await _db.SaveChangesAsync(cancellationToken);
+        db.AutomationRules.Remove(rule);
+        await db.SaveChangesAsync(cancellationToken);
         return true;
     }
 
@@ -84,7 +90,8 @@ public sealed class AutomationService : IAutomationService
     {
         if (_tenantContext.TenantId is not Guid tenantId) { return new AutomationRunResult(0, 0); }
 
-        var rules = await _db.AutomationRules
+        using var db = _dbFactory.Create();
+        var rules = await db.AutomationRules
             .Where(r => r.IsActive && r.Trigger == AutomationTrigger.NoReply && r.Action == AutomationAction.CreateFollowUp)
             .ToListAsync(cancellationToken);
         if (rules.Count == 0) { return new AutomationRunResult(0, 0); }
@@ -95,7 +102,7 @@ public sealed class AutomationService : IAutomationService
         var created = 0;
         if (unanswered.Count > 0)
         {
-            var leads = await _db.Leads
+            var leads = await db.Leads
                 .Where(l => l.Status == LeadStatus.Open && l.ContactPhone != null)
                 .Select(l => new { l.Id, l.ContactPhone, l.AssignedToTenantUserId })
                 .ToListAsync(cancellationToken);
@@ -108,10 +115,10 @@ public sealed class AutomationService : IAutomationService
                 var rule = rules.Where(r => minutesWaiting >= r.ThresholdMinutes).OrderBy(r => r.ThresholdMinutes).FirstOrDefault();
                 if (rule is null) { continue; }
 
-                var hasPending = await _db.FollowUpTasks.AnyAsync(t => t.LeadId == lead.Id && t.Status == FollowUpTaskStatus.Pending, cancellationToken);
+                var hasPending = await db.FollowUpTasks.AnyAsync(t => t.LeadId == lead.Id && t.Status == FollowUpTaskStatus.Pending, cancellationToken);
                 if (hasPending) { continue; }
 
-                _db.FollowUpTasks.Add(new FollowUpTask
+                db.FollowUpTasks.Add(new FollowUpTask
                 {
                     TenantId = tenantId,
                     LeadId = lead.Id,
@@ -127,9 +134,9 @@ public sealed class AutomationService : IAutomationService
         }
 
         foreach (var r in rules) { r.LastRunAt = now; }
-        _audit.Write(actorUserId, "automation.run", nameof(AutomationRule), Guid.Empty,
+        _audit.Write(db, actorUserId, "automation.run", nameof(AutomationRule), Guid.Empty,
             previousValue: null, newValue: new { rules = rules.Count, created }, tenantId: tenantId);
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return new AutomationRunResult(rules.Count, created);
     }
 
@@ -137,12 +144,13 @@ public sealed class AutomationService : IAutomationService
     {
         if (_tenantContext.TenantId is not Guid tenantId) { return 0; }
 
+        using var db = _dbFactory.Create();
         // Sembramos el agente REVISOR CLINICO IA si aun no existe, incluso si el tenant
         // ya tiene automatizaciones. El agente lo consume el orquestador de Capa 08 aunque
         // no se dispare desde una AutomationRule.
-        var revisorId = await EnsureRevisorClinicoAgenteAsync(tenantId, cancellationToken);
+        var revisorId = await EnsureRevisorClinicoAgenteAsync(db, tenantId, cancellationToken);
 
-        if (await _db.AutomationRules.AnyAsync(cancellationToken)) { return 0; }
+        if (await db.AutomationRules.AnyAsync(cancellationToken)) { return 0; }
 
         var seed = new List<AutomationRule>
         {
@@ -161,8 +169,8 @@ public sealed class AutomationService : IAutomationService
                 Trigger = AutomationTrigger.LeadCreated, Action = AutomationAction.ReviewClinicalHistoryWithAi,
                 AiAgentId = revisorId },
         };
-        _db.AutomationRules.AddRange(seed);
-        await _db.SaveChangesAsync(cancellationToken);
+        db.AutomationRules.AddRange(seed);
+        await db.SaveChangesAsync(cancellationToken);
         return seed.Count;
     }
 
@@ -171,9 +179,9 @@ public sealed class AutomationService : IAutomationService
     /// si ya existe devuelve su Id; si no, lo crea con el system prompt canonico y lo deja
     /// apagado (el operador lo enciende manualmente cuando confirme el proveedor de IA).
     /// </summary>
-    private async Task<Guid> EnsureRevisorClinicoAgenteAsync(Guid tenantId, CancellationToken ct)
+    private async Task<Guid> EnsureRevisorClinicoAgenteAsync(IApplicationDbContext db, Guid tenantId, CancellationToken ct)
     {
-        var existente = await _db.AiAgents.AsNoTracking()
+        var existente = await db.AiAgents.AsNoTracking()
             .Where(a => a.Name == Revision.Ia.IPreRevisionIaService.AgenteNombre)
             .Select(a => (Guid?)a.Id).FirstOrDefaultAsync(ct);
         if (existente is Guid id) { return id; }
@@ -188,8 +196,8 @@ public sealed class AutomationService : IAutomationService
             IsActive = false,
             SortOrder = 10,
         };
-        _db.AiAgents.Add(agente);
-        await _db.SaveChangesAsync(ct);
+        db.AiAgents.Add(agente);
+        await db.SaveChangesAsync(ct);
         return agente.Id;
     }
 

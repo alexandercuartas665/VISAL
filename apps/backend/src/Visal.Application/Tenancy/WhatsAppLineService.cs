@@ -5,16 +5,17 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = _dbFactory.Create();) en vez del IApplicationDbContext scoped.
 public sealed class WhatsAppLineService : IWhatsAppLineService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenantContext;
     private readonly IAuditWriter _audit;
     private readonly TimeProvider _timeProvider;
 
-    public WhatsAppLineService(IApplicationDbContext db, ITenantContext tenantContext, IAuditWriter audit, TimeProvider timeProvider)
+    public WhatsAppLineService(IApplicationDbContextFactory dbFactory, ITenantContext tenantContext, IAuditWriter audit, TimeProvider timeProvider)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenantContext = tenantContext;
         _audit = audit;
         _timeProvider = timeProvider;
@@ -22,7 +23,8 @@ public sealed class WhatsAppLineService : IWhatsAppLineService
 
     public async Task<IReadOnlyList<WhatsAppLineDto>> ListAsync(CancellationToken cancellationToken = default)
     {
-        return await _db.WhatsAppLines
+        using var db = _dbFactory.Create();
+        return await db.WhatsAppLines
             .AsNoTracking()
             .OrderBy(l => l.InstanceName)
             .Select(l => new WhatsAppLineDto(l.Id, l.InstanceName, l.PhoneNumber, l.Status, l.AssignedToTenantUserId, l.LastConnectedAt, l.LastStatusAt, l.Provider, l.GupshupAppId, l.InboundToken))
@@ -36,6 +38,7 @@ public sealed class WhatsAppLineService : IWhatsAppLineService
             return null;
         }
 
+        using var db = _dbFactory.Create();
         var line = new WhatsAppLine
         {
             TenantId = tenantId,
@@ -50,14 +53,14 @@ public sealed class WhatsAppLineService : IWhatsAppLineService
             // ya la URL a copiar sin viajes extra. Regenerable si se filtra.
             InboundToken = request.Provider == WhatsAppProvider.Gupshup ? GenerateInboundToken() : null,
         };
-        _db.WhatsAppLines.Add(line);
+        db.WhatsAppLines.Add(line);
 
-        _audit.Write(actorUserId, "whatsapp-line.create", nameof(WhatsAppLine), line.Id,
+        _audit.Write(db, actorUserId, "whatsapp-line.create", nameof(WhatsAppLine), line.Id,
             previousValue: null,
             newValue: new { line.InstanceName, line.PhoneNumber, provider = line.Provider.ToString() },
             tenantId: tenantId);
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return Map(line);
     }
 
@@ -72,7 +75,8 @@ public sealed class WhatsAppLineService : IWhatsAppLineService
 
     public async Task<WhatsAppLineDto?> ChangeStatusAsync(Guid lineId, WhatsAppLineStatus status, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var line = await _db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var line = await db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineId, cancellationToken);
         if (line is null)
         {
             return null;
@@ -89,12 +93,12 @@ public sealed class WhatsAppLineService : IWhatsAppLineService
                 line.LastConnectedAt = now;
             }
 
-            _audit.Write(actorUserId, "whatsapp-line.change-status", nameof(WhatsAppLine), line.Id,
+            _audit.Write(db, actorUserId, "whatsapp-line.change-status", nameof(WhatsAppLine), line.Id,
                 previousValue: new { Status = previous },
                 newValue: new { Status = status },
                 tenantId: line.TenantId);
 
-            await _db.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
         }
 
         return Map(line);
@@ -102,7 +106,8 @@ public sealed class WhatsAppLineService : IWhatsAppLineService
 
     public async Task<WhatsAppLineDto?> AssignAsync(Guid lineId, Guid? tenantUserId, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var line = await _db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var line = await db.WhatsAppLines.FirstOrDefaultAsync(l => l.Id == lineId, cancellationToken);
         if (line is null)
         {
             return null;
@@ -111,7 +116,7 @@ public sealed class WhatsAppLineService : IWhatsAppLineService
         if (tenantUserId is Guid userId)
         {
             // El filtro global garantiza que solo se valida contra usuarios del tenant activo.
-            var belongs = await _db.TenantUsers.AnyAsync(tu => tu.Id == userId, cancellationToken);
+            var belongs = await db.TenantUsers.AnyAsync(tu => tu.Id == userId, cancellationToken);
             if (!belongs)
             {
                 return null;
@@ -119,12 +124,12 @@ public sealed class WhatsAppLineService : IWhatsAppLineService
         }
 
         line.AssignedToTenantUserId = tenantUserId;
-        _audit.Write(actorUserId, "whatsapp-line.assign", nameof(WhatsAppLine), line.Id,
+        _audit.Write(db, actorUserId, "whatsapp-line.assign", nameof(WhatsAppLine), line.Id,
             previousValue: null,
             newValue: new { AssignedToTenantUserId = tenantUserId },
             tenantId: line.TenantId);
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return Map(line);
     }
 

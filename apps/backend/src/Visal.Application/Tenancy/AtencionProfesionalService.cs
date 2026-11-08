@@ -5,8 +5,9 @@ using Visal.Domain.Enums;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = dbFactory.Create();) en vez del IApplicationDbContext scoped.
 public sealed class AtencionProfesionalService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     IConfiguracionClinicaService clinica) : IAtencionProfesionalService
 {
@@ -16,6 +17,7 @@ public sealed class AtencionProfesionalService(
 
     public async Task<IReadOnlyList<MiServicioAsignadoDto>> GetMisServiciosAsync(Guid platformUserId, bool incluirCompletados = true, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         // Datos del usuario logueado: nivel de tenant (Owner/Advisor) + Rol con permisos.
         var tu = await db.TenantUsers.AsNoTracking()
             .FirstOrDefaultAsync(u => u.PlatformUserId == platformUserId, ct);
@@ -676,6 +678,7 @@ public sealed class AtencionProfesionalService(
         {
             return new RegistrarSesionResult(false, "Sin tenant activo.", false, false);
         }
+        using var db = dbFactory.Create();
         var turno = await db.AsignacionTurnos.FirstOrDefaultAsync(t => t.Id == asignacionTurnoId, ct);
         if (turno is null) { return new RegistrarSesionResult(false, "Turno no encontrado.", false, false); }
         if (sessionNo < 1 || sessionNo > turno.Cantidad)

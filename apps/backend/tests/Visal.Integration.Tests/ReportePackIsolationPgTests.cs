@@ -154,10 +154,13 @@ public sealed class ReportePackIsolationPgTests : IAsyncLifetime
 
     private async Task<ReportePackResultado> EjecutarComo(Guid tenantId, ReportePackDef pack)
     {
+        // El generador NO se convirtio (fuera de alcance), asi que sigue recibiendo un ctx vivo.
+        // ReporteCamposDinamicos y ReportePackService SI abren contexto corto por operacion -> factory inline.
         var ctx = CreateContext(tenantId);
-        var dinamicos = new ReporteCamposDinamicos(ctx);
+        var factory = new ReporteFactory(this, tenantId);
+        var dinamicos = new ReporteCamposDinamicos(factory);
         var gen = new ReporteSqlGenerator(ctx, new ReportSemanticModel(), dinamicos);
-        var svc = new ReportePackService(ctx, new FixedTenantContext(tenantId), gen, dinamicos);
+        var svc = new ReportePackService(factory, new FixedTenantContext(tenantId), gen, dinamicos);
         try
         {
             return await svc.EjecutarAsync(pack);
@@ -187,5 +190,13 @@ public sealed class ReportePackIsolationPgTests : IAsyncLifetime
         public Guid? TenantId { get; } = tenantId;
         public Guid? UserId { get; } = userId;
         public Guid? SucursalId => null;
+    }
+
+    // Factory inline (modelo AuditShortContext): un VisalDbContext NUEVO por Create() sobre
+    // las MISMAS opciones y tenant del test -> contexto corto por operacion sobre el mismo Postgres.
+    private sealed class ReporteFactory(ReportePackIsolationPgTests owner, Guid? tenantId)
+        : IApplicationDbContextFactory
+    {
+        public IApplicationDbContext Create() => owner.CreateContext(tenantId);
     }
 }

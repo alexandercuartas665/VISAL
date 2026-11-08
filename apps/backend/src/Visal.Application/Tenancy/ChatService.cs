@@ -7,15 +7,20 @@ namespace Visal.Application.Tenancy;
 
 public sealed class ChatService : IChatService
 {
-    private readonly IApplicationDbContext _db;
+    // Ola 4c estabilizacion (P0): contexto CORTO por operacion (using var db = _dbFactory.Create();)
+    // en vez del IApplicationDbContext scoped. El chat renderiza y recibe pushes SignalR en vivo
+    // (mensajes entrantes), donde una consulta en vuelo se solapaba con otra -> "second operation".
+    // Los helpers privados (SendCoreAsync, ResolveSenderAsync) reciben el MISMO db por parametro
+    // para mantener la Conversation trackeada y guardar todo en un solo contexto.
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenantContext;
     private readonly IWhatsAppConnectorService _connector;
     private readonly IChatBroadcaster _broadcaster;
     private readonly TimeProvider _timeProvider;
 
-    public ChatService(IApplicationDbContext db, ITenantContext tenantContext, IWhatsAppConnectorService connector, IChatBroadcaster broadcaster, TimeProvider timeProvider)
+    public ChatService(IApplicationDbContextFactory dbFactory, ITenantContext tenantContext, IWhatsAppConnectorService connector, IChatBroadcaster broadcaster, TimeProvider timeProvider)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenantContext = tenantContext;
         _connector = connector;
         _broadcaster = broadcaster;
@@ -24,7 +29,8 @@ public sealed class ChatService : IChatService
 
     public async Task<IReadOnlyList<ConversationDto>> ListConversationsAsync(CancellationToken cancellationToken = default)
     {
-        return await _db.Conversations
+        using var db = _dbFactory.Create();
+        return await db.Conversations
             .AsNoTracking()
             .OrderByDescending(c => c.LastMessageAt)
             .Select(c => new ConversationDto(c.Id, c.ContactPhone, c.ContactName, c.LeadId, c.LastMessageAt, c.WhatsAppLineId))
@@ -33,7 +39,8 @@ public sealed class ChatService : IChatService
 
     public async Task<IReadOnlyList<MessageDto>> ListMessagesAsync(Guid conversationId, CancellationToken cancellationToken = default)
     {
-        return await _db.Messages
+        using var db = _dbFactory.Create();
+        return await db.Messages
             .AsNoTracking()
             .Where(m => m.ConversationId == conversationId)
             .OrderBy(m => m.SentAt)
@@ -43,7 +50,8 @@ public sealed class ChatService : IChatService
 
     public async Task<MessageDto?> SendAsync(Guid conversationId, string body, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var conversation = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var conversation = await db.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId, cancellationToken);
         if (conversation is null)
         {
             return null;
@@ -59,23 +67,24 @@ public sealed class ChatService : IChatService
             MessageType = "text",
             SentAt = now
         };
-        _db.Messages.Add(message);
+        db.Messages.Add(message);
         conversation.LastMessageAt = now;
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return new MessageDto(message.Id, message.ConversationId, message.Direction, message.Body, message.MessageType, message.SentAt);
     }
 
     public async Task<ConversationDto?> GetOrCreateForLeadAsync(Guid leadId, CancellationToken cancellationToken = default)
     {
-        var lead = await _db.Leads.FirstOrDefaultAsync(l => l.Id == leadId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var lead = await db.Leads.FirstOrDefaultAsync(l => l.Id == leadId, cancellationToken);
         if (lead is null || string.IsNullOrWhiteSpace(lead.ContactPhone))
         {
             return null;
         }
         var phone = Digits(lead.ContactPhone);
 
-        var conv = await _db.Conversations.FirstOrDefaultAsync(c => c.LeadId == leadId || c.ContactPhone == phone, cancellationToken);
+        var conv = await db.Conversations.FirstOrDefaultAsync(c => c.LeadId == leadId || c.ContactPhone == phone, cancellationToken);
         if (conv is null)
         {
             if (_tenantContext.TenantId is not Guid tenantId)
@@ -83,13 +92,13 @@ public sealed class ChatService : IChatService
                 return null;
             }
             conv = new Conversation { TenantId = tenantId, ContactPhone = phone, ContactName = lead.ContactName, LeadId = leadId };
-            _db.Conversations.Add(conv);
-            await _db.SaveChangesAsync(cancellationToken);
+            db.Conversations.Add(conv);
+            await db.SaveChangesAsync(cancellationToken);
         }
         else if (conv.LeadId is null)
         {
             conv.LeadId = leadId;
-            await _db.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
         }
         return new ConversationDto(conv.Id, conv.ContactPhone, conv.ContactName, conv.LeadId, conv.LastMessageAt, conv.WhatsAppLineId);
     }
@@ -100,18 +109,19 @@ public sealed class ChatService : IChatService
         var phone = Digits(telefono);
         if (phone.Length == 0) { return null; }
 
-        var conv = await _db.Conversations.FirstOrDefaultAsync(c => c.ContactPhone == phone, cancellationToken);
+        using var db = _dbFactory.Create();
+        var conv = await db.Conversations.FirstOrDefaultAsync(c => c.ContactPhone == phone, cancellationToken);
         if (conv is null)
         {
             if (_tenantContext.TenantId is not Guid tenantId) { return null; }
             conv = new Conversation { TenantId = tenantId, ContactPhone = phone, ContactName = contactName };
-            _db.Conversations.Add(conv);
-            await _db.SaveChangesAsync(cancellationToken);
+            db.Conversations.Add(conv);
+            await db.SaveChangesAsync(cancellationToken);
         }
         else if (!string.IsNullOrWhiteSpace(contactName) && string.IsNullOrWhiteSpace(conv.ContactName))
         {
             conv.ContactName = contactName;
-            await _db.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
         }
         return new ConversationDto(conv.Id, conv.ContactPhone, conv.ContactName, conv.LeadId, conv.LastMessageAt, conv.WhatsAppLineId);
     }
@@ -122,17 +132,18 @@ public sealed class ChatService : IChatService
         {
             return new ChatSendResult(false, null, "El mensaje esta vacio.");
         }
-        var conv = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var conv = await db.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId, cancellationToken);
         if (conv is null)
         {
             return new ChatSendResult(false, null, "Conversacion no encontrada.");
         }
-        return await SendCoreAsync(conv, lineId, body, actorUserId, cancellationToken);
+        return await SendCoreAsync(db, conv, lineId, body, actorUserId, cancellationToken);
     }
 
     /// <summary>Variante "trusted" para servicios que operan sin tenant scope
-    /// (webhook Gupshup, cron). El caller ya validó a qué tenant pertenece la
-    /// conversación (via el token de la linea), asi que aqui solo confirmamos
+    /// (webhook Gupshup, cron). El caller ya valido a que tenant pertenece la
+    /// conversacion (via el token de la linea), asi que aqui solo confirmamos
     /// la coincidencia por (Id + TenantId) para evitar fuga entre tenants.</summary>
     public async Task<ChatSendResult> SendViaLineTrustedAsync(Guid tenantId, Guid conversationId, Guid lineId, string body, CancellationToken cancellationToken = default)
     {
@@ -140,7 +151,8 @@ public sealed class ChatService : IChatService
         {
             return new ChatSendResult(false, null, "El mensaje esta vacio.");
         }
-        var conv = await _db.Conversations
+        using var db = _dbFactory.Create();
+        var conv = await db.Conversations
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(c => c.Id == conversationId && c.TenantId == tenantId, cancellationToken);
         if (conv is null)
@@ -149,12 +161,13 @@ public sealed class ChatService : IChatService
         }
         // actorUserId = Guid.Empty: es un envio automatico del sistema, sin
         // profesional atras. SentByName queda como "Sistema" en el chat.
-        return await SendCoreAsync(conv, lineId, body, Guid.Empty, cancellationToken);
+        return await SendCoreAsync(db, conv, lineId, body, Guid.Empty, cancellationToken);
     }
 
     /// <summary>Nucleo del envio outbound compartido por SendViaLineAsync y
-    /// SendViaLineTrustedAsync. Recibe la Conversation ya cargada.</summary>
-    private async Task<ChatSendResult> SendCoreAsync(Conversation conv, Guid lineId, string body, Guid actorUserId, CancellationToken cancellationToken)
+    /// SendViaLineTrustedAsync. Recibe el contexto corto y la Conversation ya cargada
+    /// (trackeada por ese mismo contexto, para que el SaveChanges persista sus cambios).</summary>
+    private async Task<ChatSendResult> SendCoreAsync(IApplicationDbContext db, Conversation conv, Guid lineId, string body, Guid actorUserId, CancellationToken cancellationToken)
     {
         // Envio real por la linea elegida (Evolution).
         var send = await _connector.SendTestAsync(lineId, conv.ContactPhone, body, actorUserId, cancellationToken);
@@ -163,7 +176,7 @@ public sealed class ChatService : IChatService
             return new ChatSendResult(false, null, send.Error);
         }
 
-        var sender = await ResolveSenderAsync(actorUserId, conv.TenantId, cancellationToken);
+        var sender = await ResolveSenderAsync(db, actorUserId, conv.TenantId, cancellationToken);
         var now = _timeProvider.GetUtcNow();
         var msg = new Message
         {
@@ -176,10 +189,10 @@ public sealed class ChatService : IChatService
             SentByName = sender.Name,
             SentAt = now
         };
-        _db.Messages.Add(msg);
+        db.Messages.Add(msg);
         conv.LastMessageAt = now;
         conv.WhatsAppLineId = lineId;
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
 
         var dto = new MessageDto(msg.Id, msg.ConversationId, msg.Direction, msg.Body, msg.MessageType, msg.SentAt, msg.MediaType, msg.MediaUrl, msg.MediaMimeType, msg.SentByName);
         await _broadcaster.MessageAddedAsync(conv.TenantId, conv.Id, dto, cancellationToken);
@@ -192,7 +205,8 @@ public sealed class ChatService : IChatService
         {
             return new ChatSendResult(false, null, "Adjunto invalido.");
         }
-        var conv = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var conv = await db.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId, cancellationToken);
         if (conv is null)
         {
             return new ChatSendResult(false, null, "Conversacion no encontrada.");
@@ -204,7 +218,7 @@ public sealed class ChatService : IChatService
             return new ChatSendResult(false, null, send.Error);
         }
 
-        var sender = await ResolveSenderAsync(actorUserId, conv.TenantId, cancellationToken);
+        var sender = await ResolveSenderAsync(db, actorUserId, conv.TenantId, cancellationToken);
         var now = _timeProvider.GetUtcNow();
         var msg = new Message
         {
@@ -220,10 +234,10 @@ public sealed class ChatService : IChatService
             SentByName = sender.Name,
             SentAt = now
         };
-        _db.Messages.Add(msg);
+        db.Messages.Add(msg);
         conv.LastMessageAt = now;
         conv.WhatsAppLineId = lineId;
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
 
         var dto = new MessageDto(msg.Id, msg.ConversationId, msg.Direction, msg.Body, msg.MessageType, msg.SentAt, msg.MediaType, msg.MediaUrl, msg.MediaMimeType, msg.SentByName);
         await _broadcaster.MessageAddedAsync(conv.TenantId, conv.Id, dto, cancellationToken);
@@ -232,7 +246,8 @@ public sealed class ChatService : IChatService
 
     public async Task<ChatSendResult> SendLocationViaLineAsync(Guid conversationId, Guid lineId, double latitude, double longitude, string? name, Guid actorUserId, CancellationToken cancellationToken = default)
     {
-        var conv = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var conv = await db.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId, cancellationToken);
         if (conv is null)
         {
             return new ChatSendResult(false, null, "Conversacion no encontrada.");
@@ -244,7 +259,7 @@ public sealed class ChatService : IChatService
             return new ChatSendResult(false, null, send.Error);
         }
 
-        var sender = await ResolveSenderAsync(actorUserId, conv.TenantId, cancellationToken);
+        var sender = await ResolveSenderAsync(db, actorUserId, conv.TenantId, cancellationToken);
         var now = _timeProvider.GetUtcNow();
         var msg = new Message
         {
@@ -259,10 +274,10 @@ public sealed class ChatService : IChatService
             SentByName = sender.Name,
             SentAt = now
         };
-        _db.Messages.Add(msg);
+        db.Messages.Add(msg);
         conv.LastMessageAt = now;
         conv.WhatsAppLineId = lineId;
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
 
         var dto = new MessageDto(msg.Id, msg.ConversationId, msg.Direction, msg.Body, msg.MessageType, msg.SentAt, msg.MediaType, msg.MediaUrl, null, msg.SentByName);
         await _broadcaster.MessageAddedAsync(conv.TenantId, conv.Id, dto, cancellationToken);
@@ -275,7 +290,8 @@ public sealed class ChatService : IChatService
         {
             return null;
         }
-        var conv = await _db.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var conv = await db.Conversations.FirstOrDefaultAsync(c => c.Id == conversationId, cancellationToken);
         if (conv is null)
         {
             return null;
@@ -290,9 +306,9 @@ public sealed class ChatService : IChatService
             MessageType = "notice",
             SentAt = now
         };
-        _db.Messages.Add(msg);
+        db.Messages.Add(msg);
         conv.LastMessageAt = now;
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
 
         var dto = new MessageDto(msg.Id, msg.ConversationId, msg.Direction, msg.Body, msg.MessageType, msg.SentAt, msg.MediaType, msg.MediaUrl, msg.MediaMimeType, msg.SentByName);
         await _broadcaster.MessageAddedAsync(conv.TenantId, conv.Id, dto, cancellationToken);
@@ -301,12 +317,13 @@ public sealed class ChatService : IChatService
 
     public async Task<IReadOnlyDictionary<string, LeadChatStateDto>> GetUnansweredByPhoneAsync(CancellationToken cancellationToken = default)
     {
-        var convs = await _db.Conversations.AsNoTracking()
+        using var db = _dbFactory.Create();
+        var convs = await db.Conversations.AsNoTracking()
             .Select(c => new { c.Id, c.ContactPhone })
             .ToListAsync(cancellationToken);
         if (convs.Count == 0) { return new Dictionary<string, LeadChatStateDto>(); }
 
-        var msgs = await _db.Messages.AsNoTracking()
+        var msgs = await db.Messages.AsNoTracking()
             .Select(m => new { m.ConversationId, m.Direction, m.SentAt })
             .ToListAsync(cancellationToken);
         var byConv = msgs.GroupBy(m => m.ConversationId)
@@ -329,10 +346,10 @@ public sealed class ChatService : IChatService
     }
 
     // Resuelve el asesor (TenantUser) a partir del PlatformUser autenticado, con nombre para mostrar.
-    private async Task<(Guid? Id, string? Name)> ResolveSenderAsync(Guid actorPlatformUserId, Guid tenantId, CancellationToken ct)
+    private async Task<(Guid? Id, string? Name)> ResolveSenderAsync(IApplicationDbContext db, Guid actorPlatformUserId, Guid tenantId, CancellationToken ct)
     {
         if (actorPlatformUserId == Guid.Empty) { return (null, null); }
-        var tu = await _db.TenantUsers
+        var tu = await db.TenantUsers
             .IgnoreQueryFilters()
             .Include(u => u.PlatformUser)
             .FirstOrDefaultAsync(u => u.TenantId == tenantId && u.PlatformUserId == actorPlatformUserId, ct);
@@ -342,8 +359,8 @@ public sealed class ChatService : IChatService
     }
 
     // Extrae solo los digitos y trunca al ancho de la columna (varchar(40)) para
-    // que ningun caller — con teléfonos concatenados, multiples numeros o codigos
-    // de pais duplicados — reviente el INSERT a conversations con "value too long
+    // que ningun caller -- con telefonos concatenados, multiples numeros o codigos
+    // de pais duplicados -- reviente el INSERT a conversations con "value too long
     // for type character varying(40)". Precedente: paciente con 4 celulares en un
     // solo campo separados por " - " (2026-07-24).
     private const int MaxPhoneLength = 40;

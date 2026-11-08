@@ -14,19 +14,23 @@ namespace Visal.Application.Tenancy.Menu;
 /// </summary>
 public sealed class NavMenuConfigService : INavMenuConfigService
 {
-    private readonly IApplicationDbContext _db;
+    // Ola 4c estabilizacion (P0): contexto CORTO por operacion (using var db = _dbFactory.Create();)
+    // en vez del IApplicationDbContext scoped. El menu se arma en CADA render de pagina (layout),
+    // el punto de mayor solapamiento del circuito -> "second operation".
+    private readonly IApplicationDbContextFactory _dbFactory;
     private static readonly JsonSerializerOptions J = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
-    public NavMenuConfigService(IApplicationDbContext db) => _db = db;
+    public NavMenuConfigService(IApplicationDbContextFactory dbFactory) => _dbFactory = dbFactory;
 
     public Task<NavMenuTreeDto> GetEffectiveAsync(Guid? tenantId = null, CancellationToken ct = default) => BuildAsync(incluirOcultas: false, paraEditar: false, tenantId, ct);
     public Task<NavMenuTreeDto> GetForEditAsync(CancellationToken ct = default) => BuildAsync(incluirOcultas: true, paraEditar: true, null, ct);
 
     private async Task<NavMenuTreeDto> BuildAsync(bool incluirOcultas, bool paraEditar, Guid? tenantId, CancellationToken ct)
     {
+        using var db = _dbFactory.Create();
         var row = tenantId is Guid tid
-            ? await _db.TenantNavMenuConfigs.AsNoTracking().IgnoreQueryFilters().FirstOrDefaultAsync(x => x.TenantId == tid, ct)
-            : await _db.TenantNavMenuConfigs.AsNoTracking().FirstOrDefaultAsync(ct);
+            ? await db.TenantNavMenuConfigs.AsNoTracking().IgnoreQueryFilters().FirstOrDefaultAsync(x => x.TenantId == tid, ct)
+            : await db.TenantNavMenuConfigs.AsNoTracking().FirstOrDefaultAsync(ct);
         PersistedTree? saved = null;
         if (row is not null && !string.IsNullOrWhiteSpace(row.ConfigJson) && row.ConfigJson.Trim() != "{}")
         {
@@ -174,26 +178,28 @@ public sealed class NavMenuConfigService : INavMenuConfigService
         }
 
         var json = JsonSerializer.Serialize(persisted, J);
-        var row = await _db.TenantNavMenuConfigs.FirstOrDefaultAsync(ct);
+        using var db = _dbFactory.Create();
+        var row = await db.TenantNavMenuConfigs.FirstOrDefaultAsync(ct);
         if (row is null)
         {
             row = new TenantNavMenuConfig { ConfigJson = json };
-            _db.TenantNavMenuConfigs.Add(row);
+            db.TenantNavMenuConfigs.Add(row);
         }
         else
         {
             row.ConfigJson = json;
         }
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task ResetAsync(CancellationToken ct = default)
     {
-        var row = await _db.TenantNavMenuConfigs.FirstOrDefaultAsync(ct);
+        using var db = _dbFactory.Create();
+        var row = await db.TenantNavMenuConfigs.FirstOrDefaultAsync(ct);
         if (row is not null)
         {
-            _db.TenantNavMenuConfigs.Remove(row);
-            await _db.SaveChangesAsync(ct);
+            db.TenantNavMenuConfigs.Remove(row);
+            await db.SaveChangesAsync(ct);
         }
     }
 

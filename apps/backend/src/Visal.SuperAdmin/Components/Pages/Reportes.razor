@@ -9,7 +9,7 @@
 @using Visal.Application.Common
 @using Microsoft.EntityFrameworkCore
 @inject IReporteService ReportSvc
-@inject IApplicationDbContext Db
+@inject IApplicationDbContextFactory DbFactory
 @inject ITenantContext Tenant
 
 <PageTitle>Reportes - Visal</PageTitle>
@@ -223,7 +223,8 @@
         // Sucursal es tenant-scoped, el query filter aisla por agencia.
         if (Tenant.TenantId is Guid)
         {
-            _misSedes = await ((DbContext)Db).Set<Visal.Domain.Entities.Sucursal>().AsNoTracking()
+            using var db = DbFactory.Create();
+            _misSedes = await ((DbContext)db).Set<Visal.Domain.Entities.Sucursal>().AsNoTracking()
                 .Where(s => s.Activo)
                 .OrderBy(s => s.Nombre)
                 .Select(s => new SedeItem(s.Id, s.Nombre))

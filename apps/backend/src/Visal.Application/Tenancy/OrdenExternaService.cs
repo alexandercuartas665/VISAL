@@ -6,8 +6,9 @@ using Visal.Domain.Enums;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class OrdenExternaService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     IAuditWriter audit,
     TimeProvider time,
@@ -16,6 +17,7 @@ public sealed class OrdenExternaService(
     public async Task<IReadOnlyList<OrdenExternaItemDto>> ListarPorHistoriaAsync(
         Guid historiaClinicaId, TipoCatalogoServicio tipo, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.HistoriaClinicaOrdenesExternas.AsNoTracking()
             .Where(o => o.HistoriaClinicaId == historiaClinicaId && o.Tipo == tipo)
             .OrderBy(o => o.Orden)
@@ -27,6 +29,7 @@ public sealed class OrdenExternaService(
         Guid historiaClinicaId, TipoCatalogoServicio tipo,
         AgregarOrdenExternaRequest req, Guid actorUserId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tenantId) { throw new InvalidOperationException("Sin tenant activo."); }
         await db.EnsureAbiertaAsync(historiaClinicaId, ct);
         var siguiente = await db.HistoriaClinicaOrdenesExternas
@@ -50,15 +53,19 @@ public sealed class OrdenExternaService(
         // insumos_externos) que apunten a esta HC. Sin esto el ValoresJson
         // del formulario no ve el item nuevo hasta que el usuario recargue.
         await prefill.ActualizarValoresAsync(historiaClinicaId, ct);
-        audit.Write(actorUserId, "hc-orden-externa.add", nameof(HistoriaClinicaOrdenExterna), entity.Id,
+        // Contexto corto: el original confiaba en un SaveChanges futuro del contexto
+        // compartido para persistir la auditoria. Con el db corto hay que guardarla aqui.
+        audit.Write(db, actorUserId, "hc-orden-externa.add", nameof(HistoriaClinicaOrdenExterna), entity.Id,
             previousValue: null,
             newValue: new { historiaClinicaId, tipo = tipo.ToString(), entity.Descripcion, entity.Codigo },
             tenantId: tenantId);
+        await db.SaveChangesAsync(ct);
         return new OrdenExternaItemDto(entity.Id, entity.Orden, entity.Codigo, entity.Descripcion, entity.Cantidad, entity.Observaciones);
     }
 
     public async Task<bool> EliminarAsync(Guid itemId, Guid actorUserId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.HistoriaClinicaOrdenesExternas.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (e is null) { return false; }
         var hcId = e.HistoriaClinicaId;
@@ -66,9 +73,12 @@ public sealed class OrdenExternaService(
         db.HistoriaClinicaOrdenesExternas.Remove(e);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(hcId, ct);
-        audit.Write(actorUserId, "hc-orden-externa.delete", nameof(HistoriaClinicaOrdenExterna), e.Id,
+        // Contexto corto: la auditoria necesita su propio SaveChanges (el original se
+        // apoyaba en un save futuro del contexto compartido).
+        audit.Write(db, actorUserId, "hc-orden-externa.delete", nameof(HistoriaClinicaOrdenExterna), e.Id,
             previousValue: new { e.HistoriaClinicaId, tipo = e.Tipo.ToString(), e.Descripcion },
             newValue: null, tenantId: e.TenantId);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 }

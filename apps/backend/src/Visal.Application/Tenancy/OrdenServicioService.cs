@@ -5,14 +5,16 @@ using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class OrdenServicioService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
     IHistoriaPrefillService prefill) : IOrdenServicioService
 {
     public async Task<IReadOnlyList<ServicioSugerenciaDto>> BuscarSugerenciasAsync(
         string termino, int take = 12, Guid? pacienteId = null, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (string.IsNullOrWhiteSpace(termino) || termino.Trim().Length < 2)
         {
             return Array.Empty<ServicioSugerenciaDto>();
@@ -29,7 +31,7 @@ public sealed class OrdenServicioService(
         List<Guid>? contratoIds = null;
         if (pacienteId is Guid pid)
         {
-            contratoIds = await ContratoIdsDelPacienteAsync(pid, ct);
+            contratoIds = await ContratoIdsDelPacienteAsync(db, pid, ct);
             if (contratoIds.Count == 0) { return Array.Empty<ServicioSugerenciaDto>(); }
         }
 
@@ -150,6 +152,7 @@ public sealed class OrdenServicioService(
     public async Task<IReadOnlyList<OrdenServicioItemDto>> ListarPorHistoriaAsync(
         Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.HistoriaClinicaOrdenesServicio.AsNoTracking()
             .Where(x => x.HistoriaClinicaId == historiaId)
             .OrderBy(x => x.NumeroOrden)
@@ -164,6 +167,7 @@ public sealed class OrdenServicioService(
     public async Task<OrdenServicioItemDto> AgregarAsync(
         Guid historiaId, AgregarServicioRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         if (string.IsNullOrWhiteSpace(req.Descripcion))
         {
@@ -194,7 +198,7 @@ public sealed class OrdenServicioService(
             Orden = siguiente
         };
         db.HistoriaClinicaOrdenesServicio.Add(entity);
-        await RevocarEmisionSrvActivaAsync(historiaId, numeroOrden, actor, ct);
+        await RevocarEmisionSrvActivaAsync(db, historiaId, numeroOrden, actor, ct);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(historiaId, ct);
 
@@ -207,12 +211,13 @@ public sealed class OrdenServicioService(
     public async Task<bool> ActualizarAsync(
         Guid itemId, ActualizarServicioRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var entity = await db.HistoriaClinicaOrdenesServicio.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
         await db.EnsureAbiertaAsync(entity.HistoriaClinicaId, ct);
         entity.Cantidad = Trim(req.Cantidad);
         entity.Observaciones = Trim(req.Observaciones);
-        await RevocarEmisionSrvActivaAsync(entity.HistoriaClinicaId, entity.NumeroOrden, actor, ct);
+        await RevocarEmisionSrvActivaAsync(db, entity.HistoriaClinicaId, entity.NumeroOrden, actor, ct);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(entity.HistoriaClinicaId, ct);
         return true;
@@ -220,11 +225,12 @@ public sealed class OrdenServicioService(
 
     public async Task<bool> EliminarAsync(Guid itemId, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var entity = await db.HistoriaClinicaOrdenesServicio.FirstOrDefaultAsync(x => x.Id == itemId, ct);
         if (entity is null) { return false; }
         var hcId = entity.HistoriaClinicaId;
         await db.EnsureAbiertaAsync(hcId, ct);
-        await RevocarEmisionSrvActivaAsync(hcId, entity.NumeroOrden, actor, ct);
+        await RevocarEmisionSrvActivaAsync(db, hcId, entity.NumeroOrden, actor, ct);
         db.HistoriaClinicaOrdenesServicio.Remove(entity);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(hcId, ct);
@@ -233,11 +239,12 @@ public sealed class OrdenServicioService(
 
     public async Task<int> ContarPorHistoriaAsync(Guid historiaId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         return await db.HistoriaClinicaOrdenesServicio
             .CountAsync(x => x.HistoriaClinicaId == historiaId, ct);
     }
 
-    private async Task<List<Guid>> ContratoIdsDelPacienteAsync(Guid pacienteId, CancellationToken ct) =>
+    private static async Task<List<Guid>> ContratoIdsDelPacienteAsync(IApplicationDbContext db, Guid pacienteId, CancellationToken ct) =>
         await db.PacienteContratos.AsNoTracking()
             .Where(pc => pc.PacienteId == pacienteId)
             .Select(pc => pc.ContratoAseguradoraId)
@@ -247,7 +254,8 @@ public sealed class OrdenServicioService(
     public async Task<IReadOnlyList<PaquetePacienteDto>> ListarPaquetesDelPacienteAsync(
         Guid pacienteId, CancellationToken ct = default)
     {
-        var contratoIds = await ContratoIdsDelPacienteAsync(pacienteId, ct);
+        using var db = dbFactory.Create();
+        var contratoIds = await ContratoIdsDelPacienteAsync(db, pacienteId, ct);
         if (contratoIds.Count == 0) { return Array.Empty<PaquetePacienteDto>(); }
 
         // Paquetes presentes en los contratos del paciente (via ServicioContrato.PaqueteId).
@@ -268,7 +276,8 @@ public sealed class OrdenServicioService(
     public async Task<IReadOnlyList<ServicioDePaqueteDto>> ListarServiciosDePaqueteAsync(
         Guid pacienteId, Guid paqueteId, CancellationToken ct = default)
     {
-        var contratoIds = await ContratoIdsDelPacienteAsync(pacienteId, ct);
+        using var db = dbFactory.Create();
+        var contratoIds = await ContratoIdsDelPacienteAsync(db, pacienteId, ct);
         if (contratoIds.Count == 0) { return Array.Empty<ServicioDePaqueteDto>(); }
 
         return await db.ServiciosContrato.AsNoTracking()
@@ -283,11 +292,12 @@ public sealed class OrdenServicioService(
     public async Task<IReadOnlyList<OrdenServicioItemDto>> AgregarPaqueteAsync(
         Guid historiaId, Guid pacienteId, Guid paqueteId, Guid actor, int numeroOrden = 1, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
         await db.EnsureAbiertaAsync(historiaId, ct);
         if (numeroOrden <= 0) { numeroOrden = 1; }
 
-        var contratoIds = await ContratoIdsDelPacienteAsync(pacienteId, ct);
+        var contratoIds = await ContratoIdsDelPacienteAsync(db, pacienteId, ct);
         if (contratoIds.Count == 0) { return Array.Empty<OrdenServicioItemDto>(); }
 
         // Servicios del paquete que existen en los contratos del paciente.
@@ -338,13 +348,14 @@ public sealed class OrdenServicioService(
 
     public async Task<bool> EliminarOrdenAsync(Guid historiaId, int numeroOrden, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         if (numeroOrden <= 0) { numeroOrden = 1; }
         await db.EnsureAbiertaAsync(historiaId, ct);
         var items = await db.HistoriaClinicaOrdenesServicio
             .Where(x => x.HistoriaClinicaId == historiaId && x.NumeroOrden == numeroOrden)
             .ToListAsync(ct);
         if (items.Count == 0) { return false; }
-        await RevocarEmisionSrvActivaAsync(historiaId, numeroOrden, actor, ct);
+        await RevocarEmisionSrvActivaAsync(db, historiaId, numeroOrden, actor, ct);
         db.HistoriaClinicaOrdenesServicio.RemoveRange(items);
         await db.SaveChangesAsync(ct);
         await prefill.ActualizarValoresAsync(historiaId, ct);
@@ -355,7 +366,7 @@ public sealed class OrdenServicioService(
     /// publica (QR) de esa orden deja de ser fiel. La revocamos (baja logica): la
     /// impresion previa queda anulada y la proxima re-emite un QR nuevo. Mismo
     /// patron que medicamentos. No hace SaveChanges (lo hace el caller).</summary>
-    private async Task RevocarEmisionSrvActivaAsync(Guid historiaId, int numeroOrden, Guid actor, CancellationToken ct)
+    private static async Task RevocarEmisionSrvActivaAsync(IApplicationDbContext db, Guid historiaId, int numeroOrden, Guid actor, CancellationToken ct)
     {
         var emisiones = await db.OrdenesMedicamentosPublicas
             .Where(o => o.HistoriaClinicaId == historiaId && o.TipoOrden == "SRV"

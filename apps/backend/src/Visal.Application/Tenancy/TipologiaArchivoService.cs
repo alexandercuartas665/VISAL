@@ -4,26 +4,28 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class TipologiaArchivoService : ITipologiaArchivoService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenant;
 
-    public TipologiaArchivoService(IApplicationDbContext db, ITenantContext tenant)
+    public TipologiaArchivoService(IApplicationDbContextFactory dbFactory, ITenantContext tenant)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenant = tenant;
     }
 
     public async Task<IReadOnlyList<TipologiaArchivoDto>> ListAsync(bool soloActivos = false, CancellationToken ct = default)
     {
-        var tq = _db.TipologiaArchivos.AsNoTracking();
+        using var db = _dbFactory.Create();
+        var tq = db.TipologiaArchivos.AsNoTracking();
         if (soloActivos) { tq = tq.Where(t => t.Activo); }
         var tips = await tq.OrderBy(t => t.Nombre).ToListAsync(ct);
         if (tips.Count == 0) { return Array.Empty<TipologiaArchivoDto>(); }
 
         var tipIds = tips.Select(t => t.Id).ToList();
-        var sq = _db.TipologiaArchivoSubcategorias.AsNoTracking().Where(s => tipIds.Contains(s.TipologiaArchivoId));
+        var sq = db.TipologiaArchivoSubcategorias.AsNoTracking().Where(s => tipIds.Contains(s.TipologiaArchivoId));
         if (soloActivos) { sq = sq.Where(s => s.Activo); }
         var subsPorTip = (await sq.OrderBy(s => s.Orden).ThenBy(s => s.Nombre).ToListAsync(ct))
             .GroupBy(s => s.TipologiaArchivoId)
@@ -39,9 +41,10 @@ public sealed class TipologiaArchivoService : ITipologiaArchivoService
 
     public async Task<TipologiaArchivoDto?> GetAsync(Guid id, CancellationToken ct = default)
     {
-        var t = await _db.TipologiaArchivos.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+        using var db = _dbFactory.Create();
+        var t = await db.TipologiaArchivos.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (t is null) { return null; }
-        var subs = await _db.TipologiaArchivoSubcategorias.AsNoTracking()
+        var subs = await db.TipologiaArchivoSubcategorias.AsNoTracking()
             .Where(s => s.TipologiaArchivoId == id).OrderBy(s => s.Orden).ThenBy(s => s.Nombre)
             .Select(s => new SubcategoriaArchivoDto(s.Id, s.TipologiaArchivoId, s.Nombre, s.Activo, s.Orden))
             .ToListAsync(ct);
@@ -50,6 +53,7 @@ public sealed class TipologiaArchivoService : ITipologiaArchivoService
 
     public async Task<TipologiaArchivoDto?> SaveAsync(SaveTipologiaArchivoRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         if (_tenant.TenantId is not Guid tenantId) { return null; }
         var nombre = (req.Nombre ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(nombre)) { throw new InvalidOperationException("El nombre es obligatorio."); }
@@ -58,12 +62,12 @@ public sealed class TipologiaArchivoService : ITipologiaArchivoService
         TipologiaArchivo? entity;
         if (req.Id is Guid id)
         {
-            entity = await _db.TipologiaArchivos.FirstOrDefaultAsync(x => x.Id == id, ct);
+            entity = await db.TipologiaArchivos.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (entity is null) { return null; }
             // Unique check al renombrar.
             if (!string.Equals(entity.Nombre, nombre, StringComparison.OrdinalIgnoreCase))
             {
-                if (await _db.TipologiaArchivos.AnyAsync(x => x.Id != id && x.Nombre == nombre, ct))
+                if (await db.TipologiaArchivos.AnyAsync(x => x.Id != id && x.Nombre == nombre, ct))
                 {
                     throw new InvalidOperationException($"Ya existe una tipologia con el nombre '{nombre}'.");
                 }
@@ -71,39 +75,41 @@ public sealed class TipologiaArchivoService : ITipologiaArchivoService
         }
         else
         {
-            if (await _db.TipologiaArchivos.AnyAsync(x => x.Nombre == nombre, ct))
+            if (await db.TipologiaArchivos.AnyAsync(x => x.Nombre == nombre, ct))
             {
                 throw new InvalidOperationException($"Ya existe una tipologia con el nombre '{nombre}'.");
             }
             entity = new TipologiaArchivo { TenantId = tenantId };
-            _db.TipologiaArchivos.Add(entity);
+            db.TipologiaArchivos.Add(entity);
         }
         entity.Nombre = nombre;
         entity.Color = color;
         entity.Activo = req.Activo;
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return new TipologiaArchivoDto(entity.Id, entity.Nombre, entity.Color, entity.Activo, entity.CreatedAt,
             Array.Empty<SubcategoriaArchivoDto>());
     }
 
     public async Task<bool> DeleteAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
-        var entity = await _db.TipologiaArchivos.FirstOrDefaultAsync(x => x.Id == id, ct);
+        using var db = _dbFactory.Create();
+        var entity = await db.TipologiaArchivos.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (entity is null) { return false; }
         // Las subcategorias cuelgan con FK cascade; EF/BD las borra con la tipologia.
-        _db.TipologiaArchivos.Remove(entity);
-        await _db.SaveChangesAsync(ct);
+        db.TipologiaArchivos.Remove(entity);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 
     public async Task<SubcategoriaArchivoDto?> SaveSubcategoriaAsync(SaveSubcategoriaArchivoRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         if (_tenant.TenantId is not Guid tenantId) { return null; }
         var nombre = (req.Nombre ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(nombre)) { throw new InvalidOperationException("El nombre de la subcategoria es obligatorio."); }
         // La tipologia padre debe existir (y pertenecer al tenant, via query filter).
-        if (!await _db.TipologiaArchivos.AnyAsync(t => t.Id == req.TipologiaArchivoId, ct))
+        if (!await db.TipologiaArchivos.AnyAsync(t => t.Id == req.TipologiaArchivoId, ct))
         {
             throw new InvalidOperationException("La tipologia padre no existe.");
         }
@@ -111,10 +117,10 @@ public sealed class TipologiaArchivoService : ITipologiaArchivoService
         TipologiaArchivoSubcategoria? entity;
         if (req.Id is Guid id)
         {
-            entity = await _db.TipologiaArchivoSubcategorias.FirstOrDefaultAsync(x => x.Id == id, ct);
+            entity = await db.TipologiaArchivoSubcategorias.FirstOrDefaultAsync(x => x.Id == id, ct);
             if (entity is null) { return null; }
             if (!string.Equals(entity.Nombre, nombre, StringComparison.OrdinalIgnoreCase)
-                && await _db.TipologiaArchivoSubcategorias.AnyAsync(
+                && await db.TipologiaArchivoSubcategorias.AnyAsync(
                     x => x.Id != id && x.TipologiaArchivoId == entity.TipologiaArchivoId && x.Nombre == nombre, ct))
             {
                 throw new InvalidOperationException($"Ya existe la subcategoria '{nombre}' en esta tipologia.");
@@ -122,34 +128,36 @@ public sealed class TipologiaArchivoService : ITipologiaArchivoService
         }
         else
         {
-            if (await _db.TipologiaArchivoSubcategorias.AnyAsync(
+            if (await db.TipologiaArchivoSubcategorias.AnyAsync(
                     x => x.TipologiaArchivoId == req.TipologiaArchivoId && x.Nombre == nombre, ct))
             {
                 throw new InvalidOperationException($"Ya existe la subcategoria '{nombre}' en esta tipologia.");
             }
             entity = new TipologiaArchivoSubcategoria { TenantId = tenantId, TipologiaArchivoId = req.TipologiaArchivoId };
-            _db.TipologiaArchivoSubcategorias.Add(entity);
+            db.TipologiaArchivoSubcategorias.Add(entity);
         }
         entity.Nombre = nombre;
         entity.Activo = req.Activo;
         entity.Orden = req.Orden;
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return new SubcategoriaArchivoDto(entity.Id, entity.TipologiaArchivoId, entity.Nombre, entity.Activo, entity.Orden);
     }
 
     public async Task<bool> DeleteSubcategoriaAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
-        var entity = await _db.TipologiaArchivoSubcategorias.FirstOrDefaultAsync(x => x.Id == id, ct);
+        using var db = _dbFactory.Create();
+        var entity = await db.TipologiaArchivoSubcategorias.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (entity is null) { return false; }
-        _db.TipologiaArchivoSubcategorias.Remove(entity);
-        await _db.SaveChangesAsync(ct);
+        db.TipologiaArchivoSubcategorias.Remove(entity);
+        await db.SaveChangesAsync(ct);
         return true;
     }
 
     public async Task<int> SeedDefaultsAsync(CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         if (_tenant.TenantId is not Guid tenantId) { return 0; }
-        if (await _db.TipologiaArchivos.AnyAsync(ct)) { return 0; }
+        if (await db.TipologiaArchivos.AnyAsync(ct)) { return 0; }
         var seeds = new[]
         {
             ("Lista de firmas",   "#10b981"), // verde
@@ -161,7 +169,7 @@ public sealed class TipologiaArchivoService : ITipologiaArchivoService
         };
         foreach (var (n, c) in seeds)
         {
-            _db.TipologiaArchivos.Add(new TipologiaArchivo
+            db.TipologiaArchivos.Add(new TipologiaArchivo
             {
                 TenantId = tenantId,
                 Nombre = n,
@@ -169,7 +177,7 @@ public sealed class TipologiaArchivoService : ITipologiaArchivoService
                 Activo = true
             });
         }
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
         return seeds.Length;
     }
 

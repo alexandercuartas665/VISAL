@@ -5,22 +5,24 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class FollowUpTaskService : IFollowUpTaskService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenantContext;
     private readonly TimeProvider _timeProvider;
 
-    public FollowUpTaskService(IApplicationDbContext db, ITenantContext tenantContext, TimeProvider timeProvider)
+    public FollowUpTaskService(IApplicationDbContextFactory dbFactory, ITenantContext tenantContext, TimeProvider timeProvider)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenantContext = tenantContext;
         _timeProvider = timeProvider;
     }
 
     public async Task<IReadOnlyList<FollowUpTaskDto>> ListAsync(Guid? leadId = null, FollowUpTaskStatus? status = null, CancellationToken cancellationToken = default)
     {
-        var query = _db.FollowUpTasks.AsNoTracking();
+        using var db = _dbFactory.Create();
+        var query = db.FollowUpTasks.AsNoTracking();
         if (leadId is Guid l)
         {
             query = query.Where(t => t.LeadId == l);
@@ -44,14 +46,15 @@ public sealed class FollowUpTaskService : IFollowUpTaskService
             return null;
         }
 
-        var leadExists = await _db.Leads.AnyAsync(l => l.Id == request.LeadId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var leadExists = await db.Leads.AnyAsync(l => l.Id == request.LeadId, cancellationToken);
         if (!leadExists)
         {
             return null;
         }
 
         if (request.AssignedToTenantUserId is Guid assignee
-            && !await _db.TenantUsers.AnyAsync(tu => tu.Id == assignee, cancellationToken))
+            && !await db.TenantUsers.AnyAsync(tu => tu.Id == assignee, cancellationToken))
         {
             return null;
         }
@@ -66,10 +69,10 @@ public sealed class FollowUpTaskService : IFollowUpTaskService
             Status = FollowUpTaskStatus.Pending,
             AssignedToTenantUserId = request.AssignedToTenantUserId
         };
-        _db.FollowUpTasks.Add(task);
+        db.FollowUpTasks.Add(task);
 
         // Deja rastro en el historial del lead.
-        _db.LeadActivities.Add(new LeadActivity
+        db.LeadActivities.Add(new LeadActivity
         {
             TenantId = tenantId,
             LeadId = request.LeadId,
@@ -77,7 +80,7 @@ public sealed class FollowUpTaskService : IFollowUpTaskService
             Description = $"Seguimiento '{task.Title}' para {task.DueAt:yyyy-MM-dd}"
         });
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
         return Map(task);
     }
 
@@ -89,7 +92,8 @@ public sealed class FollowUpTaskService : IFollowUpTaskService
 
     private async Task<FollowUpTaskDto?> TransitionAsync(Guid taskId, FollowUpTaskStatus status, CancellationToken cancellationToken)
     {
-        var task = await _db.FollowUpTasks.FirstOrDefaultAsync(t => t.Id == taskId, cancellationToken);
+        using var db = _dbFactory.Create();
+        var task = await db.FollowUpTasks.FirstOrDefaultAsync(t => t.Id == taskId, cancellationToken);
         if (task is null)
         {
             return null;
@@ -99,7 +103,7 @@ public sealed class FollowUpTaskService : IFollowUpTaskService
         {
             task.Status = status;
             task.CompletedAt = status == FollowUpTaskStatus.Done ? _timeProvider.GetUtcNow() : null;
-            await _db.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesAsync(cancellationToken);
         }
 
         return Map(task);

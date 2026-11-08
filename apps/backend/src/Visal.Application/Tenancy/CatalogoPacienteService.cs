@@ -5,10 +5,12 @@ using Visal.Domain.Enums;
 
 namespace Visal.Application.Tenancy;
 
-public sealed class CatalogoPacienteService(IApplicationDbContext db, ITenantContext tenant) : ICatalogoPacienteService
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
+public sealed class CatalogoPacienteService(IApplicationDbContextFactory dbFactory, ITenantContext tenant) : ICatalogoPacienteService
 {
     public async Task<IReadOnlyList<CatalogoPacienteDto>> ListAsync(CatalogoPacienteTipo? tipo, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var q = db.CatalogosPaciente.AsNoTracking();
         if (tipo is CatalogoPacienteTipo t) { q = q.Where(c => c.Tipo == t); }
         return await q.OrderBy(c => c.Tipo).ThenBy(c => c.Nombre)
@@ -18,6 +20,7 @@ public sealed class CatalogoPacienteService(IApplicationDbContext db, ITenantCon
 
     public async Task<CatalogoPacienteDto?> SaveAsync(SaveCatalogoPacienteRequest req, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var codigo = (req.Codigo ?? "").Trim();
         var nombre = (req.Nombre ?? "").Trim();
         if (codigo.Length == 0) { throw new InvalidOperationException("El codigo es obligatorio."); }
@@ -55,6 +58,7 @@ public sealed class CatalogoPacienteService(IApplicationDbContext db, ITenantCon
 
     public async Task<bool> DeleteAsync(Guid id, Guid actor, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var e = await db.CatalogosPaciente.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (e is null) { return false; }
         db.CatalogosPaciente.Remove(e);

@@ -6,13 +6,15 @@ using Visal.Domain.Enums;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class RdaReintentoService(
-    IApplicationDbContext db,
+    IApplicationDbContextFactory dbFactory,
     IIhceSenderService sender,
     ILogger<RdaReintentoService> log) : IRdaReintentoService
 {
     public async Task<int> ReintentarPendientesAsync(CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
         var cfg = await db.InteroperabilidadConfigs.AsNoTracking().FirstOrDefaultAsync(ct);
         if (cfg is null || !cfg.ReintentoActivo) { return 0; }
 

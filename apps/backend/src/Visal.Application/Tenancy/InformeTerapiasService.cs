@@ -4,15 +4,16 @@ using Visal.Domain.Enums;
 
 namespace Visal.Application.Tenancy;
 
+// Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class InformeTerapiasService : IInformeTerapiasService
 {
-    private readonly IApplicationDbContext _db;
+    private readonly IApplicationDbContextFactory _dbFactory;
     private readonly ITenantContext _tenant;
     private readonly ISecretProtector _protector;
 
-    public InformeTerapiasService(IApplicationDbContext db, ITenantContext tenant, ISecretProtector protector)
+    public InformeTerapiasService(IApplicationDbContextFactory dbFactory, ITenantContext tenant, ISecretProtector protector)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _tenant = tenant;
         _protector = protector;
     }
@@ -62,8 +63,9 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
 
     public async Task<InformeTerapiasResult?> ObtenerAsync(Guid tenantId, Guid? profesionalId = null, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         // Tenant (no es tenant-scoped): se consulta directo por Id.
-        var tenant = await _db.Tenants.AsNoTracking()
+        var tenant = await db.Tenants.AsNoTracking()
             .Where(t => t.Id == tenantId)
             .Select(t => new { t.Name, t.LogoUrl })
             .FirstOrDefaultAsync(ct);
@@ -73,7 +75,7 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
 
         // Consultas con IgnoreQueryFilters + filtro explicito por tenant: la pagina
         // es anonima (sin cookie de tenant), asi que el filtro global no aplica.
-        var turnosQ = _db.AsignacionTurnos.AsNoTracking().IgnoreQueryFilters()
+        var turnosQ = db.AsignacionTurnos.AsNoTracking().IgnoreQueryFilters()
             .Where(t => t.TenantId == tenantId);
         // Acota a un profesional cuando el enlace se genero para el (auto-respuesta
         // de la alerta a ese profesional): solo sus turnos.
@@ -92,7 +94,7 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
         var turnoIds = turnos.Select(t => t.Id).ToList();
         var asigIds = turnos.Select(t => t.AsignacionId).Distinct().ToList();
 
-        var asigs = await _db.Asignaciones.AsNoTracking().IgnoreQueryFilters()
+        var asigs = await db.Asignaciones.AsNoTracking().IgnoreQueryFilters()
             .Where(a => a.TenantId == tenantId && asigIds.Contains(a.Id))
             .Select(a => new { a.Id, a.PacienteId, a.NombreServicio, a.TipoServicio, a.Modulo })
             .ToListAsync(ct);
@@ -108,7 +110,7 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
         }
         var asigTerapiaIds = asigTerapia.Select(a => a.Id).ToHashSet();
 
-        var sesionesRaw = await _db.AsignacionTurnoSesiones.AsNoTracking().IgnoreQueryFilters()
+        var sesionesRaw = await db.AsignacionTurnoSesiones.AsNoTracking().IgnoreQueryFilters()
             .Where(s => s.TenantId == tenantId && turnoIds.Contains(s.AsignacionTurnoId))
             .Select(s => new { s.AsignacionTurnoId, s.Completado, s.FechaAtencion })
             .ToListAsync(ct);
@@ -117,7 +119,7 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
             .ToDictionary(g => g.Key, g => g.Select(x => (Completado: x.Completado, Fecha: x.FechaAtencion)).ToList());
 
         var pacIds = asigTerapia.Select(a => a.PacienteId).Distinct().ToList();
-        var pacientes = (await _db.Pacientes.AsNoTracking().IgnoreQueryFilters()
+        var pacientes = (await db.Pacientes.AsNoTracking().IgnoreQueryFilters()
             .Where(p => p.TenantId == tenantId && pacIds.Contains(p.Id))
             .Select(p => new { p.Id, p.NombreCompleto, p.NumeroDocumento })
             .ToListAsync(ct))
@@ -126,7 +128,7 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
         var profIds = turnos.Where(t => t.ProfesionalId != Guid.Empty).Select(t => t.ProfesionalId).Distinct().ToList();
         var profesionales = profIds.Count == 0
             ? new Dictionary<Guid, string>()
-            : (await _db.Profesionales.AsNoTracking().IgnoreQueryFilters()
+            : (await db.Profesionales.AsNoTracking().IgnoreQueryFilters()
                 .Where(p => p.TenantId == tenantId && profIds.Contains(p.Id))
                 .Select(p => new { p.Id, p.NombreCompleto })
                 .ToListAsync(ct))
@@ -169,6 +171,7 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
 
     public async Task RegistrarAccesoAsync(Guid tenantId, Guid? profesionalId, CancellationToken ct = default)
     {
+        using var db = _dbFactory.Create();
         // La pagina es anonima (sin tenant en contexto): fijamos TenantId explicito.
         var acceso = new Visal.Domain.Entities.InformeAcceso
         {
@@ -177,7 +180,7 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
             AccedidoEn = DateTimeOffset.UtcNow,
             TokenTipo = profesionalId is null ? "inf1" : "inf2",
         };
-        _db.InformeAccesos.Add(acceso);
+        db.InformeAccesos.Add(acceso);
 
         // Abrir el enlace = el profesional gestiono la alerta: marcamos sus alertas de
         // doctor recientes (aun "Nueva") como Atendida. Enlace anonimo -> tenant explicito
@@ -185,7 +188,7 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
         if (profesionalId is Guid pid)
         {
             var corte = DateTimeOffset.UtcNow.AddDays(-45);
-            var pendientes = await _db.AlertaEnvios.IgnoreQueryFilters()
+            var pendientes = await db.AlertaEnvios.IgnoreQueryFilters()
                 .Where(e => e.TenantId == tenantId && e.ProfesionalId == pid
                          && e.Destinatario == AlertaDestinatario.DoctorAtendio
                          && e.EstadoGestion == AlertaGestion.Nueva
@@ -194,7 +197,7 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
             foreach (var e in pendientes) { e.EstadoGestion = AlertaGestion.Atendida; }
         }
 
-        await _db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(ct);
     }
 
     private static bool Contiene(string? s, string term)

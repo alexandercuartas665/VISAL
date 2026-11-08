@@ -285,6 +285,10 @@
                     </select>
                 </div>
                 <div class="seg-tf">
+                    <label>Cedula paciente</label>
+                    <input type="search" placeholder="documento contiene..." @bind="_traerDocumento" />
+                </div>
+                <div class="seg-tf">
                     <label>Servicio</label>
                     <input type="text" placeholder="contiene..." @bind="_traerServicio" />
                 </div>
@@ -490,6 +494,7 @@
     private string _traerSucursalId = "";
     private string _traerServicio = "";
     private string _traerProfesional = "";
+    private string _traerDocumento = "";
 
     // Filtros de la BANDEJA cargada (client-side sobre campos enriquecidos).
     private string _bandSede = "";
@@ -571,7 +576,8 @@
             var (creados, existentes) = await SegSvc.TraerPacientesAsync(
                 _desde, _hasta, await Actor(), sucId,
                 string.IsNullOrWhiteSpace(_traerServicio) ? null : _traerServicio,
-                string.IsNullOrWhiteSpace(_traerProfesional) ? null : _traerProfesional);
+                string.IsNullOrWhiteSpace(_traerProfesional) ? null : _traerProfesional,
+                string.IsNullOrWhiteSpace(_traerDocumento) ? null : _traerDocumento);
             _traerMsg = $"Traidos: {creados} nuevo(s) a la bandeja, {existentes} ya estaban.";
             await RecargarAsync();
         }

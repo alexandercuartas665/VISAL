@@ -108,6 +108,7 @@ public sealed class SeguimientoService(
     public async Task<(int Creados, int Existentes)> TraerPacientesAsync(
         DateOnly desde, DateOnly hasta, Guid actor,
         Guid? sucursalId = null, string? servicio = null, string? profesional = null,
+        string? documento = null,
         CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { return (0, 0); }
@@ -132,10 +133,25 @@ public sealed class SeguimientoService(
         }
         var servFiltro = string.IsNullOrWhiteSpace(servicio) ? null : servicio.Trim();
         var profFiltro = string.IsNullOrWhiteSpace(profesional) ? null : profesional.Trim();
+
+        // Filtro por cedula (documento del paciente): resuelve los PacienteId del tenant cuyo
+        // NumeroDocumento contiene el texto, y acota la actividad a esos pacientes. Si el texto no
+        // empata con ningun paciente, el set queda vacio y no se trae nada.
+        HashSet<Guid>? docIds = null;
+        var docFiltro = string.IsNullOrWhiteSpace(documento) ? null : documento.Trim();
+        if (docFiltro is not null)
+        {
+            docIds = (await db.Pacientes.AsNoTracking()
+                .Where(p => p.NumeroDocumento.Contains(docFiltro))
+                .Select(p => p.Id)
+                .ToListAsync(ct)).ToHashSet();
+        }
+
         var filtrada = actividad.Where(a =>
             (sedeNombre is null || string.Equals(a.Sede, sedeNombre, StringComparison.OrdinalIgnoreCase))
             && (servFiltro is null || (a.Servicio ?? "").Contains(servFiltro, StringComparison.OrdinalIgnoreCase))
-            && (profFiltro is null || (a.Profesional ?? "").Contains(profFiltro, StringComparison.OrdinalIgnoreCase)));
+            && (profFiltro is null || (a.Profesional ?? "").Contains(profFiltro, StringComparison.OrdinalIgnoreCase))
+            && (docIds is null || docIds.Contains(a.PacienteId)));
 
         // Deseados: (paciente, mes de cierre) distintos.
         var deseados = filtrada

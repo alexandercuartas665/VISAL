@@ -89,6 +89,7 @@ public static class CensoBlueprint
                 new("fecha_egreso", "Fecha De Egreso"),          // D
                 new("estado", "Estado Paciente"),                // E
                 new("contrato_principal", "Contrato"),           // F
+                new("ips_comenta.nombre", "IPS que comenta"),    // F2 (cruce a aseguradora)
                 new("clasif_paciente.nombre", "Clasificacion"),  // G
                 new("condicion", "Condicion"),                   // H
                 new("tipo_documento", "Tipo ID"),                // I
@@ -113,12 +114,7 @@ public static class CensoBlueprint
                 new("ciudad", "Ciudad"),                         // AB
                 new("contacto_emergencia", "Nombre Familiar Responsable"), // AC
                 new("email", "Correo Electronico"),              // AD
-                new("regimen", "Regimen de Afiliacion"),         // AE
-                new("fecha_reingreso", "Fecha Reingreso"),       // AF
-                new("observacion_reingreso", "Observacion Reingreso"), // AG
-                new("fecha_hospitalizacion", "Fecha de Hospitalizacion"), // AH
-                new("observaciones_hospitalizacion", "Observaciones Hospitalizacion"), // AI
-                new("observaciones_paciente", "Observaciones"),  // AJ
+                new("regimen", "Regimen de Afiliacion"),         // AE (ultima columna)
             ],
             filtros:
             [

@@ -71,6 +71,7 @@ public interface ISeguimientoService
     Task<(int Creados, int Existentes)> TraerPacientesAsync(
         DateOnly desde, DateOnly hasta, Guid actor,
         Guid? sucursalId = null, string? servicio = null, string? profesional = null,
+        string? documento = null,
         CancellationToken ct = default);
 
     /// <summary>Guarda la encuesta -> estado Realizada.</summary>

@@ -8,6 +8,7 @@
 @inject IAlertaService Svc
 @inject IHsmTemplateService HsmSvc
 @inject IInformeTerapiasService InformeSvc
+@inject IProfesionalConfigService ProfSvc
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 
@@ -18,11 +19,19 @@
         <div class="ase-eyebrow">Configuracion del Sistema</div>
         <h1 class="ase-title">Alertas automaticas</h1>
     </div>
-    <div class="d-flex gap-2">
-        <button class="btn btn-outline-secondary btn-sm" @onclick="AbrirInformeTerapias" title="Abre el informe de pacientes pendientes por terapias en una pestana nueva">
+    <div class="d-flex gap-2 align-items-center">
+        <select class="form-select form-select-sm" style="max-width: 240px" @bind="_infProfSel"
+                title="Acota el informe/enlace a un solo profesional (para validar). Vacio = todos los del tenant.">
+            <option value="">Informe: todos los profesionales</option>
+            @foreach (var p in _infProfesionales)
+            {
+                <option value="@p.Id">@p.NombreCompleto</option>
+            }
+        </select>
+        <button class="btn btn-outline-secondary btn-sm" @onclick="AbrirInformeTerapias" title="Abre el informe de pacientes pendientes por terapias en una pestana nueva (acotado al profesional elegido)">
             Informe terapias
         </button>
-        <button class="btn btn-outline-secondary btn-sm" @onclick="CopiarInformeTerapias" title="Copia el enlace publico del informe para pegarlo en un mensaje">
+        <button class="btn btn-outline-secondary btn-sm" @onclick="CopiarInformeTerapias" title="Copia el enlace publico del informe para pegarlo en un mensaje (acotado al profesional elegido)">
             Copiar enlace informe
         </button>
         <button class="btn btn-outline-primary btn-sm" @onclick="EjecutarAhora" disabled="@_busy">
@@ -960,6 +969,9 @@
     private async Task Cargar()
     {
         _reglas = (await Svc.ListAsync()).ToList();
+        // Profesionales para acotar el enlace/informe de terapias a uno solo (validacion).
+        try { _infProfesionales = (await ProfSvc.ListProfesionalesAsync(null)).OrderBy(p => p.NombreCompleto).ToList(); }
+        catch { _infProfesionales = new(); }
     }
 
     private async Task NuevaRegla()
@@ -1229,7 +1241,14 @@
         await Cargar();
     }
 
-    private string EnlaceInforme() => InformeSvc.GenerarEnlace(Nav.BaseUri);
+    // Profesionales para el selector del informe de terapias + el elegido (vacio = todos del tenant).
+    private List<ProfesionalDto> _infProfesionales = new();
+    private string _infProfSel = "";
+
+    private string EnlaceInforme()
+        => Guid.TryParse(_infProfSel, out var pid)
+            ? InformeSvc.GenerarEnlace(Nav.BaseUri, null, pid)
+            : InformeSvc.GenerarEnlace(Nav.BaseUri);
 
     private async Task AbrirInformeTerapias()
     {

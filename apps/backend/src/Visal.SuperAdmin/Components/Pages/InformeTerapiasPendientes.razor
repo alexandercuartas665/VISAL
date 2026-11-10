@@ -44,6 +44,38 @@
             }
             else
             {
+                <div class="inf-charts">
+                    @* "Por profesional" solo aporta cuando hay mas de uno (si el enlace se acoto a uno, se omite). *@
+                    @if (_porProf.Count > 1)
+                    {
+                        <div class="inf-chart">
+                            <div class="inf-chart-h">Sesiones pendientes por profesional</div>
+                            @foreach (var d in _porProf)
+                            {
+                                <div class="inf-bar-row">
+                                    <div class="inf-bar-lbl" title="@d.Label">@d.Label</div>
+                                    <div class="inf-bar-track"><div class="inf-bar-fill" style="width:@(Pct(d.Value, _maxProf))%"></div></div>
+                                    <div class="inf-bar-val">@d.Value</div>
+                                </div>
+                            }
+                        </div>
+                    }
+                    @if (_porServ.Count > 0)
+                    {
+                        <div class="inf-chart">
+                            <div class="inf-chart-h">Sesiones pendientes por servicio</div>
+                            @foreach (var d in _porServ)
+                            {
+                                <div class="inf-bar-row">
+                                    <div class="inf-bar-lbl" title="@d.Label">@d.Label</div>
+                                    <div class="inf-bar-track"><div class="inf-bar-fill inf-bar-fill-alt" style="width:@(Pct(d.Value, _maxServ))%"></div></div>
+                                    <div class="inf-bar-val">@d.Value</div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+
                 <div class="inf-table-wrap">
                     <table class="inf-table">
                         <thead>
@@ -90,6 +122,16 @@
     .inf-resumen { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-bottom: 14px; }
     .inf-badge { background: #dbeafe; color: #1e40af; font-weight: 700; font-size: 12px; border-radius: 999px; padding: 4px 12px; }
     .inf-badge-alt { background: #fef3c7; color: #92400e; }
+    .inf-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+    .inf-chart { background: #f8fafc; border: 1px solid #eef2f7; border-radius: 10px; padding: 12px 14px; }
+    .inf-chart-h { font-size: 12px; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: .02em; margin-bottom: 10px; }
+    .inf-bar-row { display: grid; grid-template-columns: 110px 1fr 30px; align-items: center; gap: 8px; margin-bottom: 7px; }
+    .inf-bar-lbl { font-size: 11px; color: #475569; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .inf-bar-track { background: #e2e8f0; border-radius: 999px; height: 14px; overflow: hidden; }
+    .inf-bar-fill { background: #1565c0; height: 100%; border-radius: 999px; min-width: 2px; }
+    .inf-bar-fill-alt { background: #d97706; }
+    .inf-bar-val { font-size: 11px; font-weight: 700; color: #334155; text-align: right; }
+    @@media (max-width: 640px) { .inf-charts { grid-template-columns: 1fr; } }
     .inf-table-wrap { overflow-x: auto; }
     .inf-table { width: 100%; border-collapse: collapse; font-size: 13px; }
     .inf-table th { text-align: left; font-size: 11px; text-transform: uppercase; color: #64748b; border-bottom: 2px solid #e2e8f0; padding: 8px 10px; }
@@ -110,12 +152,42 @@
     private InformeTerapiasResult? _data;
     private bool _invalido;
 
+    // Agregados para los graficos (barras): sesiones pendientes por profesional y por servicio.
+    // Se calculan una vez tras cargar el informe.
+    private IReadOnlyList<(string Label, int Value)> _porProf = Array.Empty<(string, int)>();
+    private IReadOnlyList<(string Label, int Value)> _porServ = Array.Empty<(string, int)>();
+    private int _maxProf = 1;
+    private int _maxServ = 1;
+
+    private void CalcularGraficos()
+    {
+        _porProf = Agrupar(f => string.IsNullOrWhiteSpace(f.Profesional) ? "(sin profesional)" : f.Profesional);
+        _porServ = Agrupar(f => string.IsNullOrWhiteSpace(f.Servicio) ? "(sin servicio)" : f.Servicio);
+        _maxProf = _porProf.Count > 0 ? _porProf.Max(x => x.Value) : 1;
+        _maxServ = _porServ.Count > 0 ? _porServ.Max(x => x.Value) : 1;
+    }
+
+    private IReadOnlyList<(string Label, int Value)> Agrupar(Func<TerapiaPendienteDto, string> clave)
+    {
+        if (_data is null || _data.Filas.Count == 0) { return Array.Empty<(string, int)>(); }
+        return _data.Filas
+            .GroupBy(clave)
+            .Select(g => (Label: g.Key, Value: g.Sum(x => x.SesionesPendientes)))
+            .OrderByDescending(x => x.Value)
+            .ThenBy(x => x.Label, StringComparer.OrdinalIgnoreCase)
+            .Take(12)
+            .ToList();
+    }
+
+    private static int Pct(int v, int max) => max <= 0 ? 0 : (int)Math.Round(100.0 * v / max);
+
     protected override async Task OnInitializedAsync()
     {
         var info = Svc.ValidarToken(T ?? "");
         if (info is null) { _invalido = true; return; }
         _data = await Svc.ObtenerAsync(info.TenantId, info.ProfesionalId);
         if (_data is null) { _invalido = true; return; }
+        CalcularGraficos();
 
         // Control de lectura: registrar que el doctor abrio su enlace. Best-effort;
         // nunca debe impedir que se vea el informe.

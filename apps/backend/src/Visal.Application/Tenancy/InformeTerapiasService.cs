@@ -75,8 +75,12 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
 
         // Consultas con IgnoreQueryFilters + filtro explicito por tenant: la pagina
         // es anonima (sin cookie de tenant), asi que el filtro global no aplica.
+        // Excluye los turnos inactivados por el Cierre de periodos (CierrePeriodoId != null):
+        // esas sesiones ya no se van a atender. Mismo criterio que CierrePeriodoService, para
+        // que al cerrar un periodo dejen de salir como pendientes en la alerta/informe (y si se
+        // reabre el cierre, vuelven a contar).
         var turnosQ = db.AsignacionTurnos.AsNoTracking().IgnoreQueryFilters()
-            .Where(t => t.TenantId == tenantId);
+            .Where(t => t.TenantId == tenantId && t.CierrePeriodoId == null);
         // Acota a un profesional cuando el enlace se genero para el (auto-respuesta
         // de la alerta a ese profesional): solo sus turnos.
         if (profesionalId is Guid pid)

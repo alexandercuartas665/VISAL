@@ -720,15 +720,15 @@ else
         return list;
     }
 
-    // Vigente en (anio, mes): segun la vigencia de la asignacion (AnioServicio + MesVigencia..MesFinal).
-    // Sin vigencia capturada (AnioServicio null o MesVigencia 0) -> se muestra siempre (no se oculta).
+    // Filtro de Mes: usa la FECHA DE ASIGNACION que se ve en la parrilla (columna "Fecha
+    // Asig" = s.FechaAsignacion). La asignacion aparece solo en el mes en que se asigno;
+    // para ver asignaciones de meses anteriores el usuario cambia el selector de Mes.
+    // Antes se usaba la vigencia (AnioServicio + MesVigencia..MesFinal), pero por datos
+    // inconsistentes (mes_final que no coincidia con fecha_final) colaba asignaciones del
+    // periodo anterior en el mes actual. Al atarlo a la misma fecha visible en pantalla el
+    // filtro es predecible y coincide 1:1 con lo que muestra el grid.
     private static bool VigenteEnMes(MiServicioAsignadoDto s, int anio, int mes)
-    {
-        if (s.AnioServicio is not short ay || s.MesVigencia < 1) { return true; }
-        int ini = s.MesVigencia;
-        int fin = (s.MesFinal is short mf && mf >= ini) ? mf : ini;
-        return ay == anio && mes >= ini && mes <= fin;
-    }
+        => s.FechaAsignacion.Year == anio && s.FechaAsignacion.Month == mes;
 
     private static string MesNombreLargo(int m) => m switch
     {

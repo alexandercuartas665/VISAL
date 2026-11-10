@@ -259,17 +259,24 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
 
     private sealed record TurnoPendiente(Guid TurnoId, Guid AsignacionId, int Cantidad);
 
-    // Turnos pendientes del periodo: asignaciones cuya vigencia TERMINA en (anio, mes)
-    // [(MesFinal ?? MesVigencia) == mes && AnioServicio == anio], turnos no anulados por un
-    // cierre previo, y SIN ninguna sesion completada (atendida y cerrada). Si viene pacienteId
-    // y/o sede, acota a las asignaciones de ese paciente / esa sucursal (cierre parcial).
+    // Turnos pendientes del periodo (anio, mes): asignaciones cuya FECHA DE ASIGNACION
+    // (FechaInicio) cae en ese mes, turnos no anulados por un cierre previo, y SIN ninguna
+    // sesion completada (atendida y cerrada). Si viene pacienteId y/o sede, acota a las
+    // asignaciones de ese paciente / esa sucursal (cierre parcial).
+    //
+    // El periodo se define por FechaInicio (la columna "Fecha Asig" de la parrilla), el MISMO
+    // criterio que usa el filtro de Mes del modulo Atencion. Antes se usaba AnioServicio +
+    // (MesFinal ?? MesVigencia), que podia quedar desalineado con lo que Atencion muestra
+    // (p.ej. mes_final capturado de mas): una asignacion se veia en un mes pero se cerraba en
+    // otro. Se usa rango de fechas por traduccion limpia a SQL e indices.
     private async Task<List<TurnoPendiente>> TurnosPendientesAsync(IApplicationDbContext db, int anio, int mes, Guid? pacienteId, string? sede, CancellationToken ct)
     {
-        short anioS = (short)anio, mesS = (short)mes;
         sede = string.IsNullOrWhiteSpace(sede) ? null : sede.Trim();
+        var primerDia = new DateOnly(anio, mes, 1);
+        var primerDiaSiguiente = primerDia.AddMonths(1);
 
         var asigQ = db.Asignaciones.AsNoTracking()
-            .Where(a => a.AnioServicio == anioS && (a.MesFinal ?? a.MesVigencia) == mesS);
+            .Where(a => a.FechaInicio >= primerDia && a.FechaInicio < primerDiaSiguiente);
         if (pacienteId is Guid pid) { asigQ = asigQ.Where(a => a.PacienteId == pid); }
         if (sede is not null) { asigQ = asigQ.Where(a => a.Sucursal == sede); }
         var asigIds = await asigQ.Select(a => a.Id).ToListAsync(ct);

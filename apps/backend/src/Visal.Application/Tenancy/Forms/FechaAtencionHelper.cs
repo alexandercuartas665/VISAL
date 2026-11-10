@@ -216,13 +216,58 @@ public static class FechaAtencionHelper
         return false;
     }
 
+    // Formatos aceptados para un campo de CUERPO marcado IsFechaAtencion, SIN zona
+    // horaria en el string. Mismo criterio que la cabecera "Ciudad y Fecha": Colombia
+    // es dd/MM/yyyy y NUNCA MM/dd. Usar InvariantCulture generico leia "06/10/2026"
+    // como 6 de JUNIO (MM/dd) y transponia dia/mes en impresion cuando el dia era <= 12.
+    // ISO primero por ser no ambiguo. El valor naive se interpreta como hora de pared de
+    // Bogota (UTC-5), igual que TryParseHeaderFecha, y se guarda en UTC (Npgsql exige
+    // offset 0 para timestamp with time zone).
+    private static readonly string[] CuerpoFechaSinZona =
+    {
+        "yyyy-MM-ddTHH:mm:ss", "yyyy-MM-ddTHH:mm", "yyyy-MM-dd HH:mm", "yyyy-MM-dd",
+        "dd/MM/yyyy HH:mm:ss", "dd/MM/yyyy HH:mm", "dd/MM/yyyy H:mm", "dd/MM/yyyy",
+        "d/M/yyyy HH:mm", "d/M/yyyy H:mm", "d/M/yyyy",
+        "dd-MM-yyyy HH:mm", "dd-MM-yyyy", "d-M-yyyy HH:mm", "d-M-yyyy",
+    };
+
+    // True si el string ISO trae zona explicita: termina en 'Z' o tiene un offset
+    // ("+hh:mm" / "-hh:mm") DESPUES de la 'T'. Evita confundir el '-' que separa la
+    // fecha (yyyy-MM-dd) con un offset negativo.
+    private static bool TieneZonaExplicita(string s)
+    {
+        if (s.EndsWith("Z", StringComparison.OrdinalIgnoreCase)) { return true; }
+        var t = s.IndexOf('T');
+        if (t < 0) { return false; }
+        var tail = s[(t + 1)..];
+        return tail.Contains('+') || tail.Contains('-');
+    }
+
     private static bool TryParse(string raw, out DateTimeOffset value)
     {
-        // ISO 8601 primero (culture invariant).
-        if (DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture,
-                DateTimeStyles.AssumeLocal, out value)) { return true; }
-        if (DateTimeOffset.TryParse(raw, out value)) { return true; }
         value = default;
+        var s = raw?.Trim();
+        if (string.IsNullOrEmpty(s)) { return false; }
+
+        // 1) ISO con zona explicita en el string: es un instante absoluto, se respeta.
+        if (TieneZonaExplicita(s)
+            && DateTimeOffset.TryParse(s, CultureInfo.InvariantCulture,
+                DateTimeStyles.RoundtripKind, out value))
+        {
+            value = value.ToUniversalTime();
+            return true;
+        }
+
+        // 2) ISO sin zona + dd/MM Colombia (RIGIDO: nunca MM/dd). Naive = hora de pared
+        //    de Bogota, guardado en UTC.
+        if (DateTime.TryParseExact(s, CuerpoFechaSinZona, CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces, out var naive))
+        {
+            value = new DateTimeOffset(DateTime.SpecifyKind(naive, DateTimeKind.Unspecified), BogotaOffset)
+                .ToUniversalTime();
+            return true;
+        }
+
         return false;
     }
 }

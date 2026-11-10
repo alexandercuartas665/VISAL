@@ -919,6 +919,13 @@ else if (_tabSel == "Cierre de periodos")
                                title="Tu usuario tiene una sede fija; el cierre se acota a ella" />
                     }
                 </div>
+                <div class="ase-f cd-f-sm">
+                    <label>Tipo de asignacion</label>
+                    <select class="form-select form-select-sm" @bind="_tipoCierreSel" @bind:after="OnCierreTipoChange">
+                        <option value="">Todos los tipos</option>
+                        @foreach (var tp in _tiposCierre) { <option value="@tp">@tp</option> }
+                    </select>
+                </div>
                 <div class="ase-f cd-f-md cd-ac-wrap">
                     <label>Paciente</label>
                     <div class="cd-ac-input">
@@ -1038,7 +1045,7 @@ else if (_tabSel == "Cierre de periodos")
                     <div class="table-responsive">
                         <table class="table table-sm table-striped">
                             <thead>
-                                <tr><th>Paciente</th><th>Documento</th><th>Servicio</th><th class="text-end">Sesiones no atendidas</th></tr>
+                                <tr><th>Paciente</th><th>Documento</th><th>Tipo</th><th>Servicio</th><th class="text-end">Sesiones no atendidas</th></tr>
                             </thead>
                             <tbody>
                                 @foreach (var f in FilasFiltradas)
@@ -1046,6 +1053,7 @@ else if (_tabSel == "Cierre de periodos")
                                     <tr>
                                         <td>@f.PacienteNombre</td>
                                         <td class="mono">@(f.PacienteDocumento ?? "-")</td>
+                                        <td>@(f.TipoServicio ?? "-")</td>
                                         <td>@f.ServicioNombre</td>
                                         <td class="text-end">@f.CantidadPendiente</td>
                                     </tr>
@@ -1729,6 +1737,17 @@ else if (_tabSel == "Cierre de periodos")
         _cierrePreview = null; _confirmandoCierre = false;
         _cierreResultado = null; _cierreResultadoDetalle = null; _cierreMsg = null;
     }
+
+    // Filtro por tipo de asignacion del cierre (TERAPIA, ENFERMERIA, ...): "" = todos. Un
+    // coordinador acota el cierre a su tipo para no cerrarle a otro servicio.
+    private List<string> _tiposCierre = new();
+    private string _tipoCierreSel = "";
+    private string? TipoCierreEfectivo => string.IsNullOrWhiteSpace(_tipoCierreSel) ? null : _tipoCierreSel;
+    private void OnCierreTipoChange()
+    {
+        _cierrePreview = null; _confirmandoCierre = false;
+        _cierreResultado = null; _cierreResultadoDetalle = null; _cierreMsg = null;
+    }
     private IEnumerable<CierrePeriodoFilaDto> FilasFiltradas =>
         _cierrePreview is null ? Enumerable.Empty<CierrePeriodoFilaDto>()
         : (PacienteCierreId is Guid pid ? _cierrePreview.Filas.Where(f => f.PacienteId == pid) : _cierrePreview.Filas);
@@ -1805,8 +1824,8 @@ else if (_tabSel == "Cierre de periodos")
         _confirmandoCierre = false; _cierreResultado = null; _cierreResultadoDetalle = null;
         try
         {
-            // Acota la vista previa al paciente y/o sede elegidos (si hay) para preparacion liviana.
-            _cierrePreview = await CierreSvc.PrevisualizarAsync(_anio, _mesCierre, PacienteCierreId, SedeCierreEfectiva);
+            // Acota la vista previa al paciente, sede y/o tipo elegidos (si hay) para preparacion liviana.
+            _cierrePreview = await CierreSvc.PrevisualizarAsync(_anio, _mesCierre, PacienteCierreId, SedeCierreEfectiva, TipoCierreEfectivo);
         }
         catch (Exception ex) { _cierreMsg = "No se pudo previsualizar: " + ex.Message; }
         finally { _cierreBusy = false; }
@@ -1848,13 +1867,13 @@ else if (_tabSel == "Cierre de periodos")
         try
         {
             var actor = await Actor();
-            var c = await CierreSvc.CerrarAsync(_anio, _mesCierre, PacienteCierreId, sedeEf, actor);
+            var c = await CierreSvc.CerrarAsync(_anio, _mesCierre, PacienteCierreId, sedeEf, actor, TipoCierreEfectivo);
             _cierreResultado = c;
             _cierreResultadoDetalle = await CierreSvc.GetDetalleAsync(c.Id);
             _cierreMsg = $"Periodo {MesNombre(c.Mes)} {c.Anio}{(c.PacienteNombre is null ? "" : " — " + c.PacienteNombre)} cerrado: {c.TotalServicios} servicio(s), {c.TotalSesiones} sesión(es) inactivada(s).";
             _confirmandoCierre = false;
             _pacienteCierreSel = ""; _pacienteCierreBusqueda = "";
-            _cierrePreview = await CierreSvc.PrevisualizarAsync(_anio, _mesCierre, null, SedeCierreEfectiva);
+            _cierrePreview = await CierreSvc.PrevisualizarAsync(_anio, _mesCierre, null, SedeCierreEfectiva, TipoCierreEfectivo);
             await CargarCierresAsync();
         }
         catch (Exception ex) { _cierreMsg = "No se pudo cerrar: " + ex.Message; _confirmandoCierre = false; }
@@ -1882,7 +1901,7 @@ else if (_tabSel == "Cierre de periodos")
             await CargarCierresAsync();
             if (_cierrePreview is not null && _cierrePreview.Anio == c.Anio && _cierrePreview.Mes == c.Mes)
             {
-                _cierrePreview = await CierreSvc.PrevisualizarAsync(_anio, _mesCierre, PacienteCierreId, SedeCierreEfectiva);
+                _cierrePreview = await CierreSvc.PrevisualizarAsync(_anio, _mesCierre, PacienteCierreId, SedeCierreEfectiva, TipoCierreEfectivo);
             }
         }
         catch (Exception ex) { _cierreMsg = "No se pudo reabrir: " + ex.Message; }
@@ -2003,6 +2022,10 @@ else if (_tabSel == "Cierre de periodos")
                 .Distinct()
                 .OrderBy(n => n)
                 .ToList();
+
+            // Tipos de asignacion presentes (TERAPIA, ENFERMERIA, ...) para el filtro del cierre.
+            _tiposCierre = (await Visal.SuperAdmin.Common.DbConcurrencia.ReintentarAsync(
+                () => CierreSvc.ListarTiposServicioAsync())).ToList();
         }
         catch (Exception ex) { _error = "Error inicial: " + ex.Message; }
     }

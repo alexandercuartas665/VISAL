@@ -9,10 +9,13 @@ namespace Visal.Application.Tenancy;
 /// <summary>Paciente candidato para el filtro del cierre (busqueda ligera por nombre/documento).</summary>
 public sealed record PacienteCierreBusquedaDto(Guid Id, string Nombre, string? Documento);
 
-/// <summary>Fila del resumen de un cierre/previsualizacion: un servicio con sesiones pendientes.</summary>
+/// <summary>Fila del resumen de un cierre/previsualizacion: un servicio con sesiones pendientes.
+/// TipoServicio es el tipo de asignacion (TERAPIA, ENFERMERIA, CONSULTA, ...); null en el detalle
+/// historico (no se persiste en CierrePeriodoDetalle).</summary>
 public sealed record CierrePeriodoFilaDto(
     Guid PacienteId, string PacienteNombre, string? PacienteDocumento,
-    string ServicioNombre, string? CodigoServicio, int CantidadPendiente);
+    string ServicioNombre, string? CodigoServicio, int CantidadPendiente,
+    string? TipoServicio = null);
 
 /// <summary>Previsualizacion del cierre de un periodo (sin mutar): que quedaria anulado.
 /// Filas abarca TODO el periodo (todos los pacientes con pendientes); la UI filtra por
@@ -35,13 +38,18 @@ public sealed record CierrePeriodoDto(
 public interface ICierrePeriodoService
 {
     /// <summary>Resumen de sesiones PENDIENTES que se anularian al cerrar (anio, mes). Si
-    /// <paramref name="pacienteId"/> y/o <paramref name="sede"/> vienen, acota la vista previa
-    /// (preparacion liviana); null = todo el periodo. No muta.</summary>
-    Task<CierrePeriodoPreviewDto> PrevisualizarAsync(int anio, int mes, Guid? pacienteId = null, string? sede = null, CancellationToken ct = default);
+    /// <paramref name="pacienteId"/>, <paramref name="sede"/> y/o <paramref name="tipo"/>
+    /// (tipo de asignacion: TERAPIA, ENFERMERIA, ...) vienen, acota la vista previa
+    /// (preparacion liviana); null = sin acotar por ese criterio. No muta.</summary>
+    Task<CierrePeriodoPreviewDto> PrevisualizarAsync(int anio, int mes, Guid? pacienteId = null, string? sede = null, string? tipo = null, CancellationToken ct = default);
 
     /// <summary>Busqueda ligera de pacientes por nombre o documento (para el filtro del cierre,
     /// antes de preparar). Tenant-scoped. Devuelve hasta 15 coincidencias.</summary>
     Task<IReadOnlyList<PacienteCierreBusquedaDto>> BuscarPacientesAsync(string? texto, CancellationToken ct = default);
+
+    /// <summary>Tipos de asignacion (TipoServicio) presentes en las asignaciones del tenant, para el
+    /// filtro de cierre (un coordinador cierra solo su tipo). Distinct, no vacios, ordenados.</summary>
+    Task<IReadOnlyList<string>> ListarTiposServicioAsync(CancellationToken ct = default);
 
     /// <summary>Genera el Excel de detalle de un cierre con TODOS los datos del paciente/servicio
     /// (identificacion, EPS, contrato, CUP, profesional, autorizacion, fechas, cantidades). Se
@@ -49,9 +57,10 @@ public interface ICierrePeriodoService
     Task<ArchivoExportado?> GenerarExcelDetalleAsync(Guid cierreId, CancellationToken ct = default);
 
     /// <summary>Cierra el periodo: anula las sesiones pendientes (marca sus turnos) y guarda el
-    /// resumen. Si <paramref name="pacienteId"/> y/o <paramref name="sede"/> vienen, el cierre es
-    /// PARCIAL (acotado). Lanza si no hay sesiones pendientes que cerrar. Devuelve el cierre creado.</summary>
-    Task<CierrePeriodoDto> CerrarAsync(int anio, int mes, Guid? pacienteId, string? sede, Guid actor, CancellationToken ct = default);
+    /// resumen. Si <paramref name="pacienteId"/>, <paramref name="sede"/> y/o <paramref name="tipo"/>
+    /// vienen, el cierre es PARCIAL (acotado). Lanza si no hay sesiones pendientes que cerrar.
+    /// Devuelve el cierre creado.</summary>
+    Task<CierrePeriodoDto> CerrarAsync(int anio, int mes, Guid? pacienteId, string? sede, Guid actor, string? tipo = null, CancellationToken ct = default);
 
     /// <summary>Reabre un periodo cerrado: devuelve las sesiones a pendientes (quita la marca) y
     /// borra el cierre + su resumen.</summary>
@@ -71,13 +80,13 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
 
     public CierrePeriodoService(IApplicationDbContextFactory dbFactory) => _dbFactory = dbFactory;
 
-    public async Task<CierrePeriodoPreviewDto> PrevisualizarAsync(int anio, int mes, Guid? pacienteId = null, string? sede = null, CancellationToken ct = default)
+    public async Task<CierrePeriodoPreviewDto> PrevisualizarAsync(int anio, int mes, Guid? pacienteId = null, string? sede = null, string? tipo = null, CancellationToken ct = default)
     {
         using var db = _dbFactory.Create();
         var yaCerrado = await db.CierrePeriodos.AsNoTracking()
             .AnyAsync(c => c.Anio == anio && c.Mes == mes, ct);
 
-        var filas = await ResumirAsync(db, await TurnosPendientesAsync(db, anio, mes, pacienteId, sede, ct), ct);
+        var filas = await ResumirAsync(db, await TurnosPendientesAsync(db, anio, mes, pacienteId, sede, tipo, ct), ct);
         return new CierrePeriodoPreviewDto(
             anio, mes, yaCerrado, filas,
             filas.Count, filas.Sum(f => f.CantidadPendiente));
@@ -99,23 +108,38 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
             .ToListAsync(ct);
     }
 
-    public async Task<CierrePeriodoDto> CerrarAsync(int anio, int mes, Guid? pacienteId, string? sede, Guid actor, CancellationToken ct = default)
+    public async Task<IReadOnlyList<string>> ListarTiposServicioAsync(CancellationToken ct = default)
+    {
+        using var db = _dbFactory.Create();
+        var tipos = await db.Asignaciones.AsNoTracking()
+            .Where(a => a.TipoServicio != null && a.TipoServicio != "")
+            .Select(a => a.TipoServicio!)
+            .Distinct()
+            .ToListAsync(ct);
+        return tipos
+            .Select(t => t.Trim())
+            .Where(t => t.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    public async Task<CierrePeriodoDto> CerrarAsync(int anio, int mes, Guid? pacienteId, string? sede, Guid actor, string? tipo = null, CancellationToken ct = default)
     {
         using var db = _dbFactory.Create();
         sede = string.IsNullOrWhiteSpace(sede) ? null : sede.Trim();
-        // Turnos pendientes en el periodo (acotados al paciente y/o sede si vienen). Cerrar es
+        tipo = string.IsNullOrWhiteSpace(tipo) ? null : tipo.Trim();
+        // Turnos pendientes en el periodo (acotados al paciente, sede y/o tipo si vienen). Cerrar es
         // idempotente: los turnos ya anulados por un cierre previo salen del calculo de pendientes,
         // asi que un cierre parcial no choca con otros del mismo periodo (indice no unico).
-        var turnosPend = await TurnosPendientesAsync(db, anio, mes, pacienteId, sede, ct);
+        var turnosPend = await TurnosPendientesAsync(db, anio, mes, pacienteId, sede, tipo, ct);
         if (turnosPend.Count == 0)
         {
-            var quien = (pacienteId, sede) switch
-            {
-                (not null, not null) => " para el paciente y la sede seleccionados",
-                (not null, null) => " para el paciente seleccionado",
-                (null, not null) => $" para la sede {sede}",
-                _ => ""
-            };
+            var filtros = new List<string>();
+            if (pacienteId is not null) { filtros.Add("el paciente seleccionado"); }
+            if (sede is not null) { filtros.Add($"la sede {sede}"); }
+            if (tipo is not null) { filtros.Add($"el tipo {tipo}"); }
+            var quien = filtros.Count == 0 ? "" : " para " + string.Join(" y ", filtros);
             throw new InvalidOperationException(
                 $"No hay sesiones pendientes que cerrar en {mes:00}/{anio}{quien}.");
         }
@@ -251,7 +275,7 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
         return await db.CierrePeriodoDetalles.AsNoTracking()
             .Where(d => d.CierrePeriodoId == cierreId)
             .OrderBy(d => d.PacienteNombre)
-            .Select(d => new CierrePeriodoFilaDto(Guid.Empty, d.PacienteNombre, d.PacienteDocumento, d.ServicioNombre, d.CodigoServicio, d.CantidadPendiente))
+            .Select(d => new CierrePeriodoFilaDto(Guid.Empty, d.PacienteNombre, d.PacienteDocumento, d.ServicioNombre, d.CodigoServicio, d.CantidadPendiente, null))
             .ToListAsync(ct);
     }
 
@@ -269,9 +293,10 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
     // (MesFinal ?? MesVigencia), que podia quedar desalineado con lo que Atencion muestra
     // (p.ej. mes_final capturado de mas): una asignacion se veia en un mes pero se cerraba en
     // otro. Se usa rango de fechas por traduccion limpia a SQL e indices.
-    private async Task<List<TurnoPendiente>> TurnosPendientesAsync(IApplicationDbContext db, int anio, int mes, Guid? pacienteId, string? sede, CancellationToken ct)
+    private async Task<List<TurnoPendiente>> TurnosPendientesAsync(IApplicationDbContext db, int anio, int mes, Guid? pacienteId, string? sede, string? tipo, CancellationToken ct)
     {
         sede = string.IsNullOrWhiteSpace(sede) ? null : sede.Trim();
+        tipo = string.IsNullOrWhiteSpace(tipo) ? null : tipo.Trim();
         var primerDia = new DateOnly(anio, mes, 1);
         var primerDiaSiguiente = primerDia.AddMonths(1);
 
@@ -279,6 +304,8 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
             .Where(a => a.FechaInicio >= primerDia && a.FechaInicio < primerDiaSiguiente);
         if (pacienteId is Guid pid) { asigQ = asigQ.Where(a => a.PacienteId == pid); }
         if (sede is not null) { asigQ = asigQ.Where(a => a.Sucursal == sede); }
+        // Tipo de asignacion (TERAPIA, ENFERMERIA, ...): un coordinador cierra solo su tipo.
+        if (tipo is not null) { asigQ = asigQ.Where(a => a.TipoServicio == tipo); }
         var asigIds = await asigQ.Select(a => a.Id).ToListAsync(ct);
         if (asigIds.Count == 0) { return new List<TurnoPendiente>(); }
 
@@ -317,7 +344,7 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
             join p in db.Pacientes.AsNoTracking() on a.PacienteId equals p.Id
             select new
             {
-                a.Id, a.PacienteId, a.NombreServicio,
+                a.Id, a.PacienteId, a.NombreServicio, a.TipoServicio,
                 p.PrimerNombre, p.PrimerApellido, p.TipoDocumento, p.NumeroDocumento
             }).ToListAsync(ct);
 
@@ -331,7 +358,8 @@ public sealed class CierrePeriodoService : ICierrePeriodoService
                     string.IsNullOrWhiteSpace(doc) ? null : doc,
                     a.NombreServicio ?? "(sin servicio)",
                     null,
-                    porAsig.TryGetValue(a.Id, out var c) ? c : 0);
+                    porAsig.TryGetValue(a.Id, out var c) ? c : 0,
+                    string.IsNullOrWhiteSpace(a.TipoServicio) ? null : a.TipoServicio);
             })
             .OrderBy(f => f.PacienteNombre, StringComparer.OrdinalIgnoreCase)
             .ToList();

@@ -53,6 +53,60 @@ public class DefaultValuesHelperHidratarTests
     }
 
     [Fact]
+    public void FilaImplicitaSinContadorRows_SeHidrataDesdeCeldasCapturadas()
+    {
+        // Bug reportado: la PRIMERA fila de la tabla es implicita. El visor la pinta
+        // (GetRowCount arranca en 1) y el doctor escribe el diagnostico, pero _rows
+        // nunca se escribe hasta pulsar "+ Agregar fila". Antes la tabla se saltaba por
+        // completo y ori/tip/rel (defaults que se ven en pantalla) salian vacios al imprimir.
+        var v = new Dictionary<string, string?>
+        {
+            // SIN tbl:sec:_rows a proposito.
+            ["tbl:sec:0:diag"] = "H544"
+        };
+
+        var cambio = DefaultValuesHelper.HidratarDefaultsAusentes(v, SchemaTablaConDefaults());
+
+        Assert.True(cambio);
+        Assert.Equal("ENFERMEDAD GENERAL", v["tbl:sec:0:ori"]);
+        Assert.Equal("1 - IMPRESION DIAGNOSTICA", v["tbl:sec:0:tip"]);
+        Assert.Equal("PRINCIPAL", v["tbl:sec:0:rel"]);
+    }
+
+    [Fact]
+    public void ColumnaConOpcionesSinDefaultValue_HidrataPrimeraOpcion()
+    {
+        // Columna select sin DefaultValue explicito: el visor muestra Options[0] como
+        // valor por defecto. La hidratacion debe persistir ESA primera opcion para que
+        // impresion y pantalla coincidan. Una columna cascada (OptionsMapKey) NO se toca.
+        var schema = new FormSchema
+        {
+            Children = new()
+            {
+                new FormNode
+                {
+                    Id = "t", Type = "field", FieldType = "table",
+                    Columns = new()
+                    {
+                        new FormColumn { Id = "sev", Name = "sev", FieldType = "select",
+                                         Options = new() { "LEVE", "MODERADO", "SEVERO" } },
+                        new FormColumn { Id = "sub", Name = "sub", FieldType = "select",
+                                         OptionsMapKey = "sev",
+                                         Options = new() { "NO DEBE USARSE" } }
+                    }
+                }
+            }
+        };
+        var v = new Dictionary<string, string?> { ["tbl:t:_rows"] = "1" };
+
+        var cambio = DefaultValuesHelper.HidratarDefaultsAusentes(v, schema);
+
+        Assert.True(cambio);
+        Assert.Equal("LEVE", v["tbl:t:0:sev"]);        // Options[0] persistida
+        Assert.False(v.ContainsKey("tbl:t:0:sub"));    // cascada: no se hidrata
+    }
+
+    [Fact]
     public void RespetaCeldaExistenteAunqueSeaVacio()
     {
         // El doctor vacio deliberadamente la columna ori en la fila 1

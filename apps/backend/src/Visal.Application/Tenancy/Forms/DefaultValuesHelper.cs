@@ -140,13 +140,37 @@ public static class DefaultValuesHelper
                 if (n.IsTable)
                 {
                     if (n.Columns is null) { continue; }
-                    if (!valores.TryGetValue($"tbl:{n.Id}:_rows", out var rowsRaw)
-                        || !int.TryParse(rowsRaw, out var rows) || rows <= 0)
-                    {
-                        continue;
-                    }
 
-                    for (var i = 0; i < rows; i++)
+                    // Cuantas filas hidratar. El contador tbl:sec:_rows puede FALTAR: la
+                    // primera fila de una tabla dinamica es implicita (el visor la pinta sin
+                    // escribir _rows hasta que el usuario pulsa "+ Agregar fila"), y ahi es
+                    // justo donde se perdian los defaults (la fila se ve en pantalla pero el
+                    // JSON sale sin sus celdas). Por eso, ademas de _rows, inferimos el numero
+                    // de filas desde las celdas YA capturadas: si existe cualquier celda
+                    // tbl:sec:{k}:col, la fila k existe aunque _rows no este. Con el diccionario
+                    // vacio (sin _rows y sin celdas) no hidratamos nada: no se inventan filas
+                    // fantasma (ver test SinFilas_NoHaceNada).
+                    var seedCount = n.SeedRows?.Count ?? 0;
+                    var declaredExtra = 0;
+                    if (valores.TryGetValue($"tbl:{n.Id}:_rows", out var rowsRaw)
+                        && int.TryParse(rowsRaw, out var r) && r > 0)
+                    {
+                        declaredExtra = r;
+                    }
+                    var maxPresente = 0;
+                    var prefijo = $"tbl:{n.Id}:";
+                    foreach (var k in valores.Keys)
+                    {
+                        if (!k.StartsWith(prefijo, StringComparison.Ordinal)) { continue; }
+                        var corte = k.IndexOf(':', prefijo.Length);
+                        if (corte <= prefijo.Length) { continue; } // "_rows" u otra clave sin indice de fila
+                        var seg = k.Substring(prefijo.Length, corte - prefijo.Length);
+                        if (int.TryParse(seg, out var ki) && ki + 1 > maxPresente) { maxPresente = ki + 1; }
+                    }
+                    var totalRows = Math.Max(seedCount + declaredExtra, maxPresente);
+                    if (totalRows <= 0) { continue; }
+
+                    for (var i = 0; i < totalRows; i++)
                     {
                         var seedRow = (n.SeedRows is not null && i < n.SeedRows.Count) ? n.SeedRows[i] : null;
                         for (var j = 0; j < n.Columns.Count; j++)
@@ -174,6 +198,14 @@ public static class DefaultValuesHelper
                                 }
                             }
 
+                            // Precedencia (misma que DefaultValuesHelper.Aplicar y que el
+                            // fallback visual del visor en RenderTableCell):
+                            //   1) SeedRowCellOptions[i_j][0] (opciones por fila seed)
+                            //   2) col.DefaultValue
+                            //   3) col.Options[0] (lo que el <select> muestra por defecto)
+                            // El (3) solo aplica a columnas con opciones fijas que NO son
+                            // cascada (OptionsMapKey): una cascada depende de la celda hermana
+                            // y el visor no le pinta opts[0] hasta que esa este elegida.
                             string? defaultParaCelda = null;
                             if (n.SeedRowCellOptions is not null
                                 && n.SeedRowCellOptions.TryGetValue($"{i}_{j}", out var rowOpts)
@@ -184,6 +216,10 @@ public static class DefaultValuesHelper
                             else if (!string.IsNullOrEmpty(col.DefaultValue))
                             {
                                 defaultParaCelda = col.DefaultValue;
+                            }
+                            else if (string.IsNullOrEmpty(col.OptionsMapKey) && col.Options is { Count: > 0 })
+                            {
+                                defaultParaCelda = col.Options[0];
                             }
                             if (string.IsNullOrEmpty(defaultParaCelda)) { continue; }
 

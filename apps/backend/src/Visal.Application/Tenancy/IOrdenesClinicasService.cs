@@ -113,7 +113,11 @@ public sealed record OrdenClinicaItemDto(
     string? TextoRepetido = null,
     /// <summary>El texto repetido desglosado POR CAMPO (label del campo + su valor), para ver
     /// de que campo salio cada fragmento. Solo se llena en grupos de texto repetido.</summary>
-    IReadOnlyList<CampoRepetidoDto>? TextoRepetidoCampos = null);
+    IReadOnlyList<CampoRepetidoDto>? TextoRepetidoCampos = null,
+    /// <summary>Descripcion/nombre del servicio del contrato (ServicioContrato.Descripcion) con el
+    /// que se cargo el servicio en /asignacion. Se resuelve por la misma cadena que
+    /// <see cref="CodigoServicio"/>. Null si la HC no tiene cadena o el servicio no tiene descripcion.</summary>
+    string? DescripcionServicio = null);
 
 /// <summary>Un campo que aporto al texto repetido: su etiqueta (label del schema) y el valor.</summary>
 public sealed record CampoRepetidoDto(string Label, string Texto);
@@ -151,7 +155,12 @@ public sealed record OrdenesClinicasFiltro(
     /// <summary>Si true, solo trae HCs cuyo texto clinico (narrativa) es IDENTICO al de otra(s)
     /// HC del MISMO formato dentro del resultado (deteccion de copy-paste). Cada grupo de
     /// duplicados comparte un numero en <see cref="OrdenClinicaItemDto.GrupoTextoRepetido"/>.</summary>
-    bool SoloTextoRepetido = false);
+    bool SoloTextoRepetido = false,
+    /// <summary>Filtra por el CUPS/codigo del servicio (ServicioContrato.CodigoServicio) O por la
+    /// descripcion/nombre del servicio (ServicioContrato.Descripcion), CONTIENE, case-insensitive y
+    /// sin tildes. Sirve el codigo exacto o parte del nombre. Vacio = sin filtro. Se aplica en
+    /// memoria sobre el resultado (dentro del tope de 5000, igual que el filtro de texto repetido).</summary>
+    string? ServicioTexto = null);
 
 public sealed record AseguradoraOpcionDto(Guid Id, string Nombre);
 public sealed record SucursalOpcionDto(Guid Id, string Nombre);

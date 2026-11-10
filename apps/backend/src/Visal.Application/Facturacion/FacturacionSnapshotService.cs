@@ -292,9 +292,17 @@ public sealed class FacturacionSnapshotService(
         return rows.Select(r =>
         {
             var (sedeNom, sedeDet) = DescribirSedes(sedeIdsPorRow[r.Id], sedeNombres);
+            // Nombre de aseguradora para el listado: una EPS -> su nombre; snapshot
+            // unificado (varias EPS) -> "Varias (N)"; sin EPS parseable -> null ("-").
+            string? asegLabel = r.AseguradoraId is Guid ai && aseguradoras.TryGetValue(ai, out var n) ? n : null;
+            if (asegLabel is null)
+            {
+                var multi = ExtraerAseguradoraIdsCountDeFiltros(r.FiltrosJson);
+                if (multi > 1) { asegLabel = $"Varias ({multi})"; }
+            }
             return Map(
                 r,
-                r.AseguradoraId is Guid ai && aseguradoras.TryGetValue(ai, out var n) ? n : null,
+                asegLabel,
                 r.CreatedBy is Guid cb && creadores.TryGetValue(cb, out var em) ? em : null,
                 sedeNom, sedeDet);
         }).ToList();
@@ -316,6 +324,12 @@ public sealed class FacturacionSnapshotService(
         {
             asegNombre = await db.Aseguradoras.AsNoTracking()
                 .Where(a => a.Id == aid).Select(a => a.Nombre).FirstOrDefaultAsync(ct);
+        }
+        else
+        {
+            // Snapshot unificado (varias EPS en uno): rotular "Varias (N)".
+            var multi = ExtraerAseguradoraIdsCountDeFiltros(snap.FiltrosJson);
+            if (multi > 1) { asegNombre = $"Varias ({multi})"; }
         }
         string? creadoPorNombre = null;
         if (snap.CreatedBy is Guid cb)
@@ -796,6 +810,31 @@ public sealed class FacturacionSnapshotService(
         }
         catch { /* filtros mal formados -> null */ }
         return null;
+    }
+
+    /// <summary>
+    /// Cantidad de aseguradoras del campo <c>aseguradoraIds</c> (snapshot unificado,
+    /// "Unir todo en un solo snapshot"). 0 si no trae ese campo (snapshot por EPS o
+    /// filtros mal formados). Sirve para rotular el listado como "Varias (N)".
+    /// </summary>
+    private static int ExtraerAseguradoraIdsCountDeFiltros(string? filtrosJson)
+    {
+        if (string.IsNullOrWhiteSpace(filtrosJson)) { return 0; }
+        try
+        {
+            using var doc = JsonDocument.Parse(filtrosJson);
+            if (doc.RootElement.TryGetProperty("aseguradoraIds", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            {
+                var n = 0;
+                foreach (var el in arr.EnumerateArray())
+                {
+                    if (el.ValueKind == JsonValueKind.String && Guid.TryParse(el.GetString(), out _)) { n++; }
+                }
+                return n;
+            }
+        }
+        catch { /* filtros mal formados -> 0 */ }
+        return 0;
     }
 
     public async Task<IReadOnlyList<PacienteSnapshotDto>> ListarPacientesSnapshotAsync(

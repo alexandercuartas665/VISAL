@@ -808,6 +808,80 @@ public sealed class SnapshotRelacionFacturasBuilderTests
         Assert.Contains(filas, f => Equals(f["CUPS"], "CPF1111") && Equals(f["Valor Total"], 200000m));
     }
 
+    /// <summary>
+    /// "Unir todo en un solo snapshot": con el campo <c>aseguradoraIds</c> (varias EPS),
+    /// el builder corre el selector por cada aseguradora y CONCATENA las filas en un solo
+    /// resultado. Control: el mismo mundo con <c>aseguradoraId</c> singular trae solo su EPS.
+    /// </summary>
+    [Fact]
+    public async Task Unir_VariasAseguradoras_ConcatenaFilasDeTodas()
+    {
+        var (ctx, _) = Db();
+        var asegA = new Aseguradora { Id = Guid.NewGuid(), TenantId = TenantId, Codigo = "NEPS", Tipo = "EPS", Nombre = "NUEVA EPS", Nit = "900156264" };
+        var contA = new ContratoAseguradora { Id = Guid.NewGuid(), TenantId = TenantId, AseguradoraId = asegA.Id, CodigoContrato = "NEPS-01", Estado = "ACTIVO" };
+        var asegB = new Aseguradora { Id = Guid.NewGuid(), TenantId = TenantId, Codigo = "ASMET", Tipo = "EPS", Nombre = "ASMET SALUD", Nit = "900226715" };
+        var contB = new ContratoAseguradora { Id = Guid.NewGuid(), TenantId = TenantId, AseguradoraId = asegB.Id, CodigoContrato = "ASM-02", Estado = "ACTIVO" };
+        var suc = new Sucursal { Id = Guid.NewGuid(), TenantId = TenantId, Codigo = "SED", Nombre = "SEDE", Activo = true, CodigoHabilitacion = "X" };
+        var prof = new Profesional { Id = Guid.NewGuid(), TenantId = TenantId, TipoDocumento = "CC", NumeroDocumento = "123", NombreCompleto = "PROF" };
+
+        Paciente Pac(string doc) => new() { Id = Guid.NewGuid(), TenantId = TenantId, TipoDocumento = "CC", NumeroDocumento = doc, PrimerNombre = "P", PrimerApellido = "A", NombreCompleto = "P A", Sexo = "M", Regimen = "CONTRIBUTIVO" };
+        var pacA = Pac("111"); var pacB = Pac("222");
+        var pcA = new PacienteContrato { Id = Guid.NewGuid(), TenantId = TenantId, PacienteId = pacA.Id, ContratoAseguradoraId = contA.Id, Orden = 1 };
+        var pcB = new PacienteContrato { Id = Guid.NewGuid(), TenantId = TenantId, PacienteId = pacB.Id, ContratoAseguradoraId = contB.Id, Orden = 1 };
+
+        void Atencion(Paciente pac, string contratoCodigo, DateTimeOffset fecha)
+        {
+            ctx.Asignaciones.Add(new Asignacion
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, LoteId = Guid.NewGuid(), PacienteId = pac.Id,
+                Sucursal = "SED", ServicioId = Guid.NewGuid().ToString(), NombreServicio = "SERV", TipoServicio = "CONSULTA",
+                Cantidad = 1, ContratoCodigo = contratoCodigo, FechaInicio = DateOnly.FromDateTime(fecha.DateTime),
+                MesVigencia = (short)fecha.Month, Estado = AsignacionEstado.Asignado
+            });
+            ctx.HistoriasClinicas.Add(new HistoriaClinica
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, PacienteId = pac.Id, ProfesionalId = prof.Id,
+                FormDefinitionId = Guid.Empty, ValoresJson = "{}", FechaApertura = fecha, FechaAtencion = fecha,
+                FechaCierre = fecha.AddHours(2), Estado = HistoriaClinicaEstado.Cerrada
+            });
+        }
+        Atencion(pacA, "NEPS-01", new DateTimeOffset(2026, 9, 5, 12, 0, 0, TimeSpan.Zero));
+        Atencion(pacB, "ASM-02", new DateTimeOffset(2026, 9, 8, 12, 0, 0, TimeSpan.Zero));
+
+        ctx.Aseguradoras.AddRange(asegA, asegB);
+        ctx.ContratosAseguradora.AddRange(contA, contB);
+        ctx.Sucursales.Add(suc); ctx.Profesionales.Add(prof);
+        ctx.Pacientes.AddRange(pacA, pacB); ctx.PacienteContratos.AddRange(pcA, pcB);
+        await ctx.SaveChangesAsync();
+
+        var builder = new SnapshotRelacionFacturasBuilder(new RelacionFacturasSelector(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = TenantId })));
+
+        // Unido (aseguradoraIds) -> 2 filas, una por EPS.
+        var unido = JsonSerializer.Serialize(new
+        {
+            aseguradoraIds = new[] { asegA.Id.ToString(), asegB.Id.ToString() },
+            sucursalIds = Array.Empty<string>(),
+            fechaInicio = "2026-09-01", fechaFin = "2026-09-30"
+        });
+        var filasU = new List<IReadOnlyDictionary<string, object?>>();
+        await foreach (var f in builder.ConstruirAsync(unido)) { filasU.Add(f); }
+        Assert.Equal(2, filasU.Count);
+        Assert.Contains(filasU, f => Equals(f["Contrato"], "NEPS-01"));
+        Assert.Contains(filasU, f => Equals(f["Contrato"], "ASM-02"));
+
+        // Control: una sola EPS (aseguradoraId singular) -> 1 fila.
+        var sola = JsonSerializer.Serialize(new
+        {
+            aseguradoraId = asegA.Id.ToString(),
+            sucursalIds = Array.Empty<string>(),
+            fechaInicio = "2026-09-01", fechaFin = "2026-09-30"
+        });
+        var filasS = new List<IReadOnlyDictionary<string, object?>>();
+        await foreach (var f in builder.ConstruirAsync(sola)) { filasS.Add(f); }
+        Assert.Single(filasS);
+        Assert.Equal("NEPS-01", filasS[0]["Contrato"]);
+    }
+
     // ---- Fake ITenantContext ----
 
     private sealed class FakeTenantContext : ITenantContext

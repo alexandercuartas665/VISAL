@@ -396,12 +396,15 @@ public sealed class OrdenesClinicasService(IApplicationDbContextFactory dbFactor
             .Where(x => Guid.TryParse(x.ServicioId, out _))
             .ToDictionary(x => x.Id, x => Guid.Parse(x.ServicioId!));
         var servIds = asigToServicioId.Values.Distinct().ToList();
-        var servToCodigo = servIds.Count == 0
-            ? new Dictionary<Guid, string?>()
-            : await db.ServiciosContrato.AsNoTracking()
+        var servContratoInfo = servIds.Count == 0
+            ? new List<(Guid Id, string? CodigoServicio, string? Descripcion)>()
+            : (await db.ServiciosContrato.AsNoTracking()
                 .Where(s => servIds.Contains(s.Id))
-                .Select(s => new { s.Id, s.CodigoServicio })
-                .ToDictionaryAsync(x => x.Id, x => x.CodigoServicio, ct);
+                .Select(s => new { s.Id, s.CodigoServicio, s.Descripcion })
+                .ToListAsync(ct))
+                .Select(x => (x.Id, x.CodigoServicio, x.Descripcion)).ToList();
+        var servToCodigo = servContratoInfo.ToDictionary(x => x.Id, x => x.CodigoServicio);
+        var servToDescripcion = servContratoInfo.ToDictionary(x => x.Id, x => x.Descripcion);
         var turnoOrden = new Dictionary<Guid, int>();
         if (asigIds.Count > 0)
         {
@@ -465,17 +468,18 @@ public sealed class OrdenesClinicasService(IApplicationDbContextFactory dbFactor
             Guid? asigLoteId = null;
             Guid? asignacionId = null;
             string? codigoServicio = null;
+            string? descripcionServicio = null;
             if (hcToTurno.TryGetValue(r.Hc.Id, out var turnoForLote)
                 && turnoToAsig.TryGetValue(turnoForLote, out var asigForLote))
             {
                 asignacionId = asigForLote;   // a.id del servicio concreto (nivel del N° de sesion)
                 if (asigToLote.TryGetValue(asigForLote, out var loteForHc)) { asigLoteId = loteForHc; }
-                // Codigo del servicio del contrato (ServicioContrato.CodigoServicio) con el
+                // Codigo y descripcion del servicio del contrato (ServicioContrato) con el
                 // que se cargo el servicio en /asignacion.
-                if (asigToServicioId.TryGetValue(asigForLote, out var servGuid)
-                    && servToCodigo.TryGetValue(servGuid, out var cod))
+                if (asigToServicioId.TryGetValue(asigForLote, out var servGuid))
                 {
-                    codigoServicio = cod;
+                    if (servToCodigo.TryGetValue(servGuid, out var cod)) { codigoServicio = cod; }
+                    if (servToDescripcion.TryGetValue(servGuid, out var des)) { descripcionServicio = des; }
                 }
             }
             return new OrdenClinicaItemDto(
@@ -523,7 +527,7 @@ public sealed class OrdenesClinicasService(IApplicationDbContextFactory dbFactor
                 r.Hc.ProfesionalId is Guid pid && profToDoc.TryGetValue(pid, out var pdoc) ? pdoc : null,
                 asignacionId is Guid afid && asigToEsFolio.TryGetValue(afid, out var ef) && ef,
                 asignacionId is Guid afid2 && asigToAutorizacion.TryGetValue(afid2, out var aut) ? aut : null
-            );
+            ) with { DescripcionServicio = descripcionServicio };
         }).ToList();
 
         // ── Deteccion de "texto repetido" (copy-paste) ──────────────────────────────
@@ -581,6 +585,17 @@ public sealed class OrdenesClinicasService(IApplicationDbContextFactory dbFactor
                 .ToList();
         }
 
+        // Filtro por CUPS/servicio (en memoria, sobre el resultado ya resuelto): CONTIENE en el
+        // codigo del servicio O en su descripcion, case + tildes insensibles. Igual que el filtro
+        // de texto repetido, actua dentro del tope de 5000 filas que trae la query principal.
+        if (!string.IsNullOrWhiteSpace(filtro.ServicioTexto))
+        {
+            var needle = NormalizarBusqueda(filtro.ServicioTexto);
+            result = result.Where(x =>
+                NormalizarBusqueda(x.CodigoServicio).Contains(needle)
+                || NormalizarBusqueda(x.DescripcionServicio).Contains(needle)).ToList();
+        }
+
         return result;
     }
 
@@ -626,6 +641,24 @@ public sealed class OrdenesClinicasService(IApplicationDbContextFactory dbFactor
         if (contenido.Length < 20) { return (null, null, sinCampos); }
         var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(contenido)));
         return (hash, sbLegible.ToString(), campos);
+    }
+
+    /// <summary>Normaliza para busqueda: quita tildes y pasa a mayusculas (case + tildes
+    /// insensibles). Usado por el filtro CUPS/servicio. Null/vacio -> cadena vacia.</summary>
+    private static string NormalizarBusqueda(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) { return string.Empty; }
+        var formD = s.Trim().Normalize(System.Text.NormalizationForm.FormD);
+        var sb = new System.Text.StringBuilder(formD.Length);
+        foreach (var ch in formD)
+        {
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch)
+                != System.Globalization.UnicodeCategory.NonSpacingMark)
+            {
+                sb.Append(ch);
+            }
+        }
+        return sb.ToString().Normalize(System.Text.NormalizationForm.FormC).ToUpperInvariant();
     }
 
     /// <summary>Mapa clave(Name)->label a partir del SchemaJson del FormDefinition, recorriendo

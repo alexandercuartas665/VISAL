@@ -369,9 +369,25 @@
                                 }
                             </div>
                             <small class="text-muted d-block mt-1">
-                                Se genera un snapshot independiente por cada aseguradora marcada.
+                                @(_relAseguradoraIds.Count > 1 && _relUnir
+                                    ? "Se genera UN solo snapshot con todas las aseguradoras marcadas unidas."
+                                    : "Se genera un snapshot independiente por cada aseguradora marcada.")
                             </small>
                         </div>
+                        @if (_relAseguradoraIds.Count > 1)
+                        {
+                            <div class="snf-f">
+                                <label class="sn-multi-chip" style="font-weight:600;">
+                                    <input type="checkbox"
+                                           checked="@_relUnir"
+                                           @onchange="e => _relUnir = (bool)(e.Value ?? false)" />
+                                    <span>Unir todo en un solo snapshot (todas las aseguradoras, contratos y sedes en un archivo)</span>
+                                </label>
+                                <small class="text-muted d-block mt-1">
+                                    Si lo marcas, en vez de un snapshot por aseguradora se genera uno solo que incluye todas las marcadas (cada fila conserva su aseguradora). Afecta igual a Ver, descargas, ZIP y Cuenta Medica.
+                                </small>
+                            </div>
+                        }
                         @if (_relAseguradoraIds.Count > 0)
                         {
                             <div class="snf-f">
@@ -1692,6 +1708,9 @@
     private Dictionary<Guid, List<ContratoDto>> _relContratosPorAse = new();
     private HashSet<Guid> _relContratoIds = new();
     private bool _relCargandoContratos;
+    // Cuando es true y hay 2+ aseguradoras marcadas, se genera UN solo snapshot con
+    // todas unidas (campo aseguradoraIds) en vez de uno por EPS. Default false.
+    private bool _relUnir;
     private DateOnly? _relFechaInicio;
     private DateOnly? _relFechaFin;
     // Filtro opcional pensado para pruebas: nombre o identificacion del paciente
@@ -2384,6 +2403,7 @@
         _relFechaFin = hoy;
         _relPacienteQuery = string.Empty;
         _relUsarDatosPaciente = false;
+        _relUnir = false;
         _showNuevo = true;
     }
 
@@ -2483,6 +2503,52 @@
                     .OrderBy(a => a.Nombre)
                     .ToList();
                 var esMulti = seleccionadas.Count > 1;
+
+                // Modo "Unir todo": con 2+ EPS marcadas y el checkbox activo, se genera
+                // UN solo snapshot con todas las aseguradoras (campo aseguradoraIds). El
+                // builder corre el selector por cada EPS y concatena las filas; cada EPS
+                // solo ve SUS propios contratos (la lista blanca se intersecta por EPS en
+                // el selector), por eso basta enviar la union de contratos marcados.
+                if (_relUnir && esMulti)
+                {
+                    var pqArrayU = (_relPacienteQuery ?? string.Empty)
+                        .Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .ToArray();
+                    var contratosUnion = _relContratoIds.Select(x => x.ToString()).ToArray();
+                    var payloadU = new
+                    {
+                        aseguradoraIds = seleccionadas.Select(a => a.Id.ToString()).ToArray(),
+                        sucursalIds = _relSucursalIds.Select(x => x.ToString()).ToArray(),
+                        contratoIds = contratosUnion,
+                        fechaInicio = _relFechaInicio!.Value.ToString("yyyy-MM-dd"),
+                        fechaFin = _relFechaFin!.Value.ToString("yyyy-MM-dd"),
+                        pacienteQueries = pqArrayU.Length > 0 ? pqArrayU : null,
+                        usarDatosPaciente = _relUsarDatosPaciente,
+                    };
+                    var filtrosJsonU = JsonSerializer.Serialize(payloadU);
+                    try
+                    {
+                        var cmdU = new GenerarSnapshotCmd(_nuevoTipo, nombreBase, filtrosJsonU, Visal.SuperAdmin.AppVersion.Current);
+                        var idU = await Svc.GenerarAsync(cmdU, _actorId);
+                        _showNuevo = false;
+                        if (idU == Guid.Empty)
+                        {
+                            _ok = $"El snapshot '{nombreBase}' no se genero porque no hubo datos para las {seleccionadas.Count} aseguradoras.";
+                            await CargarLista();
+                        }
+                        else
+                        {
+                            _ok = $"Snapshot unificado generado: {nombreBase} ({seleccionadas.Count} aseguradoras).";
+                            await CargarLista();
+                            await AbrirVer(idU);
+                        }
+                    }
+                    catch (Exception ex) { _nuevoErr = ex.Message; }
+                    finally { _generando = false; }
+                    return;
+                }
+
                 Guid? primerId = null;
                 var okCount = 0;
                 var errores = new List<string>();

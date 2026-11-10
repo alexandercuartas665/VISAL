@@ -125,13 +125,21 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         string filtrosJson,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var filtros = ParsearFiltros(filtrosJson);
-        var hechos = await selector.SelectAsync(filtros, ct);
-
-        foreach (var h in hechos)
+        // Un snapshot puede cubrir UNA aseguradora (campo "aseguradoraId") o VARIAS
+        // unidas en un solo archivo (campo "aseguradoraIds", cuando el usuario marco
+        // "Unir todo en un solo snapshot"). ParsearFiltrosLista devuelve un filtro por
+        // aseguradora; corremos el selector por cada una y concatenamos las filas. Cada
+        // EPS resuelve el contrato del paciente contra SUS propios contratos, asi que no
+        // hay HC duplicadas entre EPS (una HC pertenece al contrato de una sola EPS).
+        var filtrosLista = ParsearFiltrosLista(filtrosJson);
+        foreach (var filtros in filtrosLista)
         {
-            ct.ThrowIfCancellationRequested();
-            yield return Mapear(h, filtros.UsarDatosPaciente);
+            var hechos = await selector.SelectAsync(filtros, ct);
+            foreach (var h in hechos)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return Mapear(h, filtros.UsarDatosPaciente);
+            }
         }
     }
 
@@ -241,16 +249,35 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         return c == 'F' || c == 'M' ? c.ToString() : null;
     }
 
-    private static RelacionFacturasFiltros ParsearFiltros(string json)
+    private static List<RelacionFacturasFiltros> ParsearFiltrosLista(string json)
     {
         using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
         var root = doc.RootElement;
 
-        Guid aseg = default;
-        if (root.TryGetProperty("aseguradoraId", out var ae) && ae.ValueKind == JsonValueKind.String)
+        // Aseguradora(s): "aseguradoraIds" (array, snapshot unificado) tiene prioridad;
+        // si no viene, se usa "aseguradoraId" (singular, snapshot por EPS). Los demas
+        // filtros (sedes, contratos, fechas, pacientes, usarDatosPaciente) son comunes a
+        // todas las EPS del snapshot.
+        var asegIds = new List<Guid>();
+        if (root.TryGetProperty("aseguradoraIds", out var aesArr) && aesArr.ValueKind == JsonValueKind.Array)
         {
-            Guid.TryParse(ae.GetString(), out aseg);
+            foreach (var e in aesArr.EnumerateArray())
+            {
+                if (e.ValueKind == JsonValueKind.String && Guid.TryParse(e.GetString(), out var g) && !asegIds.Contains(g))
+                {
+                    asegIds.Add(g);
+                }
+            }
         }
+        if (asegIds.Count == 0 && root.TryGetProperty("aseguradoraId", out var ae)
+            && ae.ValueKind == JsonValueKind.String && Guid.TryParse(ae.GetString(), out var aseg))
+        {
+            asegIds.Add(aseg);
+        }
+        // Sin aseguradora parseable: un filtro con Guid.Empty (el selector no traera
+        // nada), para mantener el comportamiento historico de 1 filtro.
+        if (asegIds.Count == 0) { asegIds.Add(default); }
+
         List<Guid>? sedes = null;
         if (root.TryGetProperty("sucursalIds", out var se) && se.ValueKind == JsonValueKind.Array)
         {
@@ -323,6 +350,11 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             && (udp.ValueKind == JsonValueKind.True
                 || (udp.ValueKind == JsonValueKind.String && bool.TryParse(udp.GetString(), out var b) && b));
 
-        return new RelacionFacturasFiltros(aseg, sedes, fechaIni, fechaFin, pacienteQueriesFinal, usarDatosPaciente, contratos);
+        // Un filtro por aseguradora, compartiendo el resto de parametros. El selector
+        // intersecta la lista blanca de contratos con los de CADA EPS, asi que pasar la
+        // union de contratos marcados es correcto (cada EPS solo ve los suyos).
+        return asegIds
+            .Select(a => new RelacionFacturasFiltros(a, sedes, fechaIni, fechaFin, pacienteQueriesFinal, usarDatosPaciente, contratos))
+            .ToList();
     }
 }

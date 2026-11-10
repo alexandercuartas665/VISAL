@@ -633,6 +633,14 @@ else
                 }
             </select>
         </div>
+        @* Filtro por CUPS/servicio: codigo del servicio del contrato o parte de su nombre.
+           Viaja al backend (CONTIENE, case + tildes insensibles). *@
+        <div class="oc-f oc-f-wide">
+            <label>CUPS / Servicio</label>
+            <input class="form-control form-control-sm" placeholder="Ej. 890201 o terapia"
+                   title="Filtra por el CUPS (codigo del servicio) o parte del nombre del servicio"
+                   @bind="_servicioTextoFiltro" @onkeyup="OnKeyup" />
+        </div>
         <div class="oc-f">
             <label>Estado</label>
             <select class="form-select form-select-sm" @bind="_estadoFiltro">
@@ -2074,6 +2082,9 @@ else
     private string _codigoHcFiltro = "";
     private string _codigoAsignacionFiltro = "";
     private string _codigoAutorizacionFiltro = "";
+    // Filtro por CUPS/servicio: CONTIENE en el codigo del servicio (ServicioContrato.CodigoServicio)
+    // o en su descripcion. Viaja al backend (OrdenesClinicasFiltro.ServicioTexto).
+    private string _servicioTextoFiltro = "";
     private DateTime? _desde;
     private DateTime? _hasta;
     private string _especialista = "";
@@ -2139,6 +2150,7 @@ else
         if (!string.IsNullOrWhiteSpace(_aseguradoraFiltro)) { n++; }
         if (!string.IsNullOrWhiteSpace(_sucursalFiltro)) { n++; }
         if (!string.IsNullOrWhiteSpace(_formatoFiltro)) { n++; }
+        if (!string.IsNullOrWhiteSpace(_servicioTextoFiltro)) { n++; }
         if (!string.IsNullOrWhiteSpace(_estadoFiltro)) { n++; }
         if (_soloSinFirma) { n++; }
         if (_soloTextoRepetido) { n++; }
@@ -2331,7 +2343,8 @@ else
                 CodigoAsignacion: string.IsNullOrWhiteSpace(_codigoAsignacionFiltro) ? null : _codigoAsignacionFiltro.Trim(),
                 SoloSinFirma: _soloSinFirma,
                 SoloTextoRepetido: _soloTextoRepetido,
-                CodigoAutorizacion: string.IsNullOrWhiteSpace(_codigoAutorizacionFiltro) ? null : _codigoAutorizacionFiltro.Trim());
+                CodigoAutorizacion: string.IsNullOrWhiteSpace(_codigoAutorizacionFiltro) ? null : _codigoAutorizacionFiltro.Trim(),
+                ServicioTexto: string.IsNullOrWhiteSpace(_servicioTextoFiltro) ? null : _servicioTextoFiltro.Trim());
             var todas = (await OcSvc.BuscarAsync(f)).ToList();
             if (string.Equals(_estadoFiltro, "Abierta", StringComparison.OrdinalIgnoreCase))
             {
@@ -2350,7 +2363,7 @@ else
 
     private async Task Limpiar()
     {
-        _filtroPaciente = ""; _codigoHcFiltro = ""; _codigoAsignacionFiltro = ""; _codigoAutorizacionFiltro = ""; _desde = null; _hasta = null; _especialista = ""; _aseguradoraFiltro = ""; _sucursalFiltro = ""; _estadoFiltro = ""; _formatoFiltro = ""; _soloSinFirma = false; _soloTextoRepetido = false;
+        _filtroPaciente = ""; _codigoHcFiltro = ""; _codigoAsignacionFiltro = ""; _codigoAutorizacionFiltro = ""; _servicioTextoFiltro = ""; _desde = null; _hasta = null; _especialista = ""; _aseguradoraFiltro = ""; _sucursalFiltro = ""; _estadoFiltro = ""; _formatoFiltro = ""; _soloSinFirma = false; _soloTextoRepetido = false;
         _soloMultiSesion = false; _noMostrarInactivas = false; _asigNavFiltro = null;
         await Buscar();
     }
@@ -2415,6 +2428,7 @@ else
         // la(s) filtrada(s). Lo pasamos para que el paquete impreso respete el HC N°.
         if (!string.IsNullOrWhiteSpace(_codigoHcFiltro)) { qs.Add($"codigoHc={Uri.EscapeDataString(_codigoHcFiltro.Trim())}"); }
         if (!string.IsNullOrWhiteSpace(_codigoAutorizacionFiltro)) { qs.Add($"codigoAutorizacion={Uri.EscapeDataString(_codigoAutorizacionFiltro.Trim())}"); }
+        if (!string.IsNullOrWhiteSpace(_servicioTextoFiltro)) { qs.Add($"servicioTexto={Uri.EscapeDataString(_servicioTextoFiltro.Trim())}"); }
         // FAT-4 — el orden del listado impreso respeta el criterio elegido en el toolbar.
         qs.Add($"ordenarPor={Uri.EscapeDataString(_ordenarPor)}");
         return qs.Count == 0
@@ -2445,6 +2459,7 @@ else
         if (!string.IsNullOrWhiteSpace(_formatoFiltro)) { qs.Add($"formatoCodigo={Uri.EscapeDataString(_formatoFiltro)}"); }
         if (CodigoAsignacionEfectivo() is string codAsig) { qs.Add($"codigoAsignacion={Uri.EscapeDataString(codAsig)}"); }
         if (!string.IsNullOrWhiteSpace(_codigoAutorizacionFiltro)) { qs.Add($"codigoAutorizacion={Uri.EscapeDataString(_codigoAutorizacionFiltro.Trim())}"); }
+        if (!string.IsNullOrWhiteSpace(_servicioTextoFiltro)) { qs.Add($"servicioTexto={Uri.EscapeDataString(_servicioTextoFiltro.Trim())}"); }
         return qs.Count == 0 ? "/ordenes/export.xlsx" : $"/ordenes/export.xlsx?{string.Join("&", qs)}";
     }
 

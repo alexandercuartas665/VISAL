@@ -58,6 +58,11 @@ public static class ModuloCatalogo
         new("cfg-profesionales", "Profesionales (catalogo)", "Configuracion del Sistema"),
         new("cfg-servicios", "Servicios", "Configuracion del Sistema"),
         new("cfg-pacientes", "Configuracion Pacientes", "Configuracion del Sistema"),
+        // Tipologia Archivos: catalogo de categorias de los adjuntos de notas medicas.
+        // El slug DEBE coincidir con el Permission del item de menu en NavMenuCatalog
+        // ("cfg-tipologia-archivos"); sin esta entrada no hay checkbox en Roles y el
+        // modulo solo lo ven Owner/Admin por bypass.
+        new("cfg-tipologia-archivos", "Tipologia Archivos", "Configuracion del Sistema"),
         new("cfg-turnos", "Configuracion de Turnos", "Configuracion del Sistema"),
         new("cfg-agendas", "Agendas base", "Configuracion del Sistema"),
         new("cfg-agendas-prof", "Agendas de profesionales", "Configuracion del Sistema"),

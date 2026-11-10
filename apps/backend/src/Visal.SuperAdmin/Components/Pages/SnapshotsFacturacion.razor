@@ -149,10 +149,8 @@
                 <thead>
                     <tr>
                         <th>Nombre</th>
-                        <th>Aseguradora</th>
+                        <th>Aseguradora / Sede</th>
                         <th>Usuario</th>
-                        <th>Sede</th>
-                        <th>Tipo</th>
                         <th>Estado</th>
                         <th>Inicio</th>
                         <th>Tardo</th>
@@ -181,10 +179,11 @@
                                     <div class="sn-error-inline" title="@s.ErrorMensaje">Error: @Truncar(s.ErrorMensaje, 80)</div>
                                 }
                             </td>
-                            <td>@(s.AseguradoraNombre ?? "-")</td>
+                            <td>
+                                <div>@(s.AseguradoraNombre ?? "-")</div>
+                                <small class="text-muted" title="@s.SedeDetalle">@(s.SedeNombre ?? "-")</small>
+                            </td>
                             <td class="sn-truncate" title="@s.CreadoPorNombre">@(s.CreadoPorNombre ?? "-")</td>
-                            <td class="sn-truncate" title="@s.SedeDetalle">@(s.SedeNombre ?? "-")</td>
-                            <td><span class="sn-tag">@s.Tipo</span></td>
                             <td>
                                 <span class="sn-estado sn-estado-@(s.Estado.ToString().ToLower())">@s.Estado</span>
                             </td>
@@ -373,6 +372,48 @@
                                 Se genera un snapshot independiente por cada aseguradora marcada.
                             </small>
                         </div>
+                        @if (_relAseguradoraIds.Count > 0)
+                        {
+                            <div class="snf-f">
+                                <label>
+                                    Contratos
+                                    <small class="text-muted">(opcional — vacio = todos los contratos de la aseguradora)</small>
+                                </label>
+                                <div class="sn-multi" style="max-height:220px;overflow-y:auto;">
+                                    @if (_relCargandoContratos)
+                                    {
+                                        <span class="text-muted">Cargando contratos...</span>
+                                    }
+                                    else
+                                    {
+                                        @foreach (var a in _relAseguradoras.Where(x => _relAseguradoraIds.Contains(x.Id)))
+                                        {
+                                            var cons = _relContratosPorAse.TryGetValue(a.Id, out var lc) ? lc : new List<ContratoDto>();
+                                            <div class="text-muted" style="font-weight:600;margin:6px 0 2px;">@a.Nombre</div>
+                                            @if (cons.Count == 0)
+                                            {
+                                                <span class="text-muted" style="display:block;padding-left:8px;">Sin contratos.</span>
+                                            }
+                                            else
+                                            {
+                                                @foreach (var c in cons)
+                                                {
+                                                    <label class="sn-multi-chip">
+                                                        <input type="checkbox"
+                                                               checked="@_relContratoIds.Contains(c.Id)"
+                                                               @onchange="e => ToggleContrato(c.Id, (bool)(e.Value ?? false))" />
+                                                        <span>@c.CodigoContrato</span>
+                                                    </label>
+                                                }
+                                            }
+                                        }
+                                    }
+                                </div>
+                                <small class="text-muted d-block mt-1">
+                                    Si marcas contratos, cada snapshot incluye solo esos; una aseguradora sin contratos marcados incluye todos los suyos.
+                                </small>
+                            </div>
+                        }
                         <div class="snf-f">
                             <label>Sucursales <small class="text-muted">(opcional — vacio = todas las del tenant)</small></label>
                             <div class="sn-multi">
@@ -1645,6 +1686,12 @@
     private List<SucursalDto> _relSucursales = new();
     private HashSet<Guid> _relAseguradoraIds = new();
     private HashSet<Guid> _relSucursalIds = new();
+    // Filtro opcional por CONTRATO. Se cargan los contratos de las aseguradoras marcadas
+    // (lookup por aseguradoraId) y el usuario marca los que quiere. Vacio para una EPS =
+    // todos sus contratos. El contenido se acota en el selector al generar.
+    private Dictionary<Guid, List<ContratoDto>> _relContratosPorAse = new();
+    private HashSet<Guid> _relContratoIds = new();
+    private bool _relCargandoContratos;
     private DateOnly? _relFechaInicio;
     private DateOnly? _relFechaFin;
     // Filtro opcional pensado para pruebas: nombre o identificacion del paciente
@@ -2330,6 +2377,8 @@
         _relSucursales = (await SucSvc.ListAsync(soloActivas: true)).OrderBy(s => s.Nombre).ToList();
         _relAseguradoraIds = new();
         _relSucursalIds = new();
+        _relContratosPorAse = new();
+        _relContratoIds = new();
         var hoy = DateOnly.FromDateTime(DateTime.Today);
         _relFechaInicio = new DateOnly(hoy.Year, hoy.Month, 1);
         _relFechaFin = hoy;
@@ -2344,20 +2393,53 @@
         else { _relSucursalIds.Remove(id); }
     }
 
-    private void ToggleAseguradora(Guid id, bool selected)
+    private async Task ToggleAseguradora(Guid id, bool selected)
     {
         if (selected) { _relAseguradoraIds.Add(id); }
         else { _relAseguradoraIds.Remove(id); }
+        await RecargarContratosAsync();
     }
 
-    private void MarcarTodasAseguradoras()
+    private async Task MarcarTodasAseguradoras()
     {
         _relAseguradoraIds = _relAseguradoras.Select(a => a.Id).ToHashSet();
+        await RecargarContratosAsync();
     }
 
-    private void QuitarTodasAseguradoras()
+    private async Task QuitarTodasAseguradoras()
     {
         _relAseguradoraIds.Clear();
+        await RecargarContratosAsync();
+    }
+
+    private void ToggleContrato(Guid id, bool selected)
+    {
+        if (selected) { _relContratoIds.Add(id); }
+        else { _relContratoIds.Remove(id); }
+    }
+
+    // Carga los contratos de las aseguradoras marcadas (todos los de cada EPS; la tabla
+    // contrato<->sede se ignora a proposito, es informativa y casi vacia). Poda las marcas
+    // de contratos que ya no esten visibles tras cambiar la seleccion de aseguradoras.
+    private async Task RecargarContratosAsync()
+    {
+        _relCargandoContratos = true;
+        try
+        {
+            var dict = new Dictionary<Guid, List<ContratoDto>>();
+            foreach (var aid in _relAseguradoraIds)
+            {
+                var cons = await AseSvc.ListContratosAsync(aid);
+                dict[aid] = cons.OrderBy(c => c.CodigoContrato, StringComparer.OrdinalIgnoreCase).ToList();
+            }
+            _relContratosPorAse = dict;
+            var visibles = dict.Values.SelectMany(l => l.Select(c => c.Id)).ToHashSet();
+            _relContratoIds.IntersectWith(visibles);
+        }
+        finally
+        {
+            _relCargandoContratos = false;
+        }
     }
 
     private void CerrarNuevo()
@@ -2418,10 +2500,16 @@
                         .Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .ToArray();
+                    // Solo los contratos marcados que pertenecen a ESTA aseguradora. Vacio
+                    // => el builder no acota esta EPS (incluye todos sus contratos).
+                    var contratosDeEsta = _relContratosPorAse.TryGetValue(a.Id, out var consEsta)
+                        ? consEsta.Where(c => _relContratoIds.Contains(c.Id)).Select(c => c.Id.ToString()).ToArray()
+                        : Array.Empty<string>();
                     var payload = new
                     {
                         aseguradoraId = a.Id.ToString(),
                         sucursalIds = _relSucursalIds.Select(x => x.ToString()).ToArray(),
+                        contratoIds = contratosDeEsta,
                         fechaInicio = _relFechaInicio!.Value.ToString("yyyy-MM-dd"),
                         fechaFin = _relFechaFin!.Value.ToString("yyyy-MM-dd"),
                         pacienteQueries = pqArray.Length > 0 ? pqArray : null,

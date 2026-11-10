@@ -264,6 +264,21 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             }
         }
 
+        // Filtro opcional por contrato (lista blanca de ContratoAseguradora.Id). Mismo
+        // patron que sucursalIds. Vacio/ausente => no acota (todos los contratos de la EPS).
+        List<Guid>? contratos = null;
+        if (root.TryGetProperty("contratoIds", out var ce) && ce.ValueKind == JsonValueKind.Array)
+        {
+            contratos = new List<Guid>();
+            foreach (var e in ce.EnumerateArray())
+            {
+                if (e.ValueKind == JsonValueKind.String && Guid.TryParse(e.GetString(), out var g))
+                {
+                    contratos.Add(g);
+                }
+            }
+        }
+
         var hoy = DateTime.Today;
         var fechaIni = new DateOnly(hoy.Year, hoy.Month, 1);
         var fechaFin = DateOnly.FromDateTime(hoy);
@@ -308,6 +323,6 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             && (udp.ValueKind == JsonValueKind.True
                 || (udp.ValueKind == JsonValueKind.String && bool.TryParse(udp.GetString(), out var b) && b));
 
-        return new RelacionFacturasFiltros(aseg, sedes, fechaIni, fechaFin, pacienteQueriesFinal, usarDatosPaciente);
+        return new RelacionFacturasFiltros(aseg, sedes, fechaIni, fechaFin, pacienteQueriesFinal, usarDatosPaciente, contratos);
     }
 }

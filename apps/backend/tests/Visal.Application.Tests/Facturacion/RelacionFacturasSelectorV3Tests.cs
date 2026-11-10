@@ -211,4 +211,108 @@ public sealed class RelacionFacturasSelectorV3Tests
         var hechos2 = await sel.SelectAsync(Filtros(s, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31)));
         Assert.Single(hechos2);
     }
+
+    [Fact]
+    public async Task Filtro_contrato_acota_a_los_contratos_seleccionados()
+    {
+        var s = await SembrarBaseAsync();
+        // Segundo contrato de la MISMA aseguradora.
+        var contrato2 = new ContratoAseguradora { Id = Guid.NewGuid(), TenantId = TenantId, AseguradoraId = s.AseguradoraId, CodigoContrato = "CON-002", Estado = "Activo" };
+        s.Ctx.ContratosAseguradora.Add(contrato2);
+        await s.Ctx.SaveChangesAsync();
+
+        // Un paciente por contrato, ambos con HC cerrada en el rango.
+        var p1 = await SembrarPacienteAsync(s, s.ContratoId, s.SucursalId, doc: "C1");
+        var p2 = await SembrarPacienteAsync(s, contrato2.Id, s.SucursalId, doc: "C2");
+        await SembrarHcCerradaAsync(s, p1, new DateTimeOffset(2026, 7, 15, 10, 0, 0, TimeSpan.Zero));
+        await SembrarHcCerradaAsync(s, p2, new DateTimeOffset(2026, 7, 16, 10, 0, 0, TimeSpan.Zero));
+
+        var sel = new RelacionFacturasSelector(new TestDbContextFactory(s.Ctx, new FakeTenantContext { TenantId = TenantId }));
+
+        // Filtro por SOLO el contrato 1 -> solo el paciente de ese contrato.
+        var soloC1 = new RelacionFacturasFiltros(
+            s.AseguradoraId, null, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31),
+            null, false, new[] { s.ContratoId });
+        var hechos = await sel.SelectAsync(soloC1);
+
+        Assert.Single(hechos);
+        Assert.Equal(p1, hechos[0].Paciente.Id);
+        Assert.Equal(s.ContratoId, hechos[0].Contrato.Id);
+    }
+
+    [Fact]
+    public async Task Filtro_contrato_vacio_no_acota()
+    {
+        var s = await SembrarBaseAsync();
+        var contrato2 = new ContratoAseguradora { Id = Guid.NewGuid(), TenantId = TenantId, AseguradoraId = s.AseguradoraId, CodigoContrato = "CON-002", Estado = "Activo" };
+        s.Ctx.ContratosAseguradora.Add(contrato2);
+        await s.Ctx.SaveChangesAsync();
+
+        var p1 = await SembrarPacienteAsync(s, s.ContratoId, s.SucursalId, doc: "C1");
+        var p2 = await SembrarPacienteAsync(s, contrato2.Id, s.SucursalId, doc: "C2");
+        await SembrarHcCerradaAsync(s, p1, new DateTimeOffset(2026, 7, 15, 10, 0, 0, TimeSpan.Zero));
+        await SembrarHcCerradaAsync(s, p2, new DateTimeOffset(2026, 7, 16, 10, 0, 0, TimeSpan.Zero));
+
+        var sel = new RelacionFacturasSelector(new TestDbContextFactory(s.Ctx, new FakeTenantContext { TenantId = TenantId }));
+
+        // Sin contratos (null) -> entran ambos contratos de la EPS.
+        var sinFiltro = await sel.SelectAsync(Filtros(s, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31)));
+        Assert.Equal(2, sinFiltro.Count);
+
+        // Lista vacia tambien = no acota (misma semantica que sucursales vacio).
+        var vacio = new RelacionFacturasFiltros(
+            s.AseguradoraId, null, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31),
+            null, false, Array.Empty<Guid>());
+        var hechosVacio = await sel.SelectAsync(vacio);
+        Assert.Equal(2, hechosVacio.Count);
+    }
+
+    [Fact]
+    public async Task Codigo_habilitacion_prefiere_el_mas_completo_sobre_interop_mas_corto()
+    {
+        var s = await SembrarBaseAsync();
+        // Sede con REPS COMPLETO de 12 digitos (prestador 10 + sede 2).
+        var suc = await s.Ctx.Sucursales.FirstAsync(x => x.Id == s.SucursalId);
+        suc.CodigoHabilitacion = "520010352501"; // 12
+        // Credencial interop (ambiente Sandbox, el activo por defecto) con SOLO el
+        // prestador (10 digitos) -> si ganara, se comeria los 2 digitos de sede.
+        s.Ctx.InteroperabilidadCredencialesSede.Add(new InteroperabilidadCredencialSede
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            SucursalId = s.SucursalId, Ambiente = AmbienteIhce.Sandbox,
+            CodigoHabilitacion = "5200103525" // 10
+        });
+        await s.Ctx.SaveChangesAsync();
+
+        var pid = await SembrarPacienteAsync(s, s.ContratoId, s.SucursalId);
+        await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 7, 15, 10, 0, 0, TimeSpan.Zero));
+
+        var sel = new RelacionFacturasSelector(new TestDbContextFactory(s.Ctx, new FakeTenantContext { TenantId = TenantId }));
+        var hechos = await sel.SelectAsync(Filtros(s, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31)));
+
+        Assert.Single(hechos);
+        Assert.Equal("520010352501", hechos[0].CodigoHabilitacionResuelto); // 12 completos
+    }
+
+    [Fact]
+    public async Task Codigo_habilitacion_cae_a_interop_si_la_sede_no_tiene()
+    {
+        var s = await SembrarBaseAsync(); // sede sin CodigoHabilitacion
+        s.Ctx.InteroperabilidadCredencialesSede.Add(new InteroperabilidadCredencialSede
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId,
+            SucursalId = s.SucursalId, Ambiente = AmbienteIhce.Sandbox,
+            CodigoHabilitacion = "7300103531"
+        });
+        await s.Ctx.SaveChangesAsync();
+
+        var pid = await SembrarPacienteAsync(s, s.ContratoId, s.SucursalId);
+        await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 7, 15, 10, 0, 0, TimeSpan.Zero));
+
+        var sel = new RelacionFacturasSelector(new TestDbContextFactory(s.Ctx, new FakeTenantContext { TenantId = TenantId }));
+        var hechos = await sel.SelectAsync(Filtros(s, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31)));
+
+        Assert.Single(hechos);
+        Assert.Equal("7300103531", hechos[0].CodigoHabilitacionResuelto);
+    }
 }

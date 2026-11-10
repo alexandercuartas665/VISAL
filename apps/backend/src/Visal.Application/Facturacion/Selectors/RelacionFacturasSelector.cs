@@ -53,6 +53,17 @@ public sealed class RelacionFacturasSelector(IApplicationDbContextFactory dbFact
         var contratoPorId = contratos.ToDictionary(c => c.Id);
         var contratoIdsSet = contratos.Select(c => c.Id).ToHashSet();
 
+        // Filtro opcional por CONTRATO: si el caller paso contratos (y alguno es de ESTA
+        // aseguradora), restringimos el set a esa interseccion. Si no paso ninguno, o
+        // ninguno de los pasados es de esta EPS, no acotamos (= todos los contratos de la
+        // aseguradora). ResolverContratoDelPaciente usa contratoIdsSet como whitelist, asi
+        // que esto descarta las HC cuyo contrato resuelto quede fuera del set.
+        if (filtros.ContratoIds is { Count: > 0 })
+        {
+            var interseccion = contratoIdsSet.Where(id => filtros.ContratoIds.Contains(id)).ToHashSet();
+            if (interseccion.Count > 0) { contratoIdsSet = interseccion; }
+        }
+
         // 2) HCs cerradas, agrupadas por MES DE ATENCION (no de cierre).
         //    El periodo del snapshot se arma por fecha_atencion (cuando se presto
         //    el servicio), con fallback a fecha_cierre cuando la HC no tiene
@@ -328,19 +339,18 @@ public sealed class RelacionFacturasSelector(IApplicationDbContextFactory dbFact
             string? munNombre = paciente.MunicipioId is Guid mId && muns.TryGetValue(mId, out var mn) ? mn : null;
             string? nacNombre = paciente.PaisResidenciaId is Guid pId && paisesNombre.TryGetValue(pId, out var pn) ? pn : null;
 
-            // Codigo habilitacion: credencial de interop (ambiente activo) ganan
-            // sobre el campo directo de la sede.
+            // Codigo habilitacion REPS de sede: para facturacion es de 12 digitos
+            // (prestador 10 + numero de sede 2). Hay dos fuentes: el campo directo de la
+            // sede (Sucursal.CodigoHabilitacion) y la credencial de interop por sede
+            // (ambiente activo), que a veces trae SOLO el prestador (10 digitos) -> si esa
+            // ganara siempre, se perderian los 2 digitos de sede. Elegimos el valor mas
+            // COMPLETO (mas largo); empate de longitud -> interop (preserva la precedencia
+            // historica); si uno esta vacio, usamos el otro.
             string? codHabResuelto = null;
             if (sucursal is not null)
             {
-                if (credencialesSede.TryGetValue(sucursal.Id, out var chIhce) && !string.IsNullOrWhiteSpace(chIhce))
-                {
-                    codHabResuelto = chIhce;
-                }
-                else
-                {
-                    codHabResuelto = sucursal.CodigoHabilitacion;
-                }
+                var ihce = credencialesSede.TryGetValue(sucursal.Id, out var chIhce) ? chIhce : null;
+                codHabResuelto = ElegirCodigoHabilitacion(sucursal.CodigoHabilitacion, ihce);
             }
 
             // Asignacion mas relevante: preferimos misma sede + mismo contrato
@@ -623,6 +633,21 @@ public sealed class RelacionFacturasSelector(IApplicationDbContextFactory dbFact
             if (contratoIdsPermitidos.Contains(cid)) { return cid; }
         }
         return null;
+    }
+
+    /// <summary>
+    /// Elige el codigo de habilitacion REPS de sede entre el campo directo de la sede y la
+    /// credencial de interop. Devuelve el mas COMPLETO (mas largo, ya trimmeado) para no
+    /// perder el sufijo de sede de 2 digitos; empate de longitud -> el de interop
+    /// (precedencia historica); si uno esta vacio, devuelve el otro; ambos vacios -> null.
+    /// </summary>
+    private static string? ElegirCodigoHabilitacion(string? directo, string? interop)
+    {
+        var d = string.IsNullOrWhiteSpace(directo) ? null : directo.Trim();
+        var i = string.IsNullOrWhiteSpace(interop) ? null : interop.Trim();
+        if (d is null) { return i; }
+        if (i is null) { return d; }
+        return d.Length > i.Length ? d : i;
     }
 
     // Normaliza para busqueda: trim + upper invariant + strip de diacriticos

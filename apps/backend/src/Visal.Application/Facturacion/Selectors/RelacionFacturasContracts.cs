@@ -19,7 +19,12 @@ public sealed record RelacionFacturasFiltros(
     // Opcional: cuando es true, las columnas Direccion/Telefono/Correo salen del
     // PACIENTE (Paciente.Direccion/Telefono/Email) en vez de la sede que atendio.
     // Default false => datos de la sede (comportamiento historico).
-    bool UsarDatosPaciente = false);
+    bool UsarDatosPaciente = false,
+    // Opcional: lista blanca de contratos (ContratoAseguradora.Id) DE la aseguradora
+    // filtrada. Si trae alguno de esta EPS, solo entran las HC cuyo contrato resuelto
+    // este en la lista; vacio/null o ninguno de esta EPS => no acota (= todos los
+    // contratos de la aseguradora). Pensado para el selector de contrato del modal.
+    IReadOnlyList<Guid>? ContratoIds = null);
 
 /// <summary>
 /// "Hecho facturable" resuelto por el selector — todo lo que el builder de

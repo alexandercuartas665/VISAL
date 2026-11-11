@@ -7,6 +7,7 @@
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.Components.Forms
 @using Visal.Application.Tenancy
+@using Visal.Infrastructure.Pdf
 @inject IAsignacionService AsigSvc
 @inject IAutorizacionExtractorService Extractor
 @inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
@@ -355,12 +356,7 @@
         {
             var file = e.File;
             if (file.Size > 10L * 1024 * 1024) { _error = "El PDF supera 10 MB."; return; }
-            var dir = Path.Combine(Env.WebRootPath, "uploads", "autorizaciones");
-            if (!Directory.Exists(dir)) { Directory.CreateDirectory(dir); }
-            var safe = Path.GetFileNameWithoutExtension(file.Name).Replace(' ', '_');
-            var nombre = $"{DateTime.Now:yyyyMMdd-HHmmss}-{safe}.pdf";
-            var full = Path.Combine(dir, nombre);
-            // Leemos los bytes una sola vez: sirven para guardar el archivo y para el hash.
+            // Leemos los bytes una sola vez: sirven para validar, guardar y calcular el hash.
             byte[] bytes;
             await using (var src = file.OpenReadStream(10L * 1024 * 1024))
             using (var ms = new MemoryStream())
@@ -368,6 +364,26 @@
                 await src.CopyToAsync(ms);
                 bytes = ms.ToArray();
             }
+            // Valida ANTES de tocar el disco: rechaza PDFs protegidos con clave (contrasena
+            // de usuario), que rompen la extraccion, el render y la fusion en Cuenta Medica /
+            // ZIP (quedan como pagina "no legible"); tambien avisa si no es un PDF valido.
+            var estadoPdf = PdfProtectionInspector.Inspeccionar(bytes);
+            if (estadoPdf == PdfEstado.ProtegidoPorPassword)
+            {
+                _error = "Este PDF está protegido con clave y no se puede procesar. "
+                    + "Pide el documento sin contraseña (quítale la protección) y vuelve a subirlo.";
+                return;
+            }
+            if (estadoPdf == PdfEstado.NoEsPdfValido)
+            {
+                _error = "El archivo no es un PDF válido o está dañado. Revisa el archivo y vuelve a intentarlo.";
+                return;
+            }
+            var dir = Path.Combine(Env.WebRootPath, "uploads", "autorizaciones");
+            if (!Directory.Exists(dir)) { Directory.CreateDirectory(dir); }
+            var safe = Path.GetFileNameWithoutExtension(file.Name).Replace(' ', '_');
+            var nombre = $"{DateTime.Now:yyyyMMdd-HHmmss}-{safe}.pdf";
+            var full = Path.Combine(dir, nombre);
             await File.WriteAllBytesAsync(full, bytes);
             _pdfUrl = $"/uploads/autorizaciones/{nombre}";
             _pdfNombre = file.Name;

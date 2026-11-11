@@ -7,7 +7,9 @@ public sealed record TerapiaPendienteDto(
     string Servicio,
     int SesionesPendientes,
     DateOnly? UltimaAtencion,
-    string Profesional);
+    string Profesional,
+    string? Ciudad = null,
+    DateOnly? InicioPrograma = null);
 
 /// <summary>Informe listo para mostrar en la pagina publica del enlace.</summary>
 public sealed record InformeTerapiasResult(

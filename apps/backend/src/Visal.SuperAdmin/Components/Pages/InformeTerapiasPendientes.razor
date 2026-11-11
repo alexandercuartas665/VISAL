@@ -74,6 +74,34 @@
                             }
                         </div>
                     }
+                    @if (_porCiudad.Count > 0)
+                    {
+                        <div class="inf-chart">
+                            <div class="inf-chart-h">Sesiones pendientes por ciudad</div>
+                            @foreach (var d in _porCiudad)
+                            {
+                                <div class="inf-bar-row">
+                                    <div class="inf-bar-lbl" title="@d.Label">@d.Label</div>
+                                    <div class="inf-bar-track"><div class="inf-bar-fill inf-bar-fill-c" style="width:@(Pct(d.Value, _maxCiudad))%"></div></div>
+                                    <div class="inf-bar-val">@d.Value</div>
+                                </div>
+                            }
+                        </div>
+                    }
+                    @if (_porAntiguedad.Count > 0)
+                    {
+                        <div class="inf-chart">
+                            <div class="inf-chart-h">Sesiones pendientes por antiguedad</div>
+                            @foreach (var d in _porAntiguedad)
+                            {
+                                <div class="inf-bar-row">
+                                    <div class="inf-bar-lbl" title="@d.Label">@d.Label</div>
+                                    <div class="inf-bar-track"><div class="inf-bar-fill inf-bar-fill-d" style="width:@(Pct(d.Value, _maxAntig))%"></div></div>
+                                    <div class="inf-bar-val">@d.Value</div>
+                                </div>
+                            }
+                        </div>
+                    }
                 </div>
 
                 <div class="inf-table-wrap">
@@ -130,6 +158,8 @@
     .inf-bar-track { background: #e2e8f0; border-radius: 999px; height: 14px; overflow: hidden; }
     .inf-bar-fill { background: #1565c0; height: 100%; border-radius: 999px; min-width: 2px; }
     .inf-bar-fill-alt { background: #d97706; }
+    .inf-bar-fill-c { background: #0d9488; }
+    .inf-bar-fill-d { background: #7c3aed; }
     .inf-bar-val { font-size: 11px; font-weight: 700; color: #334155; text-align: right; }
     @@media (max-width: 640px) { .inf-charts { grid-template-columns: 1fr; } }
     .inf-table-wrap { overflow-x: auto; }
@@ -152,19 +182,51 @@
     private InformeTerapiasResult? _data;
     private bool _invalido;
 
-    // Agregados para los graficos (barras): sesiones pendientes por profesional y por servicio.
-    // Se calculan una vez tras cargar el informe.
+    // Agregados para los graficos (barras): sesiones pendientes por profesional, por
+    // servicio, por ciudad del paciente y por antiguedad de la programacion. Se calculan
+    // una vez tras cargar el informe.
     private IReadOnlyList<(string Label, int Value)> _porProf = Array.Empty<(string, int)>();
     private IReadOnlyList<(string Label, int Value)> _porServ = Array.Empty<(string, int)>();
+    private IReadOnlyList<(string Label, int Value)> _porCiudad = Array.Empty<(string, int)>();
+    private IReadOnlyList<(string Label, int Value)> _porAntiguedad = Array.Empty<(string, int)>();
     private int _maxProf = 1;
     private int _maxServ = 1;
+    private int _maxCiudad = 1;
+    private int _maxAntig = 1;
 
     private void CalcularGraficos()
     {
         _porProf = Agrupar(f => string.IsNullOrWhiteSpace(f.Profesional) ? "(sin profesional)" : f.Profesional);
         _porServ = Agrupar(f => string.IsNullOrWhiteSpace(f.Servicio) ? "(sin servicio)" : f.Servicio);
+        _porCiudad = Agrupar(f => string.IsNullOrWhiteSpace(f.Ciudad) ? "(Sin ciudad)" : f.Ciudad!.Trim().ToUpperInvariant());
+        _porAntiguedad = AgruparAntiguedad();
         _maxProf = _porProf.Count > 0 ? _porProf.Max(x => x.Value) : 1;
         _maxServ = _porServ.Count > 0 ? _porServ.Max(x => x.Value) : 1;
+        _maxCiudad = _porCiudad.Count > 0 ? _porCiudad.Max(x => x.Value) : 1;
+        _maxAntig = _porAntiguedad.Count > 0 ? _porAntiguedad.Max(x => x.Value) : 1;
+    }
+
+    // Antiguedad = dias desde el inicio de la programacion (Asignacion.FechaInicio) hasta
+    // la fecha del informe. Se agrupan las sesiones pendientes en rangos fijos y se muestran
+    // en orden cronologico (omitiendo los rangos vacios). Las filas sin fecha de inicio se
+    // ignoran en este grafico.
+    private IReadOnlyList<(string Label, int Value)> AgruparAntiguedad()
+    {
+        if (_data is null || _data.Filas.Count == 0) { return Array.Empty<(string, int)>(); }
+        var hoy = _data.Fecha;
+        var buckets = new (string Label, int Value)[]
+        {
+            ("0-15 dias", 0), ("16-30 dias", 0), ("31-60 dias", 0), ("60+ dias", 0),
+        };
+        foreach (var f in _data.Filas)
+        {
+            if (f.InicioPrograma is not { } ini) { continue; }
+            var dias = hoy.DayNumber - ini.DayNumber;
+            if (dias < 0) { dias = 0; }
+            var idx = dias <= 15 ? 0 : dias <= 30 ? 1 : dias <= 60 ? 2 : 3;
+            buckets[idx].Value += f.SesionesPendientes;
+        }
+        return buckets.Where(b => b.Value > 0).ToList();
     }
 
     private IReadOnlyList<(string Label, int Value)> Agrupar(Func<TerapiaPendienteDto, string> clave)

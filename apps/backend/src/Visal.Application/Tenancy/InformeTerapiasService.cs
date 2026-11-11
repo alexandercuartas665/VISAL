@@ -100,7 +100,7 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
 
         var asigs = await db.Asignaciones.AsNoTracking().IgnoreQueryFilters()
             .Where(a => a.TenantId == tenantId && asigIds.Contains(a.Id))
-            .Select(a => new { a.Id, a.PacienteId, a.NombreServicio, a.TipoServicio, a.Modulo })
+            .Select(a => new { a.Id, a.PacienteId, a.NombreServicio, a.TipoServicio, a.Modulo, a.FechaInicio })
             .ToListAsync(ct);
 
         // Solo terapias: por tipo/modulo == TERAPIA o por nombre que contenga TERAPIA
@@ -125,9 +125,9 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
         var pacIds = asigTerapia.Select(a => a.PacienteId).Distinct().ToList();
         var pacientes = (await db.Pacientes.AsNoTracking().IgnoreQueryFilters()
             .Where(p => p.TenantId == tenantId && pacIds.Contains(p.Id))
-            .Select(p => new { p.Id, p.NombreCompleto, p.NumeroDocumento })
+            .Select(p => new { p.Id, p.NombreCompleto, p.NumeroDocumento, p.Ciudad })
             .ToListAsync(ct))
-            .ToDictionary(p => p.Id, p => (Nombre: p.NombreCompleto, Doc: p.NumeroDocumento));
+            .ToDictionary(p => p.Id, p => (Nombre: p.NombreCompleto, Doc: p.NumeroDocumento, Ciudad: p.Ciudad));
 
         var profIds = turnos.Where(t => t.ProfesionalId != Guid.Empty).Select(t => t.ProfesionalId).Distinct().ToList();
         var profesionales = profIds.Count == 0
@@ -162,11 +162,11 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
                 .DefaultIfEmpty(null)
                 .Max();
 
-            var pac = pacientes.TryGetValue(a.PacienteId, out var pi) ? pi : (Nombre: "(sin paciente)", Doc: "");
+            var pac = pacientes.TryGetValue(a.PacienteId, out var pi) ? pi : (Nombre: "(sin paciente)", Doc: "", Ciudad: (string?)null);
             var profId = ts.Select(t => t.ProfesionalId).FirstOrDefault(id => id != Guid.Empty);
             var prof = profId != Guid.Empty && profesionales.TryGetValue(profId, out var pn) ? pn : "";
 
-            filas.Add(new TerapiaPendienteDto(pac.Nombre, pac.Doc, a.NombreServicio, pendientes, ultima, prof));
+            filas.Add(new TerapiaPendienteDto(pac.Nombre, pac.Doc, a.NombreServicio, pendientes, ultima, prof, pac.Ciudad, a.FechaInicio));
         }
 
         filas = filas.OrderBy(f => f.Paciente, StringComparer.OrdinalIgnoreCase).ToList();

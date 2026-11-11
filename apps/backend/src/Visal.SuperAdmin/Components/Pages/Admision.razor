@@ -618,6 +618,11 @@
                                            placeholder="Ej: consentimiento previo firmado, autorizacion de acompanante..." />
                                 </div>
                                 <div class="pac-doc-upload-f">
+                                    <label>Fecha del documento</label>
+                                    <input type="date" class="form-control form-control-sm" @bind="_docUpFecha"
+                                           title="Fecha del documento (por defecto hoy; editable)" />
+                                </div>
+                                <div class="pac-doc-upload-f">
                                     <label>Archivo</label>
                                     <InputFile OnChange="@(e => OnAdjuntarArchivoPaciente(e, pacIdUpload))"
                                                class="form-control form-control-sm"
@@ -1042,9 +1047,12 @@
                     <option value="@t.Nombre">@t.Nombre</option>
                 }
             </select>
+            @* Subcategoria: se muestra SIEMPRE para que sea visible/editable tanto en Lista como en
+               Galeria. Si la tipologia seleccionada no tiene subcategorias, el selector queda
+               deshabilitado con una nota (al elegir una tipologia que si tenga, se habilita). *@
+            <label class="doc-edit-lbl">Subcategoria</label>
             @if (SubcatsDe(_edTip).Count > 0)
             {
-                <label class="doc-edit-lbl">Subcategoria</label>
                 <select class="form-select form-select-sm" @bind="_edSubcat">
                     <option value="">(sin subcategoria)</option>
                     @foreach (var s in SubcatsDe(_edTip))
@@ -1052,6 +1060,13 @@
                         <option value="@s.Nombre">@s.Nombre</option>
                     }
                 </select>
+            }
+            else
+            {
+                <select class="form-select form-select-sm" disabled>
+                    <option>(esta tipologia no tiene subcategorias)</option>
+                </select>
+                <small class="text-muted" style="font-size:11px;">Elige una tipologia con subcategorias, o configuralas en Configuracion del Sistema -> Tipologia Archivos.</small>
             }
             <label class="doc-edit-lbl">Fecha del documento</label>
             <input type="date" class="form-control form-control-sm" @bind="_edFecha" />
@@ -1415,6 +1430,8 @@
     private string _docUpTipologia = "";
     private string _docUpSubcategoria = "";
     private string _docUpAnotaciones = "";
+    // Fecha del proximo documento a adjuntar. Por defecto HOY (Bogota) y editable.
+    private DateOnly _docUpFecha = HoyBog();
     private bool _docUpBusy;
     private string? _docUpError;
     private string? _docUpMsg;
@@ -1422,6 +1439,7 @@
     private async Task OnAbrirDocumentosTab()
     {
         _tab = "documentos";
+        _docUpFecha = HoyBog();
         await RecargarDocsPacienteAsync();
         // Carga las tipologias activas la primera vez que se abre el tab.
         if (_tipologiasArchivo.Count == 0)
@@ -1477,11 +1495,13 @@
                 f.Size,
                 string.IsNullOrWhiteSpace(_docUpTipologia) ? null : _docUpTipologia,
                 string.IsNullOrWhiteSpace(_docUpAnotaciones) ? null : _docUpAnotaciones.Trim(),
-                string.IsNullOrWhiteSpace(_docUpSubcategoria) ? null : _docUpSubcategoria
+                string.IsNullOrWhiteSpace(_docUpSubcategoria) ? null : _docUpSubcategoria,
+                ParseFechaDoc(_docUpFecha)
             ), Guid.Empty);
 
             _docUpMsg = "Archivo adjuntado.";
             _docUpAnotaciones = "";
+            _docUpFecha = HoyBog();
             await RecargarDocsPacienteAsync();
         }
         catch (Exception ex) { _docUpError = "No se pudo subir el archivo: " + ex.Message; }
@@ -1579,13 +1599,18 @@
         _docEditError = null;
         try
         {
+            // Si la tipologia elegida no tiene subcategorias, no persistir una subcategoria vieja.
+            var subcat = SubcatsDe(_edTip).Count > 0 ? _edSubcat : "";
             await NotaSvc.ActualizarDocumentoEditableAsync(
-                _docEdit.Id, _edTip, _edSubcat, _edObs, ParseFechaDoc(_edFecha), Guid.Empty);
+                _docEdit.Id, _edTip, subcat, _edObs, ParseFechaDoc(_edFecha), Guid.Empty);
             CerrarEditDoc();
             await RecargarDocsPacienteAsync();
         }
         catch (Exception ex) { _docEditError = ex.Message; }
     }
+
+    /// <summary>Hoy en hora de Bogota (el server corre en UTC), como DateOnly.</summary>
+    private static DateOnly HoyBog() => DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(Bog).DateTime);
 
     /// <summary>Fecha (dia) -> DateTimeOffset a mediodia Bogota (evita saltos de dia por zona).</summary>
     private static DateTimeOffset? ParseFechaDoc(DateOnly? d)

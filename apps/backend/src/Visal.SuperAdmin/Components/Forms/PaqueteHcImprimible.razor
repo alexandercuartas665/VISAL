@@ -100,7 +100,7 @@ else
                     @RenderHeader(hdrEvo, evo.FormatoNombre, "EVO",
                         evo.Consecutivo > 0 ? CodigoPublico.Hc(evo.Consecutivo) : evo.Id.ToString().ToUpperInvariant(),
                         FechaAtencionLinea(schEvo, valEvo, evo.FechaApertura, evo.FechaAtencion),
-                        $"Evolucion - Sesion {_ses}")
+                        $"Evolucion - Sesion {_ses}", evo.EspecialistaNombre ?? _hc.EspecialistaNombre)
                     @if (schEvo is not null)
                     {
                         @foreach (var node in schEvo.Children) { @RenderTopNode(node, valEvo) }
@@ -553,7 +553,8 @@ else
                 <div class="pack-doc">
                     @RenderHeader(hdrEsc, esc.FormatoNombre, "ESC",
                         ConsecutivoHc(),
-                        $"Aplicada: {esc.FechaApertura.ToLocalTime():dd/MM/yyyy HH:mm}")
+                        $"Aplicada: {esc.FechaApertura.ToLocalTime():dd/MM/yyyy HH:mm}",
+                        esc.EspecialistaNombre ?? _hc.EspecialistaNombre)
                     <div class="pack-band">Resultado</div>
                     @if (schEsc is not null)
                     {
@@ -579,7 +580,8 @@ else
                 <div class="pack-doc">
                     @RenderHeader(hdrCon, doc.FormatoNombre, "CON",
                         ConsecutivoHc(),
-                        $"Fecha: {doc.FechaApertura.ToLocalTime():dd/MM/yyyy HH:mm}")
+                        $"Fecha: {doc.FechaApertura.ToLocalTime():dd/MM/yyyy HH:mm}",
+                        doc.EspecialistaNombre ?? _hc.EspecialistaNombre)
                     <div class="pack-band">Consentimiento informado</div>
                     @if (schDoc is not null)
                     {
@@ -1529,7 +1531,7 @@ else
         return l.TimeOfDay == TimeSpan.Zero ? l.ToString("dd/MM/yyyy") : l.ToString("dd/MM/yyyy HH:mm");
     }
 
-    private RenderFragment RenderHeader(FormHeader hd, string titulo, string tipoCorto, string ordenNum, string fechaLinea, string? subtitulo = null) => __builder =>
+    private RenderFragment RenderHeader(FormHeader hd, string titulo, string tipoCorto, string ordenNum, string fechaLinea, string? subtitulo = null, string? especialista = null) => __builder =>
     {
         // La EPS/aseguradora (congelada de la asignacion) solo se imprime en las
         // ORDENES, no en HC/evoluciones/escalas/consentimientos.
@@ -1542,6 +1544,12 @@ else
         // tipicamente es el Codigo + Nombre del FormDefinition (ej.
         // "HC-FO-08 FORMATO HC GENERAL") — mejor algo que nada en papel.
         var tituloFinal = !string.IsNullOrWhiteSpace(hd.Titulo) ? hd.Titulo! : titulo;
+        // "Atiende:" = el profesional del DOCUMENTO que se esta pintando. Cada evolucion/
+        // escala/consentimiento anidado trae el suyo (se pasa por parametro); si no se
+        // pasa (HC base y ordenes) cae al de la HC base. Evita que el encabezado de cada
+        // sub-historia arrastre el especialista de la base cuando el paquete mezcla
+        // sesiones de varios profesionales (cuerpo y header deben coincidir).
+        var atiende = especialista ?? _hc.EspecialistaNombre;
         <div class="pack-header">
             <div class="pack-hdr-top">
                 <div class="pack-hdr-brand">
@@ -1608,9 +1616,9 @@ else
                 {
                     <span><b>EPS:</b> @eps</span>
                 }
-                @if (!string.IsNullOrWhiteSpace(_hc.EspecialistaNombre))
+                @if (!string.IsNullOrWhiteSpace(atiende))
                 {
-                    <span><b>Atiende:</b> @_hc.EspecialistaNombre</span>
+                    <span><b>Atiende:</b> @atiende</span>
                 }
             </div>
         </div>

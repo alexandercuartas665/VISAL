@@ -588,11 +588,14 @@ public sealed class IhceSenderService(
     /// </summary>
     private static string ParametersPayload(string tipoDoc, string numero)
     {
-        // MinSalud exige el parametro 'humanuser' incluso en pre-flight de consultar
-        // profesional; sin el, devuelve HTTP 400 err-000 "Hay parametros faltantes o
-        // vacios: humanuser" (evidenciado 2026-08-03). Usamos el propio documento del
-        // consultado como identificador del operador (patron CC-<numero>) igual que
-        // ConsultarPacienteAsync cuando no se pasa un CC de operador distinto.
+        // CONTRATO IHCE $consultar-profesional-salud: solo admite los parametros
+        // 'identifier' y 'name'. Historia: el 2026-08-03 MinSalud EXIGIA 'humanuser'
+        // (sin el, HTTP 400 err-000 "Hay parametros faltantes o vacios: humanuser"),
+        // pero el 2026-11-12 MinSalud REVIRTIO el contrato y ahora RECHAZA 'humanuser'
+        // con HTTP 400 "Solo 'identifier', 'name' son parametros validos". Por eso el
+        // pre-flight enviamos SOLO 'identifier' (busqueda exacta por documento). OJO:
+        // esto aplica unicamente a profesional-salud; ConsultarPacienteAsync tiene su
+        // propio payload y mantiene su 'humanuser' (operador), que esa operacion si pide.
         var payload = new
         {
             resourceType = "Parameters",
@@ -606,8 +609,7 @@ public sealed class IhceSenderService(
                         new { name = "type",  valueString = tipoDoc },
                         new { name = "value", valueString = numero }
                     }
-                },
-                new { name = "humanuser", valueString = $"CC-{numero}" }
+                }
             }
         };
         return JsonSerializer.Serialize(payload);

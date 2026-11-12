@@ -45,4 +45,13 @@ public interface IConfiguracionClinicaService
 
     /// <summary>Nombres de las etapas del embudo del tenant, para poblar los selects de la config.</summary>
     Task<IReadOnlyList<string>> ListEtapasEmbudoAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Correo electronico por defecto del paciente. El snapshot Relacion de Facturas
+    /// lo usa como respaldo cuando se genera con "Usar datos del paciente" y el paciente
+    /// no tiene correo propio. Devuelve null si no esta configurado (columna en blanco).
+    /// </summary>
+    Task<string?> GetCorreoDefaultPacienteAsync(CancellationToken ct = default);
+
+    Task SetCorreoDefaultPacienteAsync(string? correo, Guid actor, CancellationToken ct = default);
 }

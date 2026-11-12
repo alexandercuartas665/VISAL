@@ -11,6 +11,7 @@ public sealed class ConfiguracionClinicaService(IApplicationDbContextFactory dbF
     private const int DefaultMeses = 3;
     private const string KeyBloquearOverloadTurnos = "turnos.bloquear_overload";
     private const string KeyPermitirOrdenesManuales = "clinica.permitir_ordenes_manuales";
+    private const string KeyCorreoDefaultPaciente = "pacientes.correo_default";
 
     // Etapa destino del embudo por tipo de formulario web. Los lee FormWebhookService por tenant.
     public const string KeyEtapaFormPqrs = "formularios.etapa_pqrs";
@@ -101,6 +102,46 @@ public sealed class ConfiguracionClinicaService(IApplicationDbContextFactory dbF
             {
                 TenantId = tid,
                 ConfigKey = KeyPermitirOrdenesManuales,
+                ConfigValue = valor
+            });
+        }
+        else
+        {
+            cfg.ConfigValue = valor;
+        }
+        await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<string?> GetCorreoDefaultPacienteAsync(CancellationToken ct = default)
+    {
+        using var db = dbFactory.Create();
+        var cfg = await db.TenantConfigurations.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.ConfigKey == KeyCorreoDefaultPaciente, ct);
+        return string.IsNullOrWhiteSpace(cfg?.ConfigValue) ? null : cfg!.ConfigValue!.Trim();
+    }
+
+    public async Task SetCorreoDefaultPacienteAsync(string? correo, Guid actor, CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
+        var valor = correo?.Trim() ?? string.Empty;
+        // Validacion liviana: si viene algo, debe parecer un correo (tiene @ con texto a ambos lados).
+        if (valor.Length > 0)
+        {
+            var at = valor.IndexOf('@');
+            if (at <= 0 || at >= valor.Length - 1 || valor.Contains(' '))
+            {
+                throw new InvalidOperationException("El correo por defecto no es valido.");
+            }
+        }
+
+        using var db = dbFactory.Create();
+        var cfg = await db.TenantConfigurations.FirstOrDefaultAsync(c => c.ConfigKey == KeyCorreoDefaultPaciente, ct);
+        if (cfg is null)
+        {
+            db.TenantConfigurations.Add(new TenantConfiguration
+            {
+                TenantId = tid,
+                ConfigKey = KeyCorreoDefaultPaciente,
                 ConfigValue = valor
             });
         }

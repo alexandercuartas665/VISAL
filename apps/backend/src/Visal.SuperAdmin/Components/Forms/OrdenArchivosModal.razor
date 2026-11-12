@@ -45,7 +45,7 @@
             </div>
             <div class="oa-upmeta">
                 <label class="oa-lbl">Tipologia</label>
-                <select class="form-select form-select-sm" @bind="_categoria" title="Se aplica a los archivos que subas ahora">
+                <select class="form-select form-select-sm" value="@_categoria" @onchange="OnCategoriaChanged" title="Se aplica a los archivos que subas ahora">
                     <option value="">&mdash; Sin tipologia &mdash;</option>
                     @foreach (var t in _tipologias) { <option value="@t.Nombre">@t.Nombre</option> }
                 </select>
@@ -53,10 +53,18 @@
                 {
                     <small class="text-muted">Configura tipologias en <em>Tipologia Archivos</em>.</small>
                 }
+                @if (SubcatsDe(_categoria).Count > 0)
+                {
+                    <label class="oa-lbl">Subcategoria</label>
+                    <select class="form-select form-select-sm" @bind="_subcategoria" title="Subcategoria del proximo archivo">
+                        <option value="">&mdash; Sin subcategoria &mdash;</option>
+                        @foreach (var s in SubcatsDe(_categoria)) { <option value="@s.Nombre">@s.Nombre</option> }
+                    </select>
+                }
                 <label class="oa-lbl">Anotaciones</label>
                 <input type="text" class="form-control form-control-sm" placeholder="opcional"
                        @bind="_anotaciones" @bind:event="oninput" />
-                <small class="text-muted">Aplican a los archivos que sueltes ahora.</small>
+                <small class="text-muted">Aplican a los archivos que sueltes ahora. La fecha del documento se toma de la fecha de atencion de la HC (editable despues).</small>
             </div>
         </div>
 
@@ -99,7 +107,7 @@
             <div class="oa-tblwrap">
                 <table class="oa-table">
                     <thead>
-                        <tr><th></th><th>Nombre</th><th>Tipologia</th><th>Tamano</th><th>Fecha</th><th></th></tr>
+                        <tr><th></th><th>Nombre</th><th>Tipologia</th><th>Fecha doc</th><th>Subido por</th><th>Tamano</th><th>Cargado</th><th></th></tr>
                     </thead>
                     <tbody>
                         @foreach (var d in lista)
@@ -119,17 +127,27 @@
                                 <td>
                                     @if (!string.IsNullOrWhiteSpace(d.Categoria)) { <span class="oa-cat">@d.Categoria</span> }
                                     else { <span class="oa-cat oa-cat-empty">(sin tipologia)</span> }
+                                    @if (!string.IsNullOrWhiteSpace(d.Subcategoria)) { <span class="oa-cat oa-subcat">@d.Subcategoria</span> }
                                 </td>
+                                <td class="oa-tmono">@(d.FechaDocumento is DateTimeOffset fd ? fd.ToOffset(Bog).ToString("dd/MM/yyyy") : "-")</td>
+                                <td>@(string.IsNullOrWhiteSpace(d.SubidoPor) ? "-" : d.SubidoPor)</td>
                                 <td class="oa-tmono">@FormatoTamano(d.Tamano)</td>
                                 <td class="oa-tmono">@d.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
                                 <td class="oa-tacts">
                                     <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirVisor(d)">Ver</button>
-                                    @if (esHcGrupo && HcAbierta)
+                                    @if (esHcGrupo)
                                     {
+                                        <button class="btn btn-link btn-sm" title="Editar datos" @onclick="() => AbrirEditInline(d)">&#9998;</button>
                                         <button class="btn btn-link btn-sm text-danger" title="Eliminar" @onclick="() => EliminarAsync(d.Id, d.NombreOriginal)">&#128465;</button>
                                     }
                                 </td>
                             </tr>
+                            @if (_editDocId == d.Id)
+                            {
+                                <tr class="oa-editrow">
+                                    <td colspan="8">@RenderEditForm(d)</td>
+                                </tr>
+                            }
                         }
                     </tbody>
                 </table>
@@ -220,9 +238,17 @@
     .oa-meta { font-size: .72rem; color: #64748b; }
     .oa-cat { font-size: .64rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: #eef2ff; color: #4338ca; text-transform: uppercase; letter-spacing: .03em; }
     .oa-cat-empty { background: #f1f5f9; color: #94a3b8; font-style: italic; text-transform: none; }
+    .oa-subcat { background: #f0fdf4; color: #15803d; }
+    .oa-user { display: flex; align-items: center; gap: 4px; font-weight: 600; color: #475569; }
+    .oa-fechadoc { display: flex; align-items: center; gap: 4px; font-weight: 600; color: #475569; }
+    .oa-obs { font-size: .72rem; color: #334155; background: #f8fafc; border-left: 3px solid #cbd5e1; padding: 4px 8px; border-radius: 4px; word-break: break-word; }
     .oa-tip-row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
     .oa-tip-edit { display: flex; gap: 4px; align-items: center; }
     .oa-tip-edit select { flex: 1 1 auto; min-width: 0; }
+    .oa-edit { display: flex; flex-direction: column; gap: 3px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; }
+    .oa-edit-lbl { font-size: .62rem; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .03em; margin: 2px 0 0; }
+    .oa-edit-acts { display: flex; gap: 6px; margin-top: 6px; }
+    .oa-editrow td { background: #f8fafc; }
     .oa-acts { display: flex; gap: 6px; justify-content: flex-end; margin-top: 2px; }
 
     .oa-tblwrap { border: 1px solid #e5e7eb; border-radius: 10px; overflow: auto; }
@@ -258,9 +284,10 @@
     [Parameter] public Guid HistoriaClinicaId { get; set; }
     [Parameter] public Guid PacienteId { get; set; }
     [Parameter] public string PacienteNombre { get; set; } = "";
-    /// <summary>HC Abierta: habilita editar tipologia / eliminar de los archivos de
-    /// la HC. Con HC cerrada el backend igual protege esas mutaciones; subir SI se
-    /// permite siempre.</summary>
+    /// <summary>Se conserva por compatibilidad con el caller (/ordenes). Ya NO condiciona
+    /// editar/eliminar: los archivos subidos aqui son externos de la HC (NotaMedicaId null)
+    /// y el backend permite editarlos/eliminarlos aunque la HC este cerrada — justo lo que
+    /// se necesita en Ordenes Clinicas, donde la HC casi siempre esta cerrada.</summary>
     [Parameter] public bool HcAbierta { get; set; }
     [Parameter] public EventCallback OnClose { get; set; }
 
@@ -274,14 +301,48 @@
     private string? _msg;
     private string? _error;
     private string? _categoria;
+    private string? _subcategoria;
     private string? _anotaciones;
 
     private string _grupo = "hc";       // hc | pac
     private string _vista = "galeria";  // galeria | tabla
 
+    // Edicion combinada de un documento: tipologia + subcategoria + fecha + observacion.
     private Guid? _editDocId;
     private string? _editTip;
+    private string? _editSubcat;
+    private string? _editObs;
+    private DateOnly? _editFecha;
     private NotaDocumentoDto? _visorDoc;
+
+    private static readonly TimeSpan Bog = TimeSpan.FromHours(-5);
+
+    // Subcategorias activas de una tipologia por su nombre (dependiente del select de tipologia).
+    private IReadOnlyList<SubcategoriaArchivoDto> SubcatsDe(string? tipNombre)
+    {
+        if (string.IsNullOrWhiteSpace(tipNombre)) { return Array.Empty<SubcategoriaArchivoDto>(); }
+        var t = _tipologias.FirstOrDefault(x => x.Nombre == tipNombre);
+        return t?.Subcategorias ?? (IReadOnlyList<SubcategoriaArchivoDto>)Array.Empty<SubcategoriaArchivoDto>();
+    }
+
+    private void OnCategoriaChanged(ChangeEventArgs e)
+    {
+        _categoria = e.Value?.ToString() ?? "";
+        _subcategoria = ""; // al cambiar la tipologia, la subcategoria anterior ya no aplica
+    }
+
+    private void OnEditTipChanged(ChangeEventArgs e)
+    {
+        _editTip = e.Value?.ToString() ?? "";
+        _editSubcat = ""; // idem en el edit inline
+    }
+
+    // Fecha (dia) -> DateTimeOffset a mediodia Bogota (evita saltos de dia por zona).
+    private static DateTimeOffset? ParseFechaDoc(DateOnly? d)
+    {
+        if (d is not DateOnly v) { return null; }
+        return new DateTimeOffset(v.Year, v.Month, v.Day, 12, 0, 0, Bog);
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -322,16 +383,19 @@
                     {
                         await rs.CopyToAsync(fs);
                     }
+                    // FechaDocumento no se envia: el servicio la inicializa con la fecha de
+                    // atencion de la HC. CreatedBy (quien cargo) lo estampa el interceptor de auditoria.
                     await NotaSvc.AdjuntarDocumentoHcAsync(new AdjuntarDocumentoHcRequest(
                         HistoriaClinicaId, PacienteId, f.Name, $"/uploads/notas/{nombreEnDisco}",
                         f.ContentType, f.Size,
                         string.IsNullOrWhiteSpace(_categoria) ? null : _categoria,
-                        string.IsNullOrWhiteSpace(_anotaciones) ? null : _anotaciones), Guid.Empty);
+                        string.IsNullOrWhiteSpace(_anotaciones) ? null : _anotaciones,
+                        string.IsNullOrWhiteSpace(_subcategoria) ? null : _subcategoria), Guid.Empty);
                     ok++;
                 }
                 catch (Exception exf) { _error = $"'{f.Name}': {exf.Message}"; }
             }
-            if (ok > 0) { _msg = $"{ok} archivo(s) subido(s)."; _anotaciones = ""; }
+            if (ok > 0) { _msg = $"{ok} archivo(s) subido(s)."; _anotaciones = ""; _subcategoria = ""; }
             await RecargarAsync();
         }
         catch (Exception ex) { _error = "No se pudo subir: " + ex.Message; }
@@ -341,15 +405,30 @@
     private void AbrirVisor(NotaDocumentoDto d) => _visorDoc = d;
     private void CerrarVisor() => _visorDoc = null;
 
-    private void AbrirEditTipInline(Guid docId, string? actual) { _editDocId = docId; _editTip = actual ?? ""; }
-    private void CancelarEditTipInline() { _editDocId = null; _editTip = null; }
+    private void AbrirEditInline(NotaDocumentoDto d)
+    {
+        _editDocId = d.Id;
+        _editTip = d.Categoria ?? "";
+        _editSubcat = d.Subcategoria ?? "";
+        _editObs = d.Anotaciones ?? "";
+        _editFecha = d.FechaDocumento is DateTimeOffset fd ? DateOnly.FromDateTime(fd.ToOffset(Bog).DateTime) : null;
+    }
 
-    private async Task GuardarTipInlineAsync(Guid docId)
+    private void CancelarEditInline()
+    {
+        _editDocId = null;
+        _editTip = _editSubcat = _editObs = null;
+        _editFecha = null;
+    }
+
+    private async Task GuardarEdicionAsync(Guid docId)
     {
         try
         {
-            await NotaSvc.ActualizarCategoriaDocumentoAsync(docId, _editTip, Guid.Empty);
-            _msg = "Tipologia actualizada."; _editDocId = null; _editTip = null;
+            await NotaSvc.ActualizarDocumentoEditableAsync(
+                docId, _editTip, _editSubcat, _editObs, ParseFechaDoc(_editFecha), Guid.Empty);
+            _msg = "Datos del archivo actualizados.";
+            CancelarEditInline();
             await RecargarAsync();
         }
         catch (Exception ex) { _error = ex.Message; }
@@ -376,7 +455,8 @@
 
     private static NotaDocumentoDto Proxy(DocumentoPacienteDto d) => new(
         d.Id, d.NotaMedicaId, d.NombreOriginal, d.RutaArchivo, d.TipoMime, d.Tamano,
-        d.Categoria, d.TipoTerapia, d.Mes, d.Anotaciones, d.CreatedAt);
+        d.Categoria, d.TipoTerapia, d.Mes, d.Anotaciones, d.CreatedAt,
+        d.Subcategoria, d.SubidoPor, d.FechaDocumento);
 
     private RenderFragment RenderCard(NotaDocumentoDto d, bool esHc) => __builder =>
     {
@@ -390,35 +470,70 @@
                 <div class="oa-thumb-icon" @onclick="() => AbrirVisor(d)">@IconoPara(d.NombreOriginal)</div>
             }
             <div class="oa-nombre" title="@d.NombreOriginal">@d.NombreOriginal</div>
-            <div class="oa-meta">@FormatoTamano(d.Tamano) &middot; @d.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div>
+            <div class="oa-meta">@FormatoTamano(d.Tamano) &middot; cargado @d.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div>
+            <div class="oa-meta oa-user" title="Usuario que cargo el archivo">
+                &#128100; @(string.IsNullOrWhiteSpace(d.SubidoPor) ? "(sin registro de usuario)" : d.SubidoPor)
+            </div>
             @if (_editDocId == d.Id)
             {
-                <div class="oa-tip-edit">
-                    <select class="form-select form-select-sm" @bind="_editTip">
-                        <option value="">(sin tipologia)</option>
-                        @foreach (var t in _tipologias) { <option value="@t.Nombre">@t.Nombre</option> }
-                    </select>
-                    <button class="btn btn-primary btn-sm" title="Guardar" @onclick="() => GuardarTipInlineAsync(d.Id)">&#10003;</button>
-                    <button class="btn btn-outline-secondary btn-sm" title="Cancelar" @onclick="CancelarEditTipInline">&#10005;</button>
-                </div>
+                @RenderEditForm(d)
             }
             else
             {
                 <div class="oa-tip-row">
                     @if (!string.IsNullOrWhiteSpace(d.Categoria)) { <span class="oa-cat">@d.Categoria</span> }
                     else { <span class="oa-cat oa-cat-empty">(sin tipologia)</span> }
-                    @if (esHc && HcAbierta)
+                    @if (!string.IsNullOrWhiteSpace(d.Subcategoria)) { <span class="oa-cat oa-subcat">@d.Subcategoria</span> }
+                    @if (esHc)
                     {
-                        <button class="btn btn-link btn-sm p-0" title="Editar tipologia" @onclick="() => AbrirEditTipInline(d.Id, d.Categoria)">&#9998;</button>
+                        <button class="btn btn-link btn-sm p-0" title="Editar datos del archivo" @onclick="() => AbrirEditInline(d)">&#9998;</button>
                     }
                 </div>
+                @if (d.FechaDocumento is DateTimeOffset fd)
+                {
+                    <div class="oa-meta oa-fechadoc" title="Fecha del documento (editable)">&#128197; @fd.ToOffset(Bog).ToString("dd/MM/yyyy")</div>
+                }
+                @if (!string.IsNullOrWhiteSpace(d.Anotaciones))
+                {
+                    <div class="oa-obs" title="Observacion">&#128221; @d.Anotaciones</div>
+                }
             }
             <div class="oa-acts">
                 <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirVisor(d)">Ver</button>
-                @if (esHc && HcAbierta)
+                @if (esHc)
                 {
                     <button class="btn btn-link btn-sm text-danger" title="Eliminar" @onclick="() => EliminarAsync(d.Id, d.NombreOriginal)">&#128465;</button>
                 }
+            </div>
+        </div>
+    };
+
+    // Formulario de edicion combinada (tipologia + subcategoria + fecha + observacion),
+    // compartido por la card de galeria y la fila expandida de la tabla.
+    private RenderFragment RenderEditForm(NotaDocumentoDto d) => __builder =>
+    {
+        <div class="oa-edit">
+            <label class="oa-edit-lbl">Tipologia</label>
+            <select class="form-select form-select-sm" value="@_editTip" @onchange="OnEditTipChanged">
+                <option value="">(sin tipologia)</option>
+                @foreach (var t in _tipologias) { <option value="@t.Nombre">@t.Nombre</option> }
+            </select>
+            @if (SubcatsDe(_editTip).Count > 0)
+            {
+                <label class="oa-edit-lbl">Subcategoria</label>
+                <select class="form-select form-select-sm" @bind="_editSubcat">
+                    <option value="">(sin subcategoria)</option>
+                    @foreach (var s in SubcatsDe(_editTip)) { <option value="@s.Nombre">@s.Nombre</option> }
+                </select>
+            }
+            <label class="oa-edit-lbl">Fecha del documento</label>
+            <input type="date" class="form-control form-control-sm" @bind="_editFecha" />
+            <label class="oa-edit-lbl">Observacion</label>
+            <input type="text" class="form-control form-control-sm" @bind="_editObs"
+                   placeholder="Observacion del archivo" maxlength="500" />
+            <div class="oa-edit-acts">
+                <button class="btn btn-primary btn-sm" title="Guardar" @onclick="() => GuardarEdicionAsync(d.Id)">&#10003; Guardar</button>
+                <button class="btn btn-outline-secondary btn-sm" title="Cancelar" @onclick="CancelarEditInline">&#10005;</button>
             </div>
         </div>
     };

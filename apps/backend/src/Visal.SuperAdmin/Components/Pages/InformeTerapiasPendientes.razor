@@ -110,6 +110,8 @@
                             <tr>
                                 <th>Paciente</th>
                                 <th>Servicio</th>
+                                <th>Fecha asignacion</th>
+                                <th class="inf-center">Dias a la fecha</th>
                                 <th class="inf-center">Pendientes</th>
                                 <th>Ultima atencion</th>
                                 <th>Profesional</th>
@@ -121,6 +123,8 @@
                                 <tr>
                                     <td><b>@f.Paciente</b><div class="inf-xsmall">@f.Documento</div></td>
                                     <td>@f.Servicio</td>
+                                    <td>@(f.InicioPrograma is { } ini ? ini.ToString("dd/MM/yyyy") : "-")</td>
+                                    <td class="inf-center">@DiasALaFecha(f.InicioPrograma)</td>
                                     <td class="inf-center"><span class="inf-pill">@f.SesionesPendientes</span></td>
                                     <td>@(f.UltimaAtencion is { } u ? u.ToString("dd/MM/yyyy") : "-")</td>
                                     <td>@(string.IsNullOrWhiteSpace(f.Profesional) ? "-" : f.Profesional)</td>
@@ -242,6 +246,15 @@
     }
 
     private static int Pct(int v, int max) => max <= 0 ? 0 : (int)Math.Round(100.0 * v / max);
+
+    // Dias transcurridos desde la fecha de inicio de la asignacion hasta la fecha del
+    // informe (hoy, hora Colombia). "-" si la fila no tiene fecha de inicio.
+    private string DiasALaFecha(DateOnly? inicio)
+    {
+        if (_data is null || inicio is not { } ini) { return "-"; }
+        var dias = _data.Fecha.DayNumber - ini.DayNumber;
+        return dias < 0 ? "0" : dias.ToString();
+    }
 
     protected override async Task OnInitializedAsync()
     {

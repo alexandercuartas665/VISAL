@@ -71,7 +71,12 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
             .FirstOrDefaultAsync(ct);
         if (tenant is null) { return null; }
 
-        var hoy = DateOnly.FromDateTime(DateTime.Now);
+        // "Hoy" en hora LOCAL de Colombia (UTC-5): el contenedor de prod corre en UTC, y
+        // DateTime.Now haria rodar el mes 5 horas antes en la frontera (fin de mes 19:00
+        // local = dia 1 del mes siguiente en UTC). Afecta el filtro "mes actual", la fecha
+        // mostrada y los dias a la fecha. Mismo criterio que RelacionFacturasSelector.
+        var bogota = TimeSpan.FromHours(-5);
+        var hoy = DateOnly.FromDateTime(DateTimeOffset.UtcNow.ToOffset(bogota).DateTime);
 
         // Consultas con IgnoreQueryFilters + filtro explicito por tenant: la pagina
         // es anonima (sin cookie de tenant), asi que el filtro global no aplica.
@@ -107,7 +112,13 @@ public sealed class InformeTerapiasService : IInformeTerapiasService
         // (cubre FISIOTERAPIA, TERAPIA RESPIRATORIA/OCUPACIONAL/FISICA, etc.).
         static bool EsTerapia(string? tipo, string? modulo, string? nombre)
             => Contiene(tipo, "TERAPIA") || Contiene(modulo, "TERAPIA") || Contiene(nombre, "TERAPIA");
-        var asigTerapia = asigs.Where(a => EsTerapia(a.TipoServicio, a.Modulo, a.NombreServicio)).ToList();
+        // Solo lo cargado del MES ACTUAL: la asignacion cuya fecha de inicio cae en el mes
+        // y anio de hoy (hora Colombia). Evita arrastrar pendientes de meses anteriores en
+        // la notificacion/informe. La fecha de inicio es ademas la que se muestra en la tabla.
+        var asigTerapia = asigs
+            .Where(a => EsTerapia(a.TipoServicio, a.Modulo, a.NombreServicio)
+                     && a.FechaInicio.Year == hoy.Year && a.FechaInicio.Month == hoy.Month)
+            .ToList();
         if (asigTerapia.Count == 0)
         {
             return new InformeTerapiasResult(tenant.Name, tenant.LogoUrl, hoy, Array.Empty<TerapiaPendienteDto>());

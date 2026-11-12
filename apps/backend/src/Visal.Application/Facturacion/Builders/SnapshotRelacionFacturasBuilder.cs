@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Visal.Application.Facturacion.Selectors;
+using Visal.Application.Tenancy;
 using Visal.Domain.Common;
 using Visal.Domain.Enums;
 
@@ -17,7 +18,9 @@ namespace Visal.Application.Facturacion.Builders;
 /// hecho a un diccionario columna->valor. Iteraciones sobre "que cuenta como
 /// facturado" viven en el selector, no aqui.
 /// </summary>
-public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector selector) : ISnapshotBuilder
+public sealed class SnapshotRelacionFacturasBuilder(
+    IRelacionFacturasSelector selector,
+    IConfiguracionClinicaService? config = null) : ISnapshotBuilder
 {
     public TipoSnapshot TipoAplicable => TipoSnapshot.RelacionFacturas;
 
@@ -132,18 +135,21 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
         // EPS resuelve el contrato del paciente contra SUS propios contratos, asi que no
         // hay HC duplicadas entre EPS (una HC pertenece al contrato de una sola EPS).
         var filtrosLista = ParsearFiltrosLista(filtrosJson);
+        // Correo de respaldo del paciente (config por tenant). Se usa solo cuando el
+        // snapshot se genera con "usar datos del paciente" y el paciente no trae correo.
+        var correoDefaultPaciente = config is null ? null : await config.GetCorreoDefaultPacienteAsync(ct);
         foreach (var filtros in filtrosLista)
         {
             var hechos = await selector.SelectAsync(filtros, ct);
             foreach (var h in hechos)
             {
                 ct.ThrowIfCancellationRequested();
-                yield return Mapear(h, filtros.UsarDatosPaciente);
+                yield return Mapear(h, filtros.UsarDatosPaciente, correoDefaultPaciente);
             }
         }
     }
 
-    private static Dictionary<string, object?> Mapear(RelacionFacturasHecho h, bool usarDatosPaciente)
+    private static Dictionary<string, object?> Mapear(RelacionFacturasHecho h, bool usarDatosPaciente, string? correoDefaultPaciente)
     {
         // v3: la HC es la unidad base. Los campos de asignacion/turno/sesion/
         // servicio ya no aplican (prod no genera esos registros). Los dejamos
@@ -198,9 +204,13 @@ public sealed class SnapshotRelacionFacturasBuilder(IRelacionFacturasSelector se
             ["Departamento"] = h.DepartamentoNombre,                           // 38
             ["Municipio"] = h.MunicipioNombre,                                 // 39
             // 40-42 — direccion/telefono/correo: del PACIENTE si usarDatosPaciente, si no de la sede.
+            // El correo cae al correo por defecto del tenant (config de pacientes) cuando el
+            // paciente no tiene correo propio; si tampoco hay default queda en blanco.
             ["Dirección"] = usarDatosPaciente ? h.Paciente.Direccion : h.Sucursal?.Direccion,
             ["Telefono"] = usarDatosPaciente ? h.Paciente.Telefono : h.Sucursal?.Telefono,
-            ["Correo electrónico"] = usarDatosPaciente ? h.Paciente.Email : h.Sucursal?.Email,
+            ["Correo electrónico"] = usarDatosPaciente
+                ? (string.IsNullOrWhiteSpace(h.Paciente.Email) ? correoDefaultPaciente : h.Paciente.Email)
+                : h.Sucursal?.Email,
             // Trazabilidad interna (fuera del template EPS): consecutivo publico
             // legible (HC-000123 / AS-000045). El AS sale POR SERVICIO (asignacion.Consecutivo);
             // null solo si la HC no nacio de una asignacion.

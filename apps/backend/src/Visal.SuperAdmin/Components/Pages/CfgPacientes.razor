@@ -5,6 +5,7 @@
 @using Visal.Application.Tenancy
 @using Visal.Domain.Enums
 @inject ICatalogoPacienteService Svc
+@inject IConfiguracionClinicaService ClinicaSvc
 @inject IJSRuntime JS
 
 <PageTitle>Configuracion Pacientes - Visal</PageTitle>
@@ -64,7 +65,30 @@
     </div>
 </div>
 
+@* ===== Correo por defecto del paciente ===== *@
+<div class="ase-card">
+    <div class="ase-card-h">Correo por defecto del paciente</div>
+    <div class="ase-form">
+        <div class="ase-f">
+            <label>Correo electronico por defecto</label>
+            <div class="pac-input-row">
+                <input type="email" class="form-control form-control-sm" style="max-width:280px;"
+                       @bind="_correoDefault" placeholder="facturacion@ipsvisalrt.com" />
+                <button class="btn btn-primary btn-sm" @onclick="SaveCorreoDefault" disabled="@_busyCorreo">
+                    @(_busyCorreo ? "Guardando..." : "Guardar")
+                </button>
+            </div>
+            <small class="text-muted">
+                El snapshot Relacion de Facturas usa este correo como respaldo cuando se genera con
+                "Usar datos del paciente" y el paciente no tiene correo electronico propio. Si lo dejas
+                vacio, la columna Correo queda en blanco para esos pacientes.
+            </small>
+        </div>
+    </div>
+</div>
+
 <style>
+    .pac-input-row { display: flex; gap: 6px; align-items: center; }
     .pac-tabs { display: flex; gap: 4px; border-bottom: 1.5px solid #e2e8f0; margin-bottom: 18px; padding-bottom: 0; }
     .pac-tab { background: none; border: none; padding: 10px 18px; font-size: 13.5px; font-weight: 600; color: #64748b; cursor: pointer; border-bottom: 2.5px solid transparent; margin-bottom: -1.5px; transition: all .15s; }
     .pac-tab:hover { color: #1565c0; }
@@ -96,10 +120,31 @@
     private List<Row> _rows = new();
     private List<CatalogoPacienteDto> _items = new();
     private string? _error, _ok;
+    private string? _correoDefault;
+    private bool _busyCorreo;
 
     private string LabelActivo => _tabs.First(t => t.tipo == _tab).label;
 
-    protected override async Task OnInitializedAsync() => await Load();
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+        _correoDefault = await ClinicaSvc.GetCorreoDefaultPacienteAsync();
+    }
+
+    private async Task SaveCorreoDefault()
+    {
+        _error = _ok = null; _busyCorreo = true;
+        try
+        {
+            await ClinicaSvc.SetCorreoDefaultPacienteAsync(_correoDefault, await Actor());
+            _correoDefault = await ClinicaSvc.GetCorreoDefaultPacienteAsync();
+            _ok = string.IsNullOrWhiteSpace(_correoDefault)
+                ? "Correo por defecto del paciente eliminado."
+                : $"Correo por defecto del paciente guardado: {_correoDefault}.";
+        }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        finally { _busyCorreo = false; }
+    }
 
     private async Task Load()
     {

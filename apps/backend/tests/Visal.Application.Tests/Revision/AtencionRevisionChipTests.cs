@@ -45,6 +45,8 @@ public sealed class AtencionRevisionChipTests
         public Task<string?> GetEtapaFormularioWebAsync(string tipo, CancellationToken ct = default) => Task.FromResult<string?>(null);
         public Task SetEtapaFormularioWebAsync(string tipo, string? etapa, Guid actor, CancellationToken ct = default) => Task.CompletedTask;
         public Task<IReadOnlyList<string>> ListEtapasEmbudoAsync(CancellationToken ct = default) => Task.FromResult<IReadOnlyList<string>>(new List<string>());
+        public Task<string?> GetCorreoDefaultPacienteAsync(CancellationToken ct = default) => Task.FromResult<string?>(null);
+        public Task SetCorreoDefaultPacienteAsync(string? correo, Guid actor, CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class FakeTimeProvider : TimeProvider

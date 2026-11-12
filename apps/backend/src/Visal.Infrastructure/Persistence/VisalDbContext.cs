@@ -1587,7 +1587,11 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
                 .ValueGeneratedOnAdd();
             b.HasIndex(x => x.Consecutivo).IsUnique();
             b.Property(x => x.Sucursal).HasMaxLength(40).IsRequired();
-            b.Property(x => x.ContratoCodigo).HasMaxLength(60).IsRequired();
+            // 250 para igualar la columna fuente contratos_aseguradora.codigo_contrato
+            // (varchar(250)): hay contratos cuyo codigo es un hash de 64 chars (p.ej.
+            // temporales autogenerados) que desbordaban este varchar(60) al asignar
+            // (Postgres 22001 value too long for character varying(60)).
+            b.Property(x => x.ContratoCodigo).HasMaxLength(250).IsRequired();
             b.HasOne(x => x.Paciente).WithMany().HasForeignKey(x => x.PacienteId).OnDelete(DeleteBehavior.Restrict);
             b.HasMany(x => x.Items).WithOne(x => x.Lote!).HasForeignKey(x => x.LoteId).OnDelete(DeleteBehavior.Cascade);
             b.HasIndex(x => new { x.TenantId, x.PacienteId });
@@ -1646,7 +1650,11 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.CodigoRips).HasMaxLength(40);
             b.Property(x => x.TipoServicio).HasMaxLength(40).IsRequired();
             b.Property(x => x.Modulo).HasMaxLength(40);
-            b.Property(x => x.ContratoCodigo).HasMaxLength(60).IsRequired();
+            // 250 para igualar la columna fuente contratos_aseguradora.codigo_contrato
+            // (varchar(250)): hay contratos cuyo codigo es un hash de 64 chars (p.ej.
+            // temporales autogenerados) que desbordaban este varchar(60) al asignar
+            // (Postgres 22001 value too long for character varying(60)).
+            b.Property(x => x.ContratoCodigo).HasMaxLength(250).IsRequired();
             b.Property(x => x.CodigoAutorizacion).HasMaxLength(60);
             b.Property(x => x.FormatoHistoria).HasMaxLength(60);
             b.Property(x => x.PdfAutorizacionUrl).HasMaxLength(500);

@@ -1076,8 +1076,8 @@ namespace Visal.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("ContratoCodigo")
                         .IsRequired()
-                        .HasMaxLength(60)
-                        .HasColumnType("character varying(60)")
+                        .HasMaxLength(250)
+                        .HasColumnType("character varying(250)")
                         .HasColumnName("contrato_codigo");
 
                     b.Property<DateTimeOffset>("CreatedAt")
@@ -1355,8 +1355,8 @@ namespace Visal.Infrastructure.Persistence.Migrations
 
                     b.Property<string>("ContratoCodigo")
                         .IsRequired()
-                        .HasMaxLength(60)
-                        .HasColumnType("character varying(60)")
+                        .HasMaxLength(250)
+                        .HasColumnType("character varying(250)")
                         .HasColumnName("contrato_codigo");
 
                     b.Property<DateTimeOffset>("CreatedAt")

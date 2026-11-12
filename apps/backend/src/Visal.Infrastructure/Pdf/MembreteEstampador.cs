@@ -36,9 +36,29 @@ public static class MembreteEstampador
             using var doc = PdfReader.Open(inMs, PdfDocumentOpenMode.Modify);
             if (doc.PageCount == 0) { return null; }
             var page = doc.Pages[0];
-            var anchoPt = page.Width.Point;
-            if (anchoPt <= 0) { return null; }
-            var png = RenderBandaPng(anchoPt, BandaAltoPt, texto);
+            // Dimensiones SIN rotar (MediaBox): PdfSharp dibuja en este espacio e IGNORA /Rotate.
+            var mediaBox = page.MediaBox;
+            double w = mediaBox.Width;   // ancho del MediaBox (puntos)
+            double h = mediaBox.Height;  // alto del MediaBox (puntos)
+            if (w <= 0 || h <= 0) { return null; }
+
+            // XGraphics dibuja en el MediaBox y el VISOR aplica /Rotate (horario) al mostrar.
+            // Para que la banda caiga en el TOP VISUAL hay que apoyarla, en el MediaBox, sobre
+            // el borde que el visor llevara arriba (90 -> izquierdo, 180 -> inferior,
+            // 270 -> derecho; los tres de longitud = alto del MediaBox en 90/270, ancho en 180).
+            // OJO: en PDFs REABIERTOS con PdfReader (el caso real: los anexos escaneados que
+            // llegan a Cuenta Medica), XGraphics.FromPdfPage sobre una pagina /Rotate 90/270
+            // aplica un offset base de (alto-ancho) que NO aparece en paginas creadas en
+            // memoria. Las traslaciones de abajo ya lo compensan. Transforms hallados por
+            // barrido de candidatos sobre paginas GUARDADAS+REABIERTAS /Rotate 0/90/180/270
+            // (fiel a produccion) y verificados visualmente.
+            int rot = ((page.Rotate % 360) + 360) % 360;
+            if (rot != 0 && rot != 90 && rot != 180 && rot != 270) { rot = 0; }
+
+            // Ancho VISUAL del top (= largo de la banda): en 90/270 es el alto del MediaBox,
+            // porque el visor intercambia los ejes.
+            double anchoVisual = (rot == 90 || rot == 270) ? h : w;
+            var png = RenderBandaPng(anchoVisual, BandaAltoPt, texto);
             // OJO: XImage.FromStream llama MemoryStream.GetBuffer(), que lanza si el stream se
             // construye con new MemoryStream(byte[]) (buffer no publico). Hay que escribir el PNG
             // en un MemoryStream vacio (buffer publicamente visible).
@@ -48,7 +68,25 @@ public static class MembreteEstampador
             using var ximg = XImage.FromStream(imgMs);
             using (var gfx = XGraphics.FromPdfPage(page, XGraphicsPdfPageOptions.Append))
             {
-                gfx.DrawImage(ximg, 0, 0, anchoPt, BandaAltoPt);
+                // Lleva la banda al borde del MediaBox que el visor mostrara arriba.
+                // (ty/tx ya compensan el offset de reopen de XGraphics en 90/270.)
+                switch (rot)
+                {
+                    case 90:
+                        gfx.TranslateTransform(0, w);
+                        gfx.RotateTransform(-90);
+                        break;
+                    case 180:
+                        gfx.TranslateTransform(w, h);
+                        gfx.RotateTransform(-180);
+                        break;
+                    case 270:
+                        gfx.TranslateTransform(w, w - h);
+                        gfx.RotateTransform(-270);
+                        break;
+                    // case 0: sin transformacion; la banda va en el top del MediaBox.
+                }
+                gfx.DrawImage(ximg, 0, 0, anchoVisual, BandaAltoPt);
             }
             using var outMs = new MemoryStream();
             doc.Save(outMs, false);

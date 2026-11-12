@@ -12,7 +12,10 @@
      (via NotaSvc.AdjuntarDocumentoHcAsync), asi tambien se ven en Admision.
    - Vista GALERIA o TABLA de "Archivos de esta HC" y "Documentos del paciente".
    - Visor embebido de imagenes (<img>) y PDF (<iframe>) sin salir del sistema.
-   Editar tipologia / eliminar solo con HC Abierta (el backend lo protege igual).
+   Editar (tipologia/subcategoria/fecha/observacion) y eliminar se ofrecen en AMBOS
+   tabs para los documentos editables (NotaMedicaId null: adjuntos directos, externos
+   de la HC y firmas del paciente). Los anexos de una nota medica no se editan aqui
+   (el backend lo protege igual).
 *@
 
 <div class="oa-back" @onclick="Cerrar"></div>
@@ -99,7 +102,7 @@
         else if (_vista == "galeria")
         {
             <div class="oa-grid">
-                @foreach (var d in lista) { @RenderCard(d, esHcGrupo) }
+                @foreach (var d in lista) { @RenderCard(d) }
             </div>
         }
         else
@@ -135,9 +138,9 @@
                                 <td class="oa-tmono">@d.CreatedAt.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</td>
                                 <td class="oa-tacts">
                                     <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirVisor(d)">Ver</button>
-                                    @if (esHcGrupo)
+                                    @if (Editable(d))
                                     {
-                                        <button class="btn btn-link btn-sm" title="Editar datos" @onclick="() => AbrirEditInline(d)">&#9998;</button>
+                                        <button class="btn btn-link btn-sm" title="Editar tipologia / subcategoria / fecha / observacion" @onclick="() => AbrirEditInline(d)">&#9998;</button>
                                         <button class="btn btn-link btn-sm text-danger" title="Eliminar" @onclick="() => EliminarAsync(d.Id, d.NombreOriginal)">&#128465;</button>
                                     }
                                 </td>
@@ -317,6 +320,13 @@
 
     private static readonly TimeSpan Bog = TimeSpan.FromHours(-5);
 
+    // Un documento es editable (tipologia/subcategoria/fecha/observacion) y eliminable
+    // SOLO si no es anexo de una nota medica (NotaMedicaId null): adjuntos directos de
+    // Admision, externos de la HC o firmas del paciente. Es el MISMO gate que aplica el
+    // backend (ActualizarDocumentoEditableAsync lanza si NotaMedicaId != null), por eso
+    // sirve igual en el tab "Archivos de esta HC" como en "Documentos del paciente".
+    private static bool Editable(NotaDocumentoDto d) => d.NotaMedicaId is null;
+
     // Subcategorias activas de una tipologia por su nombre (dependiente del select de tipologia).
     private IReadOnlyList<SubcategoriaArchivoDto> SubcatsDe(string? tipNombre)
     {
@@ -458,7 +468,7 @@
         d.Categoria, d.TipoTerapia, d.Mes, d.Anotaciones, d.CreatedAt,
         d.Subcategoria, d.SubidoPor, d.FechaDocumento);
 
-    private RenderFragment RenderCard(NotaDocumentoDto d, bool esHc) => __builder =>
+    private RenderFragment RenderCard(NotaDocumentoDto d) => __builder =>
     {
         <div class="oa-card">
             @if (EsImagen(d.TipoMime, d.NombreOriginal))
@@ -484,9 +494,9 @@
                     @if (!string.IsNullOrWhiteSpace(d.Categoria)) { <span class="oa-cat">@d.Categoria</span> }
                     else { <span class="oa-cat oa-cat-empty">(sin tipologia)</span> }
                     @if (!string.IsNullOrWhiteSpace(d.Subcategoria)) { <span class="oa-cat oa-subcat">@d.Subcategoria</span> }
-                    @if (esHc)
+                    @if (Editable(d))
                     {
-                        <button class="btn btn-link btn-sm p-0" title="Editar datos del archivo" @onclick="() => AbrirEditInline(d)">&#9998;</button>
+                        <button class="btn btn-link btn-sm p-0" title="Editar tipologia / subcategoria / fecha / observacion" @onclick="() => AbrirEditInline(d)">&#9998;</button>
                     }
                 </div>
                 @if (d.FechaDocumento is DateTimeOffset fd)
@@ -500,7 +510,7 @@
             }
             <div class="oa-acts">
                 <button class="btn btn-outline-primary btn-sm" @onclick="() => AbrirVisor(d)">Ver</button>
-                @if (esHc)
+                @if (Editable(d))
                 {
                     <button class="btn btn-link btn-sm text-danger" title="Eliminar" @onclick="() => EliminarAsync(d.Id, d.NombreOriginal)">&#128465;</button>
                 }

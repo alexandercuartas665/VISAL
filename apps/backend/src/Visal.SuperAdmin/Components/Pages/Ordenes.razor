@@ -817,7 +817,13 @@ else
                 // Imprimir solo cuando el alcance esta ACOTADO: una asignacion enfocada
                 // (imprime ese lote) o pocas HC visibles. Sin esto, imprimir "Todas"
                 // (miles de HC) cuelga el navegador al renderizar cada paquete completo.
-                var _printAcotado = _asigNavFiltro is not null || _vis <= PrintCap;
+                // Excepcion: cuando el usuario YA filtro por un PACIENTE, su mes completo
+                // es un alcance legitimo y acotado => se permite hasta un tope duro mayor
+                // (PrintCapPaciente) en vez del tope general de "Todas".
+                var _tienePaciente = !string.IsNullOrWhiteSpace(_filtroPaciente);
+                var _printAcotado = _asigNavFiltro is not null
+                    || _vis <= PrintCap
+                    || (_tienePaciente && _vis <= PrintCapPaciente);
                 var _printHabilitado = !_buscando && _vis > 0 && _printAcotado;
             }
             @* Export XLSX del listado actual: mismo endpoint que /ordenes/export.xlsx,
@@ -833,7 +839,7 @@ else
                actual en un solo PDF (multi-paciente). Cada HC se renderiza con
                su propio schema y valores, respetando el flag HideIfEmpty del
                disenador. Habilitado siempre que haya filas y no se este
-               buscando; la pagina destino tiene su propio tope (MaxHcs=100)
+               buscando; la pagina destino tiene su propio tope (MaxHcs=500)
                que avisa al usuario si excede. Usa <a target="_blank"> con href
                construido en getter — patron del boton Excel para no perder el
                user-gesture (Blazor Server + JS.open sufre popup blocker). *@
@@ -843,7 +849,7 @@ else
                title="@(_vis == 0
                    ? "Ajusta los filtros y presiona Buscar; luego imprime el listado."
                    : !_printAcotado
-                       ? $"Demasiadas HC para imprimir ({_vis}). Enfoca una asignacion con el navegador < > o afina los filtros (max {PrintCap})."
+                       ? $"Demasiadas HC para imprimir ({_vis}). Filtra por un PACIENTE (permite hasta {PrintCapPaciente}), enfoca una asignacion con el navegador < > o afina los filtros (max {PrintCap})."
                        : _asigNavFiltro is Guid _gp
                            ? $"Imprimir SOLO la asignacion {AsigNavEtiqueta()} que esta en pantalla"
                            : $"Imprimir las {_vis} HC(s) del listado en pantalla (todos los pacientes que aparecen)")">
@@ -3258,6 +3264,12 @@ else
     // asi que un listado masivo cuelga el navegador. Con una asignacion enfocada el
     // alcance ya esta acotado al lote y se permite sin importar este tope.
     private const int PrintCap = 100;
+
+    // Tope DURO cuando hay un paciente filtrado: su mes completo es un alcance
+    // legitimo, pero seguimos evitando prints patologicos que cuelguen el navegador.
+    // Alineado con MaxHcs de ImprimirOrdenesFiltradas (la pagina destino) para que
+    // habilitar el boton nunca produzca un truncado silencioso en el destino.
+    private const int PrintCapPaciente = 500;
 
     private Guid? _asigNavFiltro;
     private bool _asigCopiado;

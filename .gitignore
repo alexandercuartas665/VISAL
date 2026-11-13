@@ -102,3 +102,6 @@ stable-bin/
 # Local data exports (no deben ir al repo)
 formularios-historias.xlsx
 formularios-historias.csv
+
+# Carpeta local de prueba del modulo Copias de seguridad (no versionar)
+.dev-backups/

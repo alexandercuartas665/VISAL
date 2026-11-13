@@ -1,0 +1,242 @@
+@page "/plataforma/copias"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Microsoft.AspNetCore.Components.Authorization
+@using Visal.Application.Common
+@using Visal.SuperAdmin.Infra
+@inject IBackupsService Backups
+@inject ITenantContext Tenant
+@inject IJSRuntime JS
+
+<PageTitle>Copias de seguridad - Visal</PageTitle>
+
+<div class="ase-page">
+    <div class="ase-page-h">
+        <h2>Copias de seguridad</h2>
+        <p class="ase-sub">
+            Inventario de los respaldos de la base de datos que guarda el servidor, con su
+            tamaño y la fecha. Abajo puedes ver cuánto pesan las copias, los archivos subidos
+            (firmas, PDFs) y el espacio libre del disco.
+            @if (_esSuperAdmin)
+            {
+                <text> Como Super Admin puedes descargar, borrar y rotar respaldos.</text>
+            }
+            else
+            {
+                <text> Las acciones de descargar/borrar un respaldo completo están reservadas al Super Admin, porque contiene datos de todas las agencias.</text>
+            }
+        </p>
+    </div>
+
+    @* ===== Totales ===== *@
+    <div class="bk-kpis">
+        <div class="bk-kpi">
+            <div class="bk-kpi-l">Copias</div>
+            <div class="bk-kpi-v">@(_resumen?.Cantidad ?? 0)</div>
+            <div class="bk-kpi-s">@Humanizar(_resumen?.TotalCopiasBytes ?? 0)</div>
+        </div>
+        <div class="bk-kpi">
+            <div class="bk-kpi-l">Archivos subidos (uploads)</div>
+            <div class="bk-kpi-v">@Humanizar(_resumen?.UploadsBytes ?? 0)</div>
+            <div class="bk-kpi-s">firmas, PDFs, adjuntos</div>
+        </div>
+        <div class="bk-kpi">
+            <div class="bk-kpi-l">Disco libre</div>
+            <div class="bk-kpi-v">@Humanizar(_resumen?.DiscoLibreBytes ?? 0)</div>
+            <div class="bk-kpi-s">de @Humanizar(_resumen?.DiscoTotalBytes ?? 0) totales</div>
+        </div>
+    </div>
+
+    @if (_resumen is not null && !_resumen.CarpetaCopiasExiste)
+    {
+        <div class="alert alert-warning">
+            La carpeta de copias no existe o no está montada en el servidor
+            (<code>@_resumen.CarpetaCopias</code>). En este entorno no hay respaldos que mostrar.
+        </div>
+    }
+
+    @* ===== Acciones de cabecera ===== *@
+    <div class="bk-actions">
+        <button class="btn btn-sm btn-outline-secondary" @onclick="Recargar">↻ Refrescar</button>
+
+        @if (_esAdmin && Tenant.TenantId is not null)
+        {
+            <a class="btn btn-sm btn-outline-primary" href="/plataforma/export-tenant" target="_blank" rel="noopener"
+               title="Descargar un ZIP con SOLO los datos de tu agencia (un CSV por tabla)">
+                ⬇ Exportar los datos de mi agencia
+            </a>
+        }
+
+        @if (_esSuperAdmin)
+        {
+            <span class="bk-rot">
+                Conservar
+                <input type="number" min="1" max="999" class="bk-rot-n" @bind="_conservar" />
+                más recientes
+                <button class="btn btn-sm btn-outline-danger" @onclick="Rotar" disabled="@_trabajando">
+                    Limpiar antiguas
+                </button>
+            </span>
+        }
+    </div>
+
+    @if (_msg is not null)
+    {
+        <div class="alert @(_msgError ? "alert-danger" : "alert-success") bk-msg">@_msg</div>
+    }
+
+    @* ===== Tabla ===== *@
+    @if (_archivos.Count == 0)
+    {
+        <div class="bk-empty">No hay copias para mostrar.</div>
+    }
+    else
+    {
+        <table class="bk-tbl">
+            <thead>
+                <tr>
+                    <th>Archivo</th>
+                    <th>Tipo</th>
+                    <th class="bk-r">Tamaño</th>
+                    <th>Fecha</th>
+                    @if (_esSuperAdmin)
+                    {
+                        <th class="bk-r">Acciones</th>
+                    }
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var f in _archivos)
+                {
+                    <tr>
+                        <td class="bk-nombre">@f.Nombre</td>
+                        <td><span class="bk-tag">@f.Tipo</span></td>
+                        <td class="bk-r">@Humanizar(f.Bytes)</td>
+                        <td>@f.Fecha.ToString("yyyy-MM-dd HH:mm")</td>
+                        @if (_esSuperAdmin)
+                        {
+                            <td class="bk-r bk-acc">
+                                <a class="btn btn-xs btn-outline-primary"
+                                   href="@($"/plataforma/copias/descargar?file={Uri.EscapeDataString(f.Nombre)}")"
+                                   target="_blank" rel="noopener" title="Descargar esta copia">⬇</a>
+                                <button class="btn btn-xs btn-outline-danger" @onclick="() => Borrar(f)"
+                                        disabled="@_trabajando" title="Borrar esta copia">🗑</button>
+                            </td>
+                        }
+                    </tr>
+                }
+            </tbody>
+        </table>
+        <div class="bk-foot">
+            Carpeta de copias: <code>@(_resumen?.CarpetaCopias)</code>
+        </div>
+    }
+</div>
+
+<style>
+    .bk-kpis { display:flex; gap:14px; flex-wrap:wrap; margin:12px 0 18px; }
+    .bk-kpi { flex:1 1 180px; background:var(--card,#fff); border:1px solid #e5e7eb; border-radius:12px; padding:14px 16px; }
+    .bk-kpi-l { font-size:.78rem; color:#6b7280; text-transform:uppercase; letter-spacing:.03em; }
+    .bk-kpi-v { font-size:1.6rem; font-weight:700; line-height:1.2; }
+    .bk-kpi-s { font-size:.8rem; color:#6b7280; }
+    .bk-actions { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+    .bk-rot { display:inline-flex; align-items:center; gap:6px; font-size:.86rem; color:#374151; }
+    .bk-rot-n { width:68px; padding:3px 6px; border:1px solid #d1d5db; border-radius:6px; }
+    .bk-msg { margin:6px 0 12px; }
+    .bk-tbl { width:100%; border-collapse:collapse; font-size:.9rem; }
+    .bk-tbl th, .bk-tbl td { padding:8px 10px; border-bottom:1px solid #eef0f2; text-align:left; }
+    .bk-tbl thead th { font-size:.76rem; text-transform:uppercase; letter-spacing:.03em; color:#6b7280; }
+    .bk-r { text-align:right; }
+    .bk-nombre { font-family:ui-monospace,Menlo,Consolas,monospace; font-size:.85rem; word-break:break-all; }
+    .bk-tag { background:#eef2ff; color:#3730a3; border-radius:999px; padding:2px 9px; font-size:.76rem; white-space:nowrap; }
+    .bk-acc { white-space:nowrap; }
+    .btn-xs { padding:1px 8px; font-size:.8rem; line-height:1.6; }
+    .bk-empty { padding:24px; text-align:center; color:#6b7280; background:#fafafa; border-radius:10px; }
+    .bk-foot { margin-top:10px; font-size:.8rem; color:#6b7280; }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private BackupResumen? _resumen;
+    private IReadOnlyList<BackupFileInfo> _archivos = new List<BackupFileInfo>();
+    private bool _esSuperAdmin;
+    private bool _esAdmin;
+    private int _conservar = 30;
+    private bool _trabajando;
+    private string? _msg;
+    private bool _msgError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ResolverRolAsync();
+        Cargar();
+    }
+
+    private async Task ResolverRolAsync()
+    {
+        if (AuthState is null) { return; }
+        try
+        {
+            var state = await AuthState;
+            var pr = state.User.FindFirst("platform_role")?.Value ?? "";
+            var rol = state.User.FindFirst("tenant_role")?.Value ?? "";
+            var rolNombre = state.User.FindFirst("rol_nombre")?.Value ?? "";
+            _esSuperAdmin = pr.Equals("SuperAdmin", StringComparison.OrdinalIgnoreCase);
+            _esAdmin = _esSuperAdmin
+                || rol.Equals("Owner", StringComparison.OrdinalIgnoreCase)
+                || rol.Equals("Admin", StringComparison.OrdinalIgnoreCase)
+                || rolNombre.Equals("Administrador", StringComparison.OrdinalIgnoreCase);
+        }
+        catch { }
+    }
+
+    private void Cargar()
+    {
+        _resumen = Backups.Resumen();
+        _archivos = Backups.Listar();
+    }
+
+    private void Recargar()
+    {
+        _msg = null;
+        Cargar();
+    }
+
+    private async Task Borrar(BackupFileInfo f)
+    {
+        if (!_esSuperAdmin) { return; }
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"¿Borrar la copia \"{f.Nombre}\" ({Humanizar(f.Bytes)})?\n\nEsta acción NO se puede deshacer.");
+        if (!ok) { return; }
+        _trabajando = true;
+        var (res, err) = await Backups.EliminarAsync(f.Nombre, Tenant.UserId ?? Guid.Empty, Tenant.TenantId);
+        _trabajando = false;
+        _msgError = !res;
+        _msg = res ? $"Copia \"{f.Nombre}\" borrada." : $"No se pudo borrar: {err}";
+        Cargar();
+    }
+
+    private async Task Rotar()
+    {
+        if (!_esSuperAdmin) { return; }
+        var ok = await JS.InvokeAsync<bool>("confirm",
+            $"¿Conservar solo las {_conservar} copias más recientes y borrar el resto?\n\nEsta acción NO se puede deshacer.");
+        if (!ok) { return; }
+        _trabajando = true;
+        var (n, bytes) = await Backups.RotarAsync(_conservar, Tenant.UserId ?? Guid.Empty, Tenant.TenantId);
+        _trabajando = false;
+        _msgError = false;
+        _msg = n == 0 ? "No había copias antiguas para borrar." : $"Se borraron {n} copias ({Humanizar(bytes)} liberados).";
+        Cargar();
+    }
+
+    private static string Humanizar(long bytes)
+    {
+        if (bytes <= 0) { return "0 B"; }
+        string[] u = { "B", "KB", "MB", "GB", "TB" };
+        double v = bytes; int i = 0;
+        while (v >= 1024 && i < u.Length - 1) { v /= 1024; i++; }
+        return i == 0 ? $"{bytes} B" : $"{v:0.#} {u[i]}";
+    }
+}

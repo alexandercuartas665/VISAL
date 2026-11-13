@@ -117,6 +117,10 @@ builder.Services.AddSingleton<Visal.Application.Common.IUploadStorage, Visal.Sup
 // Error que el framework loguea automaticamente cuando una excepcion tumba el
 // circuito y dispara el banner "Ha ocurrido un error. Recargar." en el cliente.
 builder.Services.AddScoped<CircuitHandler, Visal.SuperAdmin.RealTime.VisalCircuitHandler>();
+// Modulo Copias de seguridad: inventario de los .dump del host (bind-mount en el
+// contenedor) + export tenant-safe de los datos de una agencia.
+builder.Services.AddScoped<Visal.SuperAdmin.Infra.IBackupsService, Visal.SuperAdmin.Infra.BackupsService>();
+builder.Services.AddScoped<Visal.SuperAdmin.Infra.ITenantExportService, Visal.SuperAdmin.Infra.TenantExportService>();
 
 var app = builder.Build();
 
@@ -1673,6 +1677,78 @@ if (app.Environment.IsDevelopment())
         }
     }).AllowAnonymous();
 }
+
+// ===================== Modulo Copias de Seguridad =====================
+// Descarga de una copia COMPLETA de la base: contiene datos de TODAS las agencias,
+// por eso SOLO el Super Admin de plataforma puede bajarla. Auditado.
+app.MapGet("/plataforma/copias/descargar", async (
+    HttpContext http,
+    string? file,
+    Visal.SuperAdmin.Infra.IBackupsService backups,
+    Visal.Application.Common.IApplicationDbContextFactory dbf,
+    Visal.Application.Common.ITenantContext tc,
+    CancellationToken ct) =>
+{
+    if (http.User.FindFirst("platform_role")?.Value is not "SuperAdmin") { return Results.Forbid(); }
+    if (string.IsNullOrWhiteSpace(file)) { return Results.BadRequest(); }
+    var ruta = backups.RutaSegura(file);
+    if (ruta is null) { return Results.NotFound(); }
+    try
+    {
+        using var db = dbf.Create();
+        db.SuperAdminAuditLogs.Add(new Visal.Domain.Entities.SuperAdminAuditLog
+        {
+            ActorUserId = tc.UserId ?? Guid.Empty,
+            ActorType = Visal.Domain.Enums.AuditActorType.Human,
+            ActionName = "BackupDescargar",
+            EntityName = "Backup",
+            TenantId = tc.TenantId,
+            NewValue = System.Text.Json.JsonSerializer.Serialize(new { file })
+        });
+        await db.SaveChangesAsync(ct);
+    }
+    catch { }
+    return Results.File(System.IO.File.OpenRead(ruta), "application/octet-stream", System.IO.Path.GetFileName(ruta));
+}).RequireAuthorization();
+
+// Export de autoservicio: UNICAMENTE los datos de la agencia activa (tenant-safe).
+// Lo pueden correr los admins de agencia (Owner/Admin/Administrador) o el Super Admin.
+app.MapGet("/plataforma/export-tenant", async (
+    HttpContext http,
+    Visal.SuperAdmin.Infra.ITenantExportService exportSvc,
+    Visal.Application.Common.IApplicationDbContextFactory dbf,
+    Visal.Application.Common.ITenantContext tc,
+    CancellationToken ct) =>
+{
+    var pr = http.User.FindFirst("platform_role")?.Value ?? "";
+    var rol = http.User.FindFirst("tenant_role")?.Value ?? "";
+    var rolNombre = http.User.FindFirst("rol_nombre")?.Value ?? "";
+    var esAdmin = pr.Equals("SuperAdmin", StringComparison.OrdinalIgnoreCase)
+        || rol.Equals("Owner", StringComparison.OrdinalIgnoreCase)
+        || rol.Equals("Admin", StringComparison.OrdinalIgnoreCase)
+        || rolNombre.Equals("Administrador", StringComparison.OrdinalIgnoreCase);
+    if (!esAdmin) { return Results.Forbid(); }
+    if (tc.TenantId is not Guid tid) { return Results.BadRequest("Sin agencia activa."); }
+    var zip = await exportSvc.ExportarZipAsync(tid, ct);
+    try
+    {
+        using var db = dbf.Create();
+        db.SuperAdminAuditLogs.Add(new Visal.Domain.Entities.SuperAdminAuditLog
+        {
+            ActorUserId = tc.UserId ?? Guid.Empty,
+            ActorType = Visal.Domain.Enums.AuditActorType.Human,
+            ActionName = "ExportTenant",
+            EntityName = "Tenant",
+            EntityId = tid,
+            TenantId = tid,
+            NewValue = System.Text.Json.JsonSerializer.Serialize(new { bytes = zip.Length })
+        });
+        await db.SaveChangesAsync(ct);
+    }
+    catch { }
+    var nombre = $"export-agencia-{DateTime.Now:yyyyMMdd-HHmm}.zip";
+    return Results.File(zip, "application/zip", nombre);
+}).RequireAuthorization();
 
 try
 {

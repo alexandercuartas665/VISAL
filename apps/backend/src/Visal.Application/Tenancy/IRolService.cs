@@ -75,6 +75,11 @@ public static class ModuloCatalogo
         // Menu lateral configurable por tenant: crear grupos, mover/ocultar opciones,
         // enlaces externos e iconos. Owner/Admin del tenant lo tienen implicito.
         new("cfg-menu-lateral", "Menu lateral (personalizar)", "Configuracion de la Entidad"),
+        // Copias de seguridad: ver el inventario de respaldos del servidor + export de los
+        // datos de la agencia. El slug DEBE coincidir con el Permission del item en
+        // NavMenuCatalog. Owner/Admin y SuperAdmin lo tienen implicito. Descargar/borrar
+        // respaldos de plataforma lo gatea la pagina solo al SuperAdmin.
+        new("copias-seguridad", "Copias de seguridad", "Configuracion de la Entidad"),
         // Facturacion (Capa 07): snapshots transaccionales para radicacion EPS.
         // Permite generar, ver y descargar. Owner/Admin y SuperAdmin lo tienen implicito.
         new("facturacion.snapshots", "Facturacion - Snapshots Transaccionales", "Facturacion"),

@@ -127,6 +127,10 @@ public static class NavMenuCatalog
         new("cfg-roles", "Roles y Permisos", "cfg-roles", "llave", "cfg-roles", "Configuracion de la Entidad"),
         new("cfg-usuarios", "Administracion de Usuarios", "cfg-usuarios", "usuarios", "cfg-usuarios", "Configuracion de la Entidad"),
         new("cfg-menu-lateral", "Menu lateral", "config/menu-lateral", "menu", "cfg-menu-lateral", "Configuracion de la Entidad"),
+        // Copias de seguridad: inventario de los respaldos del servidor + export de los
+        // datos de la agencia. El admin de agencia ve el inventario; descargar/borrar un
+        // respaldo (que contiene datos de TODAS las agencias) lo gatea la pagina al Super Admin.
+        new("copias-seguridad", "Copias de seguridad", "plataforma/copias", "caja", "copias-seguridad", "Configuracion de la Entidad"),
 
         // ===== Mi agencia =====
         new("mi-perfil", "Mi perfil", "mi-perfil", "persona", null, "Mi agencia"),

@@ -60,6 +60,11 @@ services:
       # contenedor desde imagen limpia y borra todo, dejando los URLs en la BD
       # apuntando a archivos inexistentes ("imagenes rotas").
       - visal-uploads:/app/wwwroot/uploads
+      # Inventario de respaldos (modulo Copias de seguridad). El script de deploy
+      # escribe los dumps en ./backups del host; se montan RW para que el Super
+      # Admin pueda descargar/borrar/rotar desde la UI (/plataforma/copias). La app
+      # lee /app/backups por defecto (Backups:Path), no requiere config extra.
+      - ./backups:/app/backups
     depends_on:
       postgres:
         condition: service_healthy

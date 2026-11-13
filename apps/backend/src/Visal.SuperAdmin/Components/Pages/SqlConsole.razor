@@ -1,5 +1,5 @@
 @page "/admin/sql-console"
-@attribute [Authorize]
+@attribute [Authorize(Policy = "PlatformOperator")]
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using System.Security.Claims
 @using System.Text

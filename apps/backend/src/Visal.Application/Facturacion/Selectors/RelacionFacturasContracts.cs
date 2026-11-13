@@ -115,4 +115,16 @@ public sealed record RelacionFacturasHecho(
     /// (nota_medica_documentos.categoria = "Lista de firmas", filtrado por historia_clinica_id).
     /// Conteo por HISTORIA (no por autorizacion). Se muestra en la columna
     /// "Historia con listado firmas"; la cabecera de paquete lo deja vacio.</summary>
-    int HistoriaListadoFirmasCount = 0);
+    int HistoriaListadoFirmasCount = 0,
+    /// <summary>Nombre del usuario que cargo la autorizacion (Asignacion.AutorizacionCargadaPorNombre,
+    /// denormalizado al cargarla). Vacio en autorizaciones historicas. Columna "Autorizacion cargada por".</summary>
+    string? AutorizacionCargadaPorNombre = null,
+    /// <summary>Modulo por el que entro la autorizacion (Asignacion.AutorizacionOrigenModulo):
+    /// "Asignaciones", "Ordenes Clinicas", "Asignacion por agendas". Vacio en historicas.
+    /// Columna "Origen autorizacion".</summary>
+    string? AutorizacionOrigenModulo = null,
+    /// <summary>Nombre(s) distinto(s) del/los usuario(s) que cargaron los documentos
+    /// "Lista de firmas" de ESTA HC (NotaMedicaDocumento.CreatedBy, por historia_clinica_id),
+    /// separados por coma y ordenados por fecha de carga. Vacio si la HC no tiene ninguno.
+    /// Columna "Listado firmas cargado por"; vacio en la cabecera de paquete.</summary>
+    string? ListadoFirmasCargadoPor = null);

@@ -236,6 +236,9 @@
 @code {
     [Parameter] public Guid? AsignacionId { get; set; }
     [Parameter] public bool Visible { get; set; }
+    /// <summary>Modulo desde el que se abre el modal (para trazar por donde entro la
+    /// autorizacion): "Ordenes Clinicas", "Asignaciones", etc. Lo pasa el host.</summary>
+    [Parameter] public string? Origen { get; set; }
     [Parameter] public EventCallback OnCerrar { get; set; }
     [Parameter] public EventCallback OnGuardado { get; set; }
     // Modo BORRADOR (crear asignacion): la asignacion aun no existe. Se pasa la info del
@@ -433,7 +436,7 @@
         try
         {
             var actor = await Actor();
-            await RetryDb(() => AsigSvc.CompletarAutorizacionAsync(aid, _codigo.Trim(), _pdfUrl, actor, _pdfHash));
+            await RetryDb(() => AsigSvc.CompletarAutorizacionAsync(aid, _codigo.Trim(), _pdfUrl, actor, _pdfHash, Origen));
             await OnGuardado.InvokeAsync();
             await Cerrar();
         }

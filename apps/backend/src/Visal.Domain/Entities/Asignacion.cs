@@ -104,6 +104,24 @@ public class Asignacion : TenantEntity
     /// (filtro "Autorizaciones pendientes" -> modal) y al completar se pone en false.</summary>
     public bool AutorizacionPendiente { get; set; }
 
+    /// <summary>Usuario (platform_user) que cargo/completo la autorizacion (numero y/o PDF).
+    /// Se setea al adjuntar la autorizacion desde cualquier modulo (alta de asignacion,
+    /// edicion, modal "Autorizacion" en Ordenes Clinicas o Asignacion). Null en autorizaciones
+    /// historicas (no se registraba antes de esta funcionalidad).</summary>
+    public Guid? AutorizacionCargadaPorUserId { get; set; }
+
+    /// <summary>Nombre denormalizado del usuario que cargo la autorizacion (al momento de
+    /// cargarla), mismo criterio que AseguradoraNombre: snapshot para listados/Snapshots sin
+    /// JOIN. Null en historicas.</summary>
+    public string? AutorizacionCargadaPorNombre { get; set; }
+
+    /// <summary>Modulo por el que se cargo la autorizacion: "Asignaciones", "Ordenes Clinicas",
+    /// "Asignacion por agendas", etc. Null en historicas.</summary>
+    public string? AutorizacionOrigenModulo { get; set; }
+
+    /// <summary>Fecha/hora en que se cargo/completo la autorizacion. Null en historicas.</summary>
+    public DateTimeOffset? AutorizacionCargadaEn { get; set; }
+
     /// <summary>Tipo de pago del paciente: "CUOTA" (cuota moderadora), "COPAGO" o null si no aplica.</summary>
     public string? TipoPago { get; set; }
 

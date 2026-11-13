@@ -387,7 +387,10 @@ public sealed record CrearLoteRequest(
     // servicios que NO caen en el snapshot RelacionFacturas (excluidos de Snapshots).
     bool EsFolio = false,
     // SHA-256 (hex) del PDF de autorizacion, para el control anti-duplicados.
-    string? PdfAutorizacionHash = null);
+    string? PdfAutorizacionHash = null,
+    // Modulo por el que se crea el lote (para la trazabilidad de autorizacion cargada en el
+    // alta). Null/vacio => "Asignaciones"; Agendas pasa "Asignacion por agendas".
+    string? OrigenModulo = null);
 
 /// <summary>Filtros del tab "Listado" en /asignacion. Todos opcionales; los null/vacios
 /// simplemente no aplican. Fecha_inicial y fecha_final aplican sobre FechaInicio de la
@@ -487,7 +490,8 @@ public interface IAsignacionService
     /// estado de la asignacion (es un dato administrativo).</summary>
     Task<bool> CompletarAutorizacionAsync(
         Guid asignacionId, string codigoAutorizacion, string? pdfAutorizacionUrl,
-        Guid actor, string? pdfAutorizacionHash = null, CancellationToken ct = default);
+        Guid actor, string? pdfAutorizacionHash = null, string? origenModulo = null,
+        CancellationToken ct = default);
 
     /// <summary>Control anti-duplicados de autorizaciones: busca si el HASH del PDF o el
     /// NUMERO de autorizacion ya estan en uso en OTRA asignacion del tenant (cualquier

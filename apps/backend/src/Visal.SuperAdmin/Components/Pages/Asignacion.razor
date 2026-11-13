@@ -743,7 +743,7 @@ else
 @* ============ Modal AUTORIZACION (componente compartido: numero + PDF embebido) ============ *@
 @* Mismo visor que Ordenes Clinicas: al abrir muestra el PDF embebido inline si existe,
    permite editar numero y subir PDF. Reusa IAsignacionService (sin duplicar logica). *@
-<AutorizacionModal AsignacionId="_autAsigId" Visible="_autVisible"
+<AutorizacionModal AsignacionId="_autAsigId" Visible="_autVisible" Origen="Asignaciones"
                    OnCerrar="() => _autVisible = false"
                    OnGuardado="OnAutorizacionGuardada" />
 

@@ -1043,6 +1043,22 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("aseguradora_nombre");
 
+                    b.Property<DateTimeOffset?>("AutorizacionCargadaEn")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("autorizacion_cargada_en");
+
+                    b.Property<string>("AutorizacionCargadaPorNombre")
+                        .HasColumnType("text")
+                        .HasColumnName("autorizacion_cargada_por_nombre");
+
+                    b.Property<Guid?>("AutorizacionCargadaPorUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("autorizacion_cargada_por_user_id");
+
+                    b.Property<string>("AutorizacionOrigenModulo")
+                        .HasColumnType("text")
+                        .HasColumnName("autorizacion_origen_modulo");
+
                     b.Property<bool>("AutorizacionPendiente")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("boolean")

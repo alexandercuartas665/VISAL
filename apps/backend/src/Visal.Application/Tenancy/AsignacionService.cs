@@ -351,9 +351,18 @@ public sealed class AsignacionService(ITenantContext tenant, IAuditWriter audit,
                 .Where(a => a.Id == aseSnapId).Select(a => a.Nombre).FirstOrDefaultAsync(ct);
         }
 
+        // Trazabilidad de autorizacion cargada en el ALTA: usuario (denormalizado una vez),
+        // modulo de origen (por defecto "Asignaciones"; Agendas pasa el suyo) y fecha. Solo
+        // se estampa en las asignaciones que nacen YA con autorizacion (numero y/o PDF).
+        var autCargadaEn = DateTimeOffset.UtcNow;
+        var autOrigen = string.IsNullOrWhiteSpace(req.OrigenModulo) ? "Asignaciones" : req.OrigenModulo.Trim();
+        var autNombre = await ResolverNombreUsuarioAsync(db, actor, ct);
+
         var yaAsignadoValor = new HashSet<Guid>();
         foreach (var it in req.Items)
         {
+            var tieneAut = !string.IsNullOrWhiteSpace(it.CodigoAutorizacion)
+                || !string.IsNullOrWhiteSpace(req.PdfAutorizacionUrl);
             var valorPactado = it.PaqueteValorPactado;
             if (it.PaqueteInstanciaId is Guid pid)
             {
@@ -396,6 +405,10 @@ public sealed class AsignacionService(ITenantContext tenant, IAuditWriter audit,
                 ValorPagoReal = req.ValorPagoReal,
                 Estado = AsignacionEstado.Pendiente,
                 AutorizacionPendiente = req.AutorizacionPendiente,
+                AutorizacionCargadaPorUserId = tieneAut ? actor : (Guid?)null,
+                AutorizacionCargadaPorNombre = tieneAut ? autNombre : null,
+                AutorizacionOrigenModulo = tieneAut ? autOrigen : null,
+                AutorizacionCargadaEn = tieneAut ? autCargadaEn : (DateTimeOffset?)null,
                 EsFolio = req.EsFolio,
                 PaqueteInstanciaId = it.PaqueteInstanciaId,
                 PaqueteCodigo = it.PaqueteCodigo,
@@ -542,7 +555,18 @@ public sealed class AsignacionService(ITenantContext tenant, IAuditWriter audit,
         a.Modulo = req.Modulo;
         a.Cantidad = req.Cantidad;
         a.ContratoCodigo = req.ContratoCodigo;
+        // Si la edicion CAMBIA el numero de autorizacion a uno no vacio, registrar quien lo
+        // hizo y por que modulo (Asignaciones). Si no cambia, se conserva el cargador original.
+        var autNumAntes = (a.CodigoAutorizacion ?? "").Trim();
         a.CodigoAutorizacion = req.CodigoAutorizacion;
+        if (!string.IsNullOrWhiteSpace(req.CodigoAutorizacion)
+            && !string.Equals(autNumAntes, req.CodigoAutorizacion!.Trim(), StringComparison.Ordinal))
+        {
+            a.AutorizacionCargadaPorUserId = actor;
+            a.AutorizacionCargadaPorNombre = await ResolverNombreUsuarioAsync(db, actor, ct);
+            a.AutorizacionOrigenModulo = "Asignaciones";
+            a.AutorizacionCargadaEn = DateTimeOffset.UtcNow;
+        }
         a.AnioServicio = req.AnioServicio;
         a.MesVigencia = req.MesVigencia;
         a.MesFinal = req.MesFinal;
@@ -559,7 +583,8 @@ public sealed class AsignacionService(ITenantContext tenant, IAuditWriter audit,
 
     public async Task<bool> CompletarAutorizacionAsync(
         Guid asignacionId, string codigoAutorizacion, string? pdfAutorizacionUrl,
-        Guid actor, string? pdfAutorizacionHash = null, CancellationToken ct = default)
+        Guid actor, string? pdfAutorizacionHash = null, string? origenModulo = null,
+        CancellationToken ct = default)
     {
         using var db = dbFactory.Create();
         var a = await db.Asignaciones.FirstOrDefaultAsync(x => x.Id == asignacionId, ct);
@@ -590,6 +615,13 @@ public sealed class AsignacionService(ITenantContext tenant, IAuditWriter audit,
             a.PdfAutorizacionHash = pdfAutorizacionHash;
         }
         a.AutorizacionPendiente = false;
+
+        // Trazabilidad: quien cargo/completo la autorizacion y por que modulo entro.
+        // El nombre se denormaliza (como AseguradoraNombre) para listados/Snapshots sin JOIN.
+        a.AutorizacionCargadaPorUserId = actor;
+        a.AutorizacionCargadaPorNombre = await ResolverNombreUsuarioAsync(db, actor, ct);
+        if (!string.IsNullOrWhiteSpace(origenModulo)) { a.AutorizacionOrigenModulo = origenModulo.Trim(); }
+        a.AutorizacionCargadaEn = DateTimeOffset.UtcNow;
 
         await db.SaveChangesAsync(ct);
         return true;
@@ -893,6 +925,21 @@ public sealed class AsignacionService(ITenantContext tenant, IAuditWriter audit,
         if (!string.IsNullOrWhiteSpace(full)) { return full; }
         if (!string.IsNullOrWhiteSpace(username)) { return username.Trim(); }
         return email;
+    }
+
+    // Resuelve el nombre visible de un usuario (platform_user) por id, para denormalizarlo
+    // al cargar la autorizacion. Null si no hay usuario o no se encuentra.
+    private static async Task<string?> ResolverNombreUsuarioAsync(
+        IApplicationDbContext db, Guid? userId, CancellationToken ct)
+    {
+        if (userId is not Guid uid) { return null; }
+        var u = await db.PlatformUsers.AsNoTracking()
+            .Where(x => x.Id == uid)
+            .Select(x => new { x.DisplayName, x.PrimerNombre, x.SegundoNombre, x.PrimerApellido, x.SegundoApellido, x.Username, x.Email })
+            .FirstOrDefaultAsync(ct);
+        return u is null
+            ? null
+            : NombreUsuario(u.DisplayName, u.PrimerNombre, u.SegundoNombre, u.PrimerApellido, u.SegundoApellido, u.Username, u.Email);
     }
 
     public async Task<IReadOnlyList<UsuarioCreadorDto>> ListarUsuariosCreadoresAsignacionesAsync(CancellationToken ct = default)

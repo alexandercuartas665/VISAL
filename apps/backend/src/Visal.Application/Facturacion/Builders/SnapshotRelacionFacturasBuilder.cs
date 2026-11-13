@@ -78,7 +78,10 @@ public sealed class SnapshotRelacionFacturasBuilder(
         "Cód. Asignación",                            // 44  Consecutivo por SERVICIO (AS-NNNNNN); en cabecera de paquete, la autorizacion
         "Cód. Paquete",                               // 45  Codigo del paquete con el que se presto el servicio
         "Autorizacion con archivo",                   // 46  SI/NO: el numero de autorizacion tiene PDF guardado
-        "Historia con listado firmas"                 // 47  Cantidad de archivos "Lista de firmas" colgados de la HC
+        "Historia con listado firmas",                // 47  Cantidad de archivos "Lista de firmas" colgados de la HC
+        "Autorizacion cargada por",                   // 48  Usuario que cargo la autorizacion (vacio en historicas)
+        "Origen autorizacion",                        // 49  Modulo por el que entro la autorizacion (vacio en historicas)
+        "Listado firmas cargado por"                  // 50  Usuario(s) que cargaron los "Lista de firmas" de la HC
     };
 
     /// <summary>
@@ -122,6 +125,9 @@ public sealed class SnapshotRelacionFacturasBuilder(
         ["Cód. Paquete"]                            = "Codigo del paquete con el que se presto el servicio (Asignacion.PaqueteCodigo), sin el sufijo de modalidad d/f. Se captura en /asignacion al aplicar un paquete; vacio si el servicio no nacio de un paquete. Cada paquete agrega ademas una LINEA PRIMARIA (cabecera) con CUPS=codigo de paquete, descripcion=nombre del paquete y valor=valor pactado; sus HC de detalle van con valor 0. No forma parte del template EPS.",
         ["Autorizacion con archivo"]                = "SI/NO: indica si el numero de autorizacion de la fila tiene un PDF de autorizacion guardado en la asignacion (Asignacion.PdfAutorizacionUrl). Es la MISMA condicion que usa el archivo AUTOTIZACIONES de Cuenta Medica: SI => ese numero aportara un PDF al ZIP; NO => no hay archivo cargado para esa autorizacion. Vacio cuando la fila no trae numero de autorizacion. No forma parte del template EPS.",
         ["Historia con listado firmas"]             = "Cantidad de archivos con tipologia 'Lista de firmas' colgados de ESTA Historia Clinica (nota_medica_documentos.categoria = 'Lista de firmas', por historia_clinica_id). Conteo por HC: 0 si la historia no tiene ninguno. En la CABECERA de un paquete queda vacio (no es una HC real). No forma parte del template EPS.",
+        ["Autorizacion cargada por"]                = "Nombre del usuario que cargo/completo la autorizacion de la fila (Asignacion.AutorizacionCargadaPorNombre, denormalizado al cargarla desde cualquier modulo). Vacio en autorizaciones historicas (anteriores a esta funcionalidad, sin registro de usuario) y cuando la fila no trae autorizacion. No forma parte del template EPS.",
+        ["Origen autorizacion"]                     = "Modulo por el que entro la autorizacion (Asignacion.AutorizacionOrigenModulo): 'Asignaciones', 'Ordenes Clinicas', 'Asignacion por agendas'. Vacio en autorizaciones historicas y cuando la fila no trae autorizacion. No forma parte del template EPS.",
+        ["Listado firmas cargado por"]              = "Nombre(s) del/los usuario(s) que cargaron los documentos con tipologia 'Lista de firmas' de ESTA Historia Clinica (NotaMedicaDocumento.CreatedBy, por historia_clinica_id). Si hay varios usuarios distintos, se listan separados por coma (ordenados por fecha de carga). Vacio si la HC no tiene ningun 'Lista de firmas'. En la CABECERA de un paquete queda vacio (no es una HC real). No forma parte del template EPS.",
     };
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> ConstruirAsync(
@@ -235,6 +241,16 @@ public sealed class SnapshotRelacionFacturasBuilder(
             ["Historia con listado firmas"] = h.EsLineaPaquetePrimaria
                 ? (object?)null
                 : h.HistoriaListadoFirmasCount,
+            // 48 — usuario que cargo la autorizacion (denormalizado al cargarla). Vacio en
+            // autorizaciones historicas (sin registro) y en filas sin autorizacion.
+            ["Autorizacion cargada por"] = h.AutorizacionCargadaPorNombre,
+            // 49 — modulo por el que entro la autorizacion. Vacio en historicas / sin autorizacion.
+            ["Origen autorizacion"] = h.AutorizacionOrigenModulo,
+            // 50 — usuario(s) distintos que cargaron los "Lista de firmas" de ESTA HC. Vacio si
+            // la HC no tiene ninguno y en la cabecera de paquete (no es una HC real).
+            ["Listado firmas cargado por"] = h.EsLineaPaquetePrimaria
+                ? (object?)null
+                : h.ListadoFirmasCargadoPor,
         };
     }
 

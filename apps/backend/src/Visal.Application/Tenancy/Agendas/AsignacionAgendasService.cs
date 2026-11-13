@@ -393,7 +393,8 @@ public sealed class AsignacionAgendasService(
                 TipoPago: string.IsNullOrWhiteSpace(req.TipoPago) ? null : req.TipoPago,
                 CategoriaCopago: string.IsNullOrWhiteSpace(req.CategoriaCopago) ? null : req.CategoriaCopago,
                 ValorPagoSugerido: req.ValorPagoSugerido, ValorPagoReal: req.ValorPagoReal,
-                AutorizacionPendiente: req.AutorizacionPendiente), actor, ct);
+                AutorizacionPendiente: req.AutorizacionPendiente,
+                OrigenModulo: "Asignacion por agendas"), actor, ct);
 
         // 2) Recuperar la Asignacion recien creada del lote.
         var asigId = await db.Asignaciones.AsNoTracking()

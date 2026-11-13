@@ -271,6 +271,41 @@ public sealed class RelacionFacturasSelector(IApplicationDbContextFactory dbFact
                 .ToListAsync(ct))
                 .ToDictionary(x => x.HcId, x => x.N);
 
+        // 6.b.4) Usuario(s) que cargaron los "Lista de firmas" de cada HC. El usuario es
+        //        CreatedBy del documento (ya se guarda). Se resuelven los nombres distintos
+        //        (ordenados por fecha de carga) y se juntan por coma. Alimenta la columna
+        //        "Listado firmas cargado por".
+        var listadoFirmasUsuariosPorHc = new Dictionary<Guid, string>();
+        if (hcIdsPrefil.Count > 0)
+        {
+            var docsFirmas = await db.NotaMedicaDocumentos.AsNoTracking()
+                .Where(d => d.HistoriaClinicaId != null
+                         && hcIdsPrefil.Contains(d.HistoriaClinicaId.Value)
+                         && d.Categoria != null
+                         && d.Categoria.ToLower() == "lista de firmas"
+                         && d.CreatedBy != null)
+                .Select(d => new { HcId = d.HistoriaClinicaId!.Value, UserId = d.CreatedBy!.Value, d.CreatedAt })
+                .ToListAsync(ct);
+            if (docsFirmas.Count > 0)
+            {
+                var firmaUserIds = docsFirmas.Select(d => d.UserId).Distinct().ToList();
+                var firmaNombres = (await db.PlatformUsers.AsNoTracking()
+                    .Where(u => firmaUserIds.Contains(u.Id))
+                    .Select(u => new { u.Id, u.DisplayName, u.PrimerNombre, u.SegundoNombre, u.PrimerApellido, u.SegundoApellido, u.Username, u.Email })
+                    .ToListAsync(ct))
+                    .ToDictionary(u => u.Id, u => NombreUsuarioFirma(u.DisplayName, u.PrimerNombre, u.SegundoNombre, u.PrimerApellido, u.SegundoApellido, u.Username, u.Email));
+                listadoFirmasUsuariosPorHc = docsFirmas
+                    .GroupBy(d => d.HcId)
+                    .ToDictionary(
+                        g => g.Key,
+                        g => string.Join(", ", g
+                            .OrderBy(d => d.CreatedAt)
+                            .Select(d => firmaNombres.GetValueOrDefault(d.UserId))
+                            .Where(n => !string.IsNullOrWhiteSpace(n))
+                            .Distinct()));
+            }
+        }
+
         // 6.c) TipoArchivoRips desde el catalogo de tipos de servicio — mapeamos
         //      por codigo del modulo de la asignacion (CONSULTA/TERAPIA/...).
         var catalogoTipos = await db.CatalogosTipoServicio.AsNoTracking()
@@ -491,7 +526,13 @@ public sealed class RelacionFacturasSelector(IApplicationDbContextFactory dbFact
                 // (misma condicion que usa el ZIP de AUTOTIZACIONES para incluir el archivo).
                 AutorizacionTieneArchivo: !string.IsNullOrWhiteSpace(asigRelevante?.PdfAutorizacionUrl),
                 // Cantidad de archivos "Lista de firmas" colgados de ESTA HC (conteo por historia).
-                HistoriaListadoFirmasCount: listadoFirmasPorHc.GetValueOrDefault(hc.Id)));
+                HistoriaListadoFirmasCount: listadoFirmasPorHc.GetValueOrDefault(hc.Id),
+                // Trazabilidad de autorizacion: usuario que la cargo y modulo de origen
+                // (denormalizados en la asignacion al cargarla). Vacio en historicas.
+                AutorizacionCargadaPorNombre: asigRelevante?.AutorizacionCargadaPorNombre,
+                AutorizacionOrigenModulo: asigRelevante?.AutorizacionOrigenModulo,
+                // Usuario(s) distintos que cargaron los "Lista de firmas" de ESTA HC (por historia).
+                ListadoFirmasCargadoPor: listadoFirmasUsuariosPorHc.GetValueOrDefault(hc.Id)));
         }
 
         // ── Lineas primarias de paquete ────────────────────────────────────────────────
@@ -648,6 +689,21 @@ public sealed class RelacionFacturasSelector(IApplicationDbContextFactory dbFact
         if (d is null) { return i; }
         if (i is null) { return d; }
         return d.Length > i.Length ? d : i;
+    }
+
+    // Nombre visible de un usuario (platform_user), mismo criterio que AsignacionService/
+    // FacturacionSnapshotService: DisplayName -> nombres+apellidos -> Username -> Email.
+    // Se usa para la columna "Listado firmas cargado por".
+    private static string NombreUsuarioFirma(
+        string? displayName, string? primerNombre, string? segundoNombre,
+        string? primerApellido, string? segundoApellido, string? username, string email)
+    {
+        if (!string.IsNullOrWhiteSpace(displayName)) { return displayName.Trim(); }
+        var full = string.Join(" ", new[] { primerNombre, segundoNombre, primerApellido, segundoApellido }
+            .Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x!.Trim()));
+        if (!string.IsNullOrWhiteSpace(full)) { return full; }
+        if (!string.IsNullOrWhiteSpace(username)) { return username.Trim(); }
+        return email;
     }
 
     // Normaliza para busqueda: trim + upper invariant + strip de diacriticos

@@ -486,4 +486,183 @@ public sealed class AseguradoraService : IAseguradoraService
         return existentes.Count;
     }
 
+    // ======================= Busqueda global de servicios =======================
+
+    public async Task<ServicioBusquedaResultado> BuscarServiciosGlobalAsync(
+        string texto, bool soloContratosActivos = false, int max = 500, CancellationToken ct = default)
+    {
+        var tokens = NormalizarBusqueda(texto)
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (tokens.Length == 0 || string.Concat(tokens).Length < 2)
+        {
+            return new ServicioBusquedaResultado(Array.Empty<ServicioBusquedaDto>(), 0, false);
+        }
+        if (max <= 0) { max = 500; }
+
+        using var db = _dbFactory.Create();
+        // Catalogo completo de servicios del tenant (global query filter) con su contrato y
+        // aseguradora. Son pocos miles de filas: se filtra EN MEMORIA para poder ignorar
+        // tildes (ILIKE de Postgres no lo hace y el catalogo mezcla ATENCION con y sin tilde).
+        var filas = await db.ServiciosContrato.AsNoTracking()
+            .Select(s => new
+            {
+                s.Id,
+                s.ContratoId,
+                AseId = s.Contrato!.AseguradoraId,
+                AseNombre = s.Contrato.Aseguradora!.Nombre,
+                AseCodigo = s.Contrato.Aseguradora.Codigo,
+                AseTipo = s.Contrato.Aseguradora.Tipo,
+                s.Contrato.CodigoContrato,
+                ContratoEstado = s.Contrato.Estado,
+                s.Contrato.FechaInicial,
+                s.Contrato.FechaFinal,
+                s.Historia, s.CodigoServicio, s.CodigoInterno, s.Descripcion,
+                s.Tarifa, s.ValorTotal, s.Modulo, s.Especialidad, s.Modalidad, s.Sede,
+                PaqueteCodigo = s.Paquete != null ? s.Paquete.Codigo : null,
+                s.Clasificacion, s.Observaciones, s.TipoArchivoRips, s.ModalidadAtencion,
+                s.GrupoServicios, s.Servicios, s.Finalidad, s.CodOtroServicio, s.CausaExterna, s.ViaIngreso,
+                s.ModalidadFacturacion, s.GrupoServicioFacturacion, s.ServicioFacturacion,
+            })
+            .ToListAsync(ct);
+
+        var coincidencias = filas
+            .Where(f => !soloContratosActivos
+                        || string.Equals(f.ContratoEstado, "ACTIVO", StringComparison.OrdinalIgnoreCase))
+            .Where(f =>
+            {
+                // Se busca por codigo (con y sin sufijo d/f), codigo interno y descripcion.
+                var hay = NormalizarBusqueda(
+                    $"{f.CodigoServicio} {ServicioCodigo.Base(f.CodigoServicio)} {f.CodigoInterno} {f.Descripcion}");
+                return tokens.All(t => hay.Contains(t, StringComparison.Ordinal));
+            })
+            .OrderBy(f => f.AseNombre, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(f => f.CodigoContrato, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(f => f.Descripcion, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var formatos = await MapaFormatosActivosAsync(db, ct);
+        var dto = coincidencias.Take(max).Select(f => new ServicioBusquedaDto(
+            f.Id,
+            f.AseId, f.AseNombre, f.AseCodigo, f.AseTipo,
+            f.ContratoId, f.CodigoContrato, f.ContratoEstado, f.FechaInicial, f.FechaFinal,
+            f.Historia, NombreFormato(formatos, f.Historia),
+            f.CodigoServicio, ServicioCodigo.Base(f.CodigoServicio), f.CodigoInterno, f.Descripcion,
+            f.Tarifa, f.ValorTotal,
+            f.Modulo, f.Especialidad, f.Modalidad, f.Sede, f.PaqueteCodigo,
+            f.Clasificacion, f.Observaciones,
+            f.TipoArchivoRips, f.ModalidadAtencion, f.GrupoServicios, f.Servicios,
+            f.Finalidad, f.CodOtroServicio, f.CausaExterna, f.ViaIngreso,
+            f.ModalidadFacturacion, f.GrupoServicioFacturacion, f.ServicioFacturacion)).ToList();
+
+        return new ServicioBusquedaResultado(dto, coincidencias.Count, coincidencias.Count > max);
+    }
+
+    public async Task<IReadOnlyList<FormatoHistoriaOpcionDto>> ListFormatosHistoriaActivosAsync(CancellationToken ct = default)
+    {
+        using var db = _dbFactory.Create();
+        var defs = await db.FormDefinitions.AsNoTracking()
+            .Where(f => f.Activo)
+            .Select(f => new { f.Codigo, f.Nombre })
+            .ToListAsync(ct);
+        return defs
+            .Where(d => !string.IsNullOrWhiteSpace(d.Codigo))
+            .GroupBy(d => d.Codigo.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(g => new FormatoHistoriaOpcionDto(g.Key, g.First().Nombre))
+            .OrderBy(x => x.Codigo, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    public async Task<ActualizarHistoriaResultado> ActualizarHistoriaServicioAsync(
+        Guid servicioId, string? historia, Guid actor, CancellationToken ct = default)
+    {
+        if (_tenant.TenantId is not Guid tid)
+        {
+            return new ActualizarHistoriaResultado(false, "Sin agencia activa.", null, null);
+        }
+        using var db = _dbFactory.Create();
+        var s = await db.ServiciosContrato
+            .Include(x => x.Contrato).ThenInclude(c => c!.Aseguradora)
+            .FirstOrDefaultAsync(x => x.Id == servicioId, ct);
+        if (s is null) { return new ActualizarHistoriaResultado(false, "Servicio no encontrado.", null, null); }
+
+        var formatos = await MapaFormatosActivosAsync(db, ct);
+        var nueva = string.IsNullOrWhiteSpace(historia) ? null : historia.Trim();
+        string? nombre = null;
+        if (nueva is not null && !formatos.TryGetValue(nueva, out nombre))
+        {
+            return new ActualizarHistoriaResultado(false,
+                $"El codigo \"{nueva}\" no corresponde a ningun formulario activo.",
+                s.Historia, NombreFormato(formatos, s.Historia));
+        }
+
+        var anterior = s.Historia;
+        if (string.Equals((anterior ?? "").Trim(), nueva ?? "", StringComparison.Ordinal))
+        {
+            return new ActualizarHistoriaResultado(true, null, nueva, nombre);
+        }
+
+        // SOLO la historia: ningun otro campo del servicio se toca.
+        s.Historia = nueva;
+        db.SuperAdminAuditLogs.Add(new SuperAdminAuditLog
+        {
+            ActorUserId = actor,
+            ActorType = Visal.Domain.Enums.AuditActorType.Human,
+            ActionName = "ServicioHistoriaActualizar",
+            EntityName = "ServicioContrato",
+            EntityId = s.Id,
+            TenantId = tid,
+            // PreviousValue/NewValue son jsonb: SIEMPRE JSON valido (un string plano falla el INSERT).
+            PreviousValue = System.Text.Json.JsonSerializer.Serialize(new { historia = anterior }),
+            NewValue = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                historia = nueva,
+                aseguradora = s.Contrato?.Aseguradora?.Nombre,
+                contrato = s.Contrato?.CodigoContrato,
+                codigo = s.CodigoServicio,
+                descripcion = s.Descripcion,
+            }),
+        });
+        await db.SaveChangesAsync(ct);
+        return new ActualizarHistoriaResultado(true, null, nueva, nombre);
+    }
+
+    /// <summary>Codigo (Codigo o CodigoSecundario) -> nombre de los formularios ACTIVOS.
+    /// Mismo criterio que Atencion para resolver el formato de un servicio.</summary>
+    private static async Task<Dictionary<string, string>> MapaFormatosActivosAsync(IApplicationDbContext db, CancellationToken ct)
+    {
+        var defs = await db.FormDefinitions.AsNoTracking()
+            .Where(f => f.Activo)
+            .Select(f => new { f.Codigo, f.CodigoSecundario, f.Nombre })
+            .ToListAsync(ct);
+        var mapa = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var d in defs.Where(d => !string.IsNullOrWhiteSpace(d.Codigo)))
+        {
+            mapa.TryAdd(d.Codigo.Trim(), d.Nombre);
+        }
+        foreach (var d in defs.Where(d => !string.IsNullOrWhiteSpace(d.CodigoSecundario)))
+        {
+            mapa.TryAdd(d.CodigoSecundario!.Trim(), d.Nombre);
+        }
+        return mapa;
+    }
+
+    private static string? NombreFormato(Dictionary<string, string> mapa, string? codigo)
+        => !string.IsNullOrWhiteSpace(codigo) && mapa.TryGetValue(codigo.Trim(), out var n) ? n : null;
+
+    /// <summary>Minusculas y sin tildes/diacriticos, para comparar texto de busqueda.</summary>
+    private static string NormalizarBusqueda(string? s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) { return ""; }
+        var d = s.Normalize(System.Text.NormalizationForm.FormD);
+        var sb = new System.Text.StringBuilder(d.Length);
+        foreach (var ch in d)
+        {
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch)
+                != System.Globalization.UnicodeCategory.NonSpacingMark)
+            {
+                sb.Append(char.ToLowerInvariant(ch));
+            }
+        }
+        return sb.ToString();
+    }
 }

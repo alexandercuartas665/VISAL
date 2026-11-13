@@ -135,7 +135,12 @@ public sealed record MiServicioAsignadoDto(
     /// <summary>Fecha/hora en que se coordino el turno (AsignacionTurno.CreatedAt). Es la
     /// referencia desde la que se mide la oportunidad de la 1a sesion. Se muestra como
     /// columna "Fecha coordinacion" en la parrilla de Atencion.</summary>
-    DateTimeOffset? FechaCoordinacion = null);
+    DateTimeOffset? FechaCoordinacion = null,
+    /// <summary>Codigo CUPS del servicio asignado: Asignacion.CodigoRips (codigo base, sin el
+    /// sufijo de modalidad d/f). Para asignaciones legacy sin ese snapshot se resuelve en vivo
+    /// del ServicioContrato.CodigoServicio (mismo criterio que el bundle RDA). Se muestra como
+    /// columna "CUPS" en la parrilla de Atencion. Null si no hay codigo resoluble.</summary>
+    string? CodigoCups = null);
 
 /// <summary>Resultado del intento de registrar una nota / atender una sesion.</summary>
 public sealed record RegistrarSesionResult(

@@ -21,6 +21,8 @@
         <h1 class="ase-title">Entidades Aseguradoras</h1>
     </div>
     <div class="ase-head-actions">
+        @* Busqueda global de servicios (todas las EPS y contratos) en modal. *@
+        <button class="btn btn-outline-primary btn-sm" title="Buscar un servicio por código CUPS o descripción en todas las EPS y contratos" @onclick="AbrirBuscarCups">&#128269; Buscar CUPS</button>
         <button class="btn btn-outline-secondary btn-sm" title="Actualizar en masa MODALIDAD, GRUPO SERVICIO y SERVICIO FACTURACION de todos los servicios que coincidan con la busqueda por Descripcion. Guarda snapshot para deshacer." @onclick="AbrirBulk">&#128736; Actualizar en masa</button>
         <button class="btn btn-outline-secondary btn-sm" title="Descargar plantilla Excel para carga masiva de aseguradoras" @onclick="DescargarPlantillaAseguradoras">&#8595; Plantilla</button>
         <InputFile OnChange="OnImportAseguradorasExcel" accept=".xlsx" style="display:none;" id="aseg-import-file" />
@@ -31,6 +33,171 @@
 
 @if (_error is not null) { <div class="ase-alert">@_error</div> }
 @if (_ok is not null) { <div class="ase-ok">@_ok</div> }
+
+@if (_gModal)
+{
+    <div class="sn-modal-back">
+    <div class="sn-modal sn-modal-xl gsv-modal">
+        <div class="sn-modal-h">
+            <div>
+                <div class="sn-modal-eyebrow">Todas las EPS y contratos</div>
+                <h3>Buscar servicio por CUPS o descripción</h3>
+            </div>
+            <button class="sn-modal-x" title="Cerrar" @onclick="CerrarGlobal">&times;</button>
+        </div>
+        <div class="sn-modal-b">
+        <div class="gsv-search">
+            <input @ref="_gInput" class="form-control form-control-sm" placeholder="Código CUPS (ej. 890112) o parte de la descripción…"
+                   @bind="_gq" @bind:event="oninput" @onkeydown="OnGqKey" />
+            <button class="btn btn-sm btn-primary" @onclick="BuscarGlobal" disabled="@_gBuscando">
+                @(_gBuscando ? "Buscando…" : "🔎 Buscar")
+            </button>
+            <label class="gsv-chk"><input type="checkbox" checked="@_gSoloActivos" @onchange="OnSoloActivos" /> Solo contratos activos</label>
+        </div>
+        @if (_gError is not null) { <div class="ase-alert">@_gError</div> }
+        @if (_gResultado is null)
+        {
+            <div class="ase-empty">Escribe un código CUPS o parte de la descripción del servicio y presiona Enter. No importan tildes ni mayúsculas.</div>
+        }
+        else
+        {
+        var _gEps = _gFilas.Select(x => x.D.AseguradoraId).Distinct().Count();
+        var _gCtr = _gFilas.Select(x => x.D.ContratoId).Distinct().Count();
+        <div class="gsv-h">
+            <div class="gsv-title">Resultados para “@_gUltimo”</div>
+            <div class="gsv-sub">
+                @_gResultado.TotalCoincidencias servicio(s) · @_gEps EPS · @_gCtr contrato(s)
+                @if (_gResultado.Truncado) { <span class="gsv-warn"> · mostrando los primeros @_gFilas.Count, afina la búsqueda</span> }
+            </div>
+        </div>
+        @if (_gFilas.Count == 0)
+        {
+            <div class="ase-empty">Ningún servicio coincide con la búsqueda.</div>
+        }
+        else
+        {
+            <datalist id="gsv-formatos">
+                @foreach (var fm in _gFormatos) { <option value="@fm.Codigo">@fm.Nombre</option> }
+            </datalist>
+            <div class="gsv-wrap">
+                <table class="gsv-tbl">
+                    <thead><tr>
+                        <th>EPS</th>
+                        <th>Contrato</th>
+                        <th class="gsv-th-edit" title="Único dato editable. El cambio aplica a las asignaciones que se creen DESPUÉS; las ya creadas conservan su formato.">Historia (editable)</th>
+                        <th>Cod. Servicio</th>
+                        <th>CUPS</th>
+                        <th>Cod. Interno</th>
+                        <th>Descripción</th>
+                        <th>Tarifa</th>
+                        <th>Valor total</th>
+                        <th>Módulo</th>
+                        <th>Especialidad</th>
+                        <th>Modalidad</th>
+                        <th>Sede</th>
+                        <th>Paquete</th>
+                        <th title="AC/AP/AT/AM">Tipo archivo</th>
+                        <th title="Res 202/2021: codModalidadAtencion">Cod Modalidad Atención</th>
+                        <th title="Res 202/2021: grupoServicios">Cod Grupo Servicio</th>
+                        <th title="Res 202/2021: codServicio (REPS)">Cod Servicio REPS</th>
+                        <th title="Res 202/2021: finalidadTecnologiaSalud">Cod Finalidad</th>
+                        <th title="Res 202/2021: codOtroServicio">Cod Otro Servicio</th>
+                        <th>Causa externa</th>
+                        <th>Vía ingreso</th>
+                        <th>Modalidad fact.</th>
+                        <th>Grupo servicio fact.</th>
+                        <th>Servicio fact.</th>
+                        <th>Clasificación</th>
+                        <th>Observaciones</th>
+                    </tr></thead>
+                    <tbody>
+                        @foreach (var f in _gFilas)
+                        {
+                            var d = f.D;
+                            <tr @key="d.ServicioId">
+                                <td class="gsv-eps">@d.AseguradoraNombre<small>@d.AseguradoraCodigo · @d.AseguradoraTipo</small></td>
+                                <td class="gsv-ctr">
+                                    <span class="mono">@d.CodigoContrato</span>
+                                    <span class="gsv-estado @(string.Equals(d.ContratoEstado, "ACTIVO", StringComparison.OrdinalIgnoreCase) ? "" : "off")">@d.ContratoEstado</span>
+                                    @if (d.ContratoFechaInicial is not null || d.ContratoFechaFinal is not null)
+                                    {
+                                        <small>@(d.ContratoFechaInicial?.ToString("dd/MM/yyyy") ?? "…") – @(d.ContratoFechaFinal?.ToString("dd/MM/yyyy") ?? "…")</small>
+                                    }
+                                </td>
+                                <td class="gsv-hist">
+                                    <div class="gsv-hist-row">
+                                        <input class="form-control form-control-sm mono" list="gsv-formatos" placeholder="(sin formato)"
+                                               @bind="f.HistoriaEdit" @bind:event="oninput" @bind:after="() => LimpiarEstadoHistoria(f)" disabled="@f.Guardando" />
+                                        <button class="btn btn-sm @(f.Dirty ? "btn-primary" : "btn-outline-secondary")"
+                                                disabled="@(!f.Dirty || f.Guardando)" @onclick="() => GuardarHistoria(f)">
+                                            @(f.Guardando ? "…" : "Guardar")
+                                        </button>
+                                    </div>
+                                    <div class="gsv-hint">
+                                        @if (f.Error is not null)
+                                        {
+                                            <span class="gsv-bad">@f.Error</span>
+                                        }
+                                        else if (f.Dirty)
+                                        {
+                                            var nPrev = NombreFormatoPrimario(f.HistoriaEdit);
+                                            if (string.IsNullOrWhiteSpace(f.HistoriaEdit)) { <span class="gsv-muted">Se quitará la historia del servicio</span> }
+                                            else if (nPrev is not null) { <span class="gsv-info">→ @nPrev</span> }
+                                            else { <span class="gsv-warn">Código no reconocido: se validará al guardar</span> }
+                                        }
+                                        else if (string.IsNullOrWhiteSpace(f.HistoriaGuardada))
+                                        {
+                                            <span class="gsv-muted">(sin formato)</span>
+                                        }
+                                        else if (f.HistoriaNombre is not null)
+                                        {
+                                            <span class="gsv-ok">@f.HistoriaNombre@(f.Ok ? " · ✓ guardado" : "")</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="gsv-bad">⚠ No corresponde a un formulario activo</span>
+                                        }
+                                    </div>
+                                </td>
+                                <td class="mono">@d.CodigoServicio</td>
+                                <td class="mono">@d.CodigoCups</td>
+                                <td class="mono">@d.CodigoInterno</td>
+                                <td class="gsv-desc">@d.Descripcion</td>
+                                <td class="gsv-num">@d.Tarifa?.ToString("N0", CultureInfo.GetCultureInfo("es-CO"))</td>
+                                <td class="gsv-num">@d.ValorTotal?.ToString("N0", CultureInfo.GetCultureInfo("es-CO"))</td>
+                                <td>@d.Modulo</td>
+                                <td>@d.Especialidad</td>
+                                <td>@d.Modalidad</td>
+                                <td>@d.Sede</td>
+                                <td class="mono">@d.PaqueteCodigo</td>
+                                <td class="mono">@d.TipoArchivoRips</td>
+                                <td class="mono">@d.ModalidadAtencion</td>
+                                <td class="mono">@d.GrupoServicios</td>
+                                <td class="mono">@d.Servicios</td>
+                                <td class="mono">@d.Finalidad</td>
+                                <td class="mono">@d.CodOtroServicio</td>
+                                <td class="mono">@d.CausaExterna</td>
+                                <td class="mono">@d.ViaIngreso</td>
+                                <td>@d.ModalidadFacturacion</td>
+                                <td>@d.GrupoServicioFacturacion</td>
+                                <td>@d.ServicioFacturacion</td>
+                                <td>@d.Clasificacion</td>
+                                <td>@d.Observaciones</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+        }
+        </div>
+        <div class="sn-modal-f">
+            <span class="gsv-foot">Solo la <b>Historia</b> es editable aquí. El cambio aplica a las asignaciones que se creen después; las ya creadas conservan el formato con el que nacieron. Cada cambio queda auditado.</span>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarGlobal">Cerrar</button>
+        </div>
+    </div>
+    </div>
+}
 
 <div class="ase-grid">
     <!-- Lista de aseguradoras -->
@@ -577,6 +744,34 @@
     .bulk-estado { padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; }
     .bulk-estado-aplicada { background:#dbeafe; color:#1e3a8a; }
     .bulk-estado-revertida { background:#fef3c7; color:#92400e; }
+
+    /* Busqueda global de servicios (todas las EPS y contratos) */
+    /* El cuerpo del modal no scrollea: lo hace solo la tabla (sin doble barra). */
+    .gsv-modal { height: 92vh; }
+    .gsv-modal .sn-modal-b { display: flex; flex-direction: column; overflow: hidden; gap: 10px; }
+    .gsv-search { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .gsv-search input { flex: 1 1 320px; max-width: 560px; }
+    .gsv-h { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+    .gsv-title { font-weight: 700; font-size: 14px; color: #0f172a; }
+    .gsv-sub { font-size: 12.5px; color: #64748b; }
+    .gsv-chk { font-size: 12.5px; color: #334155; display: flex; gap: 6px; align-items: center; margin: 0; cursor: pointer; }
+    .gsv-wrap { flex: 1; min-height: 0; overflow: auto; border: 1px solid #e2e8f0; border-radius: 6px; background: #fff; }
+    .gsv-tbl { border-collapse: separate; border-spacing: 0; margin: 0; font-size: 12.5px; width: max-content; min-width: 100%; }
+    .gsv-tbl th { position: sticky; top: 0; z-index: 3; background: #eff6ff; color: #1e3a8a; font-weight: 600; padding: 7px 9px; border-bottom: 1px solid #dbeafe; white-space: nowrap; text-align: left; }
+    .gsv-tbl th.gsv-th-edit { background: #fef3c7; color: #92400e; }
+    .gsv-tbl td { padding: 5px 9px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+    .gsv-tbl td.gsv-desc { min-width: 300px; max-width: 420px; }
+    .gsv-hist { min-width: 260px; background: #fffbeb; }
+    .gsv-hist-row { display: flex; gap: 6px; }
+    .gsv-hist-row input { width: 140px; }
+    .gsv-hint { font-size: 11.5px; margin-top: 3px; line-height: 1.3; max-width: 260px; }
+    .gsv-ok { color: #15803d; } .gsv-warn { color: #b45309; } .gsv-bad { color: #b91c1c; } .gsv-muted { color: #94a3b8; } .gsv-info { color: #1d4ed8; }
+    .gsv-eps, .gsv-ctr { white-space: nowrap; }
+    .gsv-eps small, .gsv-ctr small { display: block; color: #64748b; font-size: 11px; }
+    .gsv-estado { display: inline-block; margin-left: 4px; padding: 1px 7px; border-radius: 10px; font-size: 10.5px; font-weight: 600; background: #dcfce7; color: #166534; }
+    .gsv-estado.off { background: #f1f5f9; color: #64748b; }
+    .gsv-num { text-align: right; white-space: nowrap; }
+    .gsv-foot { margin-top: 8px; font-size: 12px; color: #64748b; }
 </style>
 
 @code {
@@ -1265,6 +1460,137 @@
             await LoadHistorialBulk();
             if (_contratoId is not null) { await LoadServicios(); }
         }
+    }
+
+    // ===================== Busqueda global de servicios =====================
+    // Busca en TODAS las aseguradoras y contratos por CUPS o descripcion (sin tildes,
+    // por palabras). Solo permite editar la Historia del servicio (auditado en backend).
+    private string _gq = "";
+    private string _gUltimo = "";
+    private bool _gBuscando;
+    private bool _gSoloActivos;
+    private ServicioBusquedaResultado? _gResultado;
+    private List<GsvFila> _gFilas = new();
+    private List<FormatoHistoriaOpcionDto> _gFormatos = new();
+    // Modal "Buscar CUPS": abierto/cerrado, error de validacion propio (el de la pagina
+    // quedaria detras del modal) y foco automatico en el campo al abrir.
+    private bool _gModal;
+    private string? _gError;
+    private ElementReference _gInput;
+    private bool _gFocoPendiente;
+
+    private void AbrirBuscarCups()
+    {
+        _gModal = true;
+        _gError = null;
+        _gFocoPendiente = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_gFocoPendiente && _gModal)
+        {
+            _gFocoPendiente = false;
+            try { await _gInput.FocusAsync(); } catch { /* el input aun no existe: sin foco, no es critico */ }
+        }
+    }
+
+    private async Task OnGqKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") { await BuscarGlobal(); }
+        else if (e.Key == "Escape") { CerrarGlobal(); }
+    }
+
+    private async Task BuscarGlobal()
+    {
+        _gError = null;
+        var t = (_gq ?? "").Trim();
+        if (t.Length < 2)
+        {
+            _gError = "Escribe al menos 2 caracteres (código CUPS o parte de la descripción del servicio).";
+            return;
+        }
+        _gBuscando = true;
+        try
+        {
+            if (_gFormatos.Count == 0) { _gFormatos = (await Svc.ListFormatosHistoriaActivosAsync()).ToList(); }
+            _gResultado = await Svc.BuscarServiciosGlobalAsync(t, _gSoloActivos);
+            _gUltimo = t;
+            _gFilas = _gResultado.Filas.Select(d => new GsvFila
+            {
+                D = d,
+                HistoriaGuardada = d.Historia,
+                HistoriaNombre = d.HistoriaNombre,
+                HistoriaEdit = d.Historia ?? "",
+            }).ToList();
+        }
+        catch (Exception ex) { _gError = "No se pudo buscar: " + ex.Message; }
+        finally { _gBuscando = false; }
+    }
+
+    private async Task OnSoloActivos(ChangeEventArgs e)
+    {
+        _gSoloActivos = e.Value is bool b && b;
+        if (!string.IsNullOrWhiteSpace(_gUltimo)) { _gq = _gUltimo; await BuscarGlobal(); }
+    }
+
+    /// <summary>Al escribir de nuevo se limpia el error/ok anterior para que la ayuda
+    /// muestre la vista previa del codigo que se esta tecleando.</summary>
+    private void LimpiarEstadoHistoria(GsvFila f)
+    {
+        f.Error = null;
+        f.Ok = false;
+    }
+
+    /// <summary>Cierra el modal pero CONSERVA la ultima busqueda: al reabrir se ven los
+    /// mismos resultados (util para ir y volver entre la busqueda y un contrato).</summary>
+    private void CerrarGlobal()
+    {
+        _gModal = false;
+        _gError = null;
+    }
+
+    private async Task GuardarHistoria(GsvFila f)
+    {
+        f.Error = null;
+        f.Ok = false;
+        f.Guardando = true;
+        try
+        {
+            var r = await Svc.ActualizarHistoriaServicioAsync(f.D.ServicioId, f.HistoriaEdit, await Actor());
+            if (!r.Ok) { f.Error = r.Error; return; }
+            f.HistoriaGuardada = r.Historia;
+            f.HistoriaNombre = r.HistoriaNombre;
+            f.HistoriaEdit = r.Historia ?? "";
+            f.Ok = true;
+            // Si ese servicio esta abierto en la tabla del contrato seleccionado, se refleja
+            // alli para que un "Guardar" posterior de esa fila no lo pise con el valor viejo.
+            var abierto = _servicios.FirstOrDefault(x => x.Id == f.D.ServicioId);
+            if (abierto is not null) { abierto.Historia = r.Historia; }
+        }
+        catch (Exception ex) { f.Error = "No se pudo guardar: " + ex.Message; }
+        finally { f.Guardando = false; }
+    }
+
+    /// <summary>Nombre del formulario activo cuyo codigo PRINCIPAL coincide (preview mientras
+    /// se escribe). El backend valida tambien contra el codigo secundario al guardar.</summary>
+    private string? NombreFormatoPrimario(string? codigo)
+    {
+        if (string.IsNullOrWhiteSpace(codigo)) { return null; }
+        var c = codigo.Trim();
+        return _gFormatos.FirstOrDefault(x => string.Equals(x.Codigo, c, StringComparison.OrdinalIgnoreCase))?.Nombre;
+    }
+
+    private sealed class GsvFila
+    {
+        public ServicioBusquedaDto D { get; init; } = null!;
+        public string? HistoriaGuardada { get; set; }
+        public string? HistoriaNombre { get; set; }
+        public string HistoriaEdit { get; set; } = "";
+        public bool Guardando { get; set; }
+        public bool Ok { get; set; }
+        public string? Error { get; set; }
+        public bool Dirty => !string.Equals((HistoriaEdit ?? "").Trim(), (HistoriaGuardada ?? "").Trim(), StringComparison.Ordinal);
     }
 
     private sealed class ServicioEdit

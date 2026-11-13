@@ -103,6 +103,29 @@ public sealed class AtencionProfesionalService(
                 ? a.FormatoHistoria
                 : (a.ServicioId != null && historiaPorServicioContrato.TryGetValue(a.ServicioId, out var hv) ? hv : null);
 
+        // CUPS del servicio asignado (columna "CUPS"): el snapshot Asignacion.CodigoRips ya es
+        // el codigo base sin sufijo d/f. Asignaciones legacy sin snapshot -> en vivo del
+        // ServicioContrato.CodigoServicio (mismo criterio que RdaConsultaBuilderService).
+        var guidsSinCups = asigs
+            .Where(a => string.IsNullOrWhiteSpace(a.CodigoRips) && !string.IsNullOrWhiteSpace(a.ServicioId))
+            .Select(a => Guid.TryParse(a.ServicioId, out var g) ? (Guid?)g : null)
+            .Where(g => g.HasValue).Select(g => g!.Value)
+            .Distinct()
+            .ToList();
+        var codigoPorServicioContrato = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (guidsSinCups.Count > 0)
+        {
+            var scsCod = await db.ServiciosContrato.AsNoTracking()
+                .Where(sc => guidsSinCups.Contains(sc.Id) && sc.CodigoServicio != null && sc.CodigoServicio != "")
+                .Select(sc => new { sc.Id, sc.CodigoServicio })
+                .ToListAsync(ct);
+            foreach (var sc in scsCod) { codigoPorServicioContrato[sc.Id.ToString()] = sc.CodigoServicio!; }
+        }
+        string? CupsDe(Asignacion a) => ServicioCodigo.Base(
+            !string.IsNullOrWhiteSpace(a.CodigoRips)
+                ? a.CodigoRips
+                : (a.ServicioId != null && codigoPorServicioContrato.TryGetValue(a.ServicioId, out var cv) ? cv : null));
+
         var pacIds = asigs.Select(a => a.PacienteId).Distinct().ToList();
         var pacs = await db.Pacientes.AsNoTracking()
             .Where(p => pacIds.Contains(p.Id))
@@ -666,7 +689,8 @@ public sealed class AtencionProfesionalService(
                     opVenc,
                     opLimite,
                     opDesde,
-                    t.CreatedAt));
+                    t.CreatedAt,
+                    CupsDe(a)));
             }
         }
         return result;

@@ -1145,6 +1145,10 @@ else
         new ColDef("fec_asig",      "FechaAsig",       "Fecha<br/>Asig",                          7),
         new ColDef("orden",         "Orden",           "Orden",                                   8),
         new ColDef("tipo",          "Tipo",            "Tipo",                                    9),
+        // Codigo CUPS del servicio asignado (Asignacion.CodigoRips, sin sufijo d/f; legacy ->
+        // en vivo del ServicioContrato). Mismo orden que "servicio" y declarada ANTES para que
+        // el orden estable la deje inmediatamente a su izquierda (codigo + nombre juntos).
+        new ColDef("cups",          "CUPS",            "CUPS",                                   10),
         new ColDef("servicio",      "Servicio",        "Servicio",                               10),
         new ColDef("pkg_cod",       "PaqueteCod",      "Paquete<br/>Cod",                        11),
         new ColDef("pkg_nom",       "PaqueteNombre",   "Paquete<br/>Nombre",                     12),
@@ -1303,6 +1307,13 @@ else
                 __b.OpenElement(seq++, "td");
                 __b.AddAttribute(seq++, "data-label", label);
                 __b.AddContent(seq++, s.TipoServicio);
+                __b.CloseElement();
+                break;
+            case "cups":
+                __b.OpenElement(seq++, "td");
+                __b.AddAttribute(seq++, "data-label", label);
+                __b.AddAttribute(seq++, "class", "mono");
+                __b.AddContent(seq++, string.IsNullOrWhiteSpace(s.CodigoCups) ? "—" : s.CodigoCups);
                 __b.CloseElement();
                 break;
             case "servicio":

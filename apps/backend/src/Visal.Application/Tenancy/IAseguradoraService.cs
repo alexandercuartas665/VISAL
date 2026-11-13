@@ -150,4 +150,56 @@ public interface IAseguradoraService
     /// historia). Las asignaciones existentes que referencien al servicio quedan
     /// con servicio_contrato_id en NULL (FK ON DELETE SET NULL).</summary>
     Task<int> EliminarServiciosDeContratoAsync(Guid contratoId, Guid actor, CancellationToken ct = default);
+
+    // ---- Busqueda global de servicios (todas las aseguradoras y contratos del tenant) ----
+
+    /// <summary>
+    /// Busca servicios en TODOS los contratos de TODAS las aseguradoras del tenant por
+    /// codigo (CUPS / CodigoServicio, Cod. interno) o por descripcion. La coincidencia es
+    /// insensible a mayusculas y tildes ("atencion" encuentra "ATENCIÓN") y por palabras:
+    /// cada palabra del texto debe aparecer (en cualquier orden). Devuelve como maximo
+    /// <paramref name="max"/> filas; <see cref="ServicioBusquedaResultado.Truncado"/> avisa
+    /// si hubo mas coincidencias.
+    /// </summary>
+    Task<ServicioBusquedaResultado> BuscarServiciosGlobalAsync(string texto, bool soloContratosActivos = false, int max = 500, CancellationToken ct = default);
+
+    /// <summary>Formularios ACTIVOS del tenant que pueden asignarse como historia de un
+    /// servicio (codigo + nombre). Mismo criterio que usa Atencion para resolver el formato.</summary>
+    Task<IReadOnlyList<FormatoHistoriaOpcionDto>> ListFormatosHistoriaActivosAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Cambia SOLO la historia (formato de HC) de un servicio de contrato, sin tocar ningun
+    /// otro campo. El codigo debe corresponder a un formulario activo (por Codigo o
+    /// CodigoSecundario); vacio = quitar la historia. Queda auditado (antes/despues).
+    /// Afecta las asignaciones que se creen DESPUES: las existentes conservan su snapshot.
+    /// </summary>
+    Task<ActualizarHistoriaResultado> ActualizarHistoriaServicioAsync(Guid servicioId, string? historia, Guid actor, CancellationToken ct = default);
 }
+
+/// <summary>Fila de la busqueda global de servicios: aseguradora + contrato + detalle completo del servicio.</summary>
+public sealed record ServicioBusquedaDto(
+    Guid ServicioId,
+    Guid AseguradoraId, string AseguradoraNombre, string AseguradoraCodigo, string AseguradoraTipo,
+    Guid ContratoId, string CodigoContrato, string ContratoEstado, DateOnly? ContratoFechaInicial, DateOnly? ContratoFechaFinal,
+    string? Historia,
+    /// <summary>Nombre del formulario activo al que resuelve <see cref="Historia"/>; null si no resuelve o no hay historia.</summary>
+    string? HistoriaNombre,
+    string? CodigoServicio,
+    /// <summary>CodigoServicio sin el sufijo de modalidad d/f (el codigo que viaja a RIPS).</summary>
+    string? CodigoCups,
+    string? CodigoInterno, string? Descripcion,
+    decimal? Tarifa, decimal? ValorTotal,
+    string? Modulo, string? Especialidad, string? Modalidad, string? Sede, string? PaqueteCodigo,
+    string? Clasificacion, string? Observaciones,
+    string? TipoArchivoRips, string? ModalidadAtencion, string? GrupoServicios, string? Servicios,
+    string? Finalidad, string? CodOtroServicio, string? CausaExterna, string? ViaIngreso,
+    string? ModalidadFacturacion, string? GrupoServicioFacturacion, string? ServicioFacturacion);
+
+public sealed record ServicioBusquedaResultado(
+    IReadOnlyList<ServicioBusquedaDto> Filas,
+    int TotalCoincidencias,
+    bool Truncado);
+
+public sealed record FormatoHistoriaOpcionDto(string Codigo, string Nombre);
+
+public sealed record ActualizarHistoriaResultado(bool Ok, string? Error, string? Historia, string? HistoriaNombre);

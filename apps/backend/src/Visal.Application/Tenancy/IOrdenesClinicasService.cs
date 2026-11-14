@@ -160,7 +160,13 @@ public sealed record OrdenesClinicasFiltro(
     /// descripcion/nombre del servicio (ServicioContrato.Descripcion), CONTIENE, case-insensitive y
     /// sin tildes. Sirve el codigo exacto o parte del nombre. Vacio = sin filtro. Se aplica en
     /// memoria sobre el resultado (dentro del tope de 5000, igual que el filtro de texto repetido).</summary>
-    string? ServicioTexto = null);
+    string? ServicioTexto = null,
+    /// <summary>Rango sobre la FECHA DE ASIGNACION: la fecha inicial de la asignacion
+    /// (Asignacion.FechaInicio) de la que cuelga la HC (pivote sesion -> turno -> asignacion).
+    /// Independiente del rango Desde/Hasta (fecha de atencion); si vienen ambos se combinan
+    /// (AND). Las HC sin vinculo a una asignacion quedan fuera cuando este rango se usa.</summary>
+    DateOnly? AsigDesde = null,
+    DateOnly? AsigHasta = null);
 
 public sealed record AseguradoraOpcionDto(Guid Id, string Nombre);
 public sealed record SucursalOpcionDto(Guid Id, string Nombre);

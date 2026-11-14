@@ -749,7 +749,8 @@ public sealed class AtencionProfesionalService(
                     opLimite,
                     opDesde,
                     t.CreatedAt,
-                    CupsDe(a)));
+                    CupsDe(a),
+                    a.FechaInicio == default ? null : a.FechaInicio));
             }
         }
         return result;

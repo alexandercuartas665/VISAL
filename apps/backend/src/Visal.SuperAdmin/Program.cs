@@ -1496,6 +1496,8 @@ app.MapGet("/ordenes/export.xlsx", async (
     string? codigoAsignacion,
     string? codigoAutorizacion,
     string? servicioTexto,
+    DateOnly? asigDesde,
+    DateOnly? asigHasta,
     Visal.Application.Tenancy.IOrdenesClinicasService svc,
     CancellationToken ct) =>
 {
@@ -1510,7 +1512,9 @@ app.MapGet("/ordenes/export.xlsx", async (
         FormatoCodigo: string.IsNullOrWhiteSpace(formatoCodigo) ? null : formatoCodigo,
         CodigoAsignacion: string.IsNullOrWhiteSpace(codigoAsignacion) ? null : codigoAsignacion.Trim(),
         CodigoAutorizacion: string.IsNullOrWhiteSpace(codigoAutorizacion) ? null : codigoAutorizacion.Trim(),
-        ServicioTexto: string.IsNullOrWhiteSpace(servicioTexto) ? null : servicioTexto.Trim());
+        ServicioTexto: string.IsNullOrWhiteSpace(servicioTexto) ? null : servicioTexto.Trim(),
+        AsigDesde: asigDesde,
+        AsigHasta: asigHasta);
     var archivo = await svc.ExportarExcelAsync(f, ct);
     return Results.File(archivo.Contenido, archivo.MimeType, archivo.NombreArchivo);
 }).RequireAuthorization();

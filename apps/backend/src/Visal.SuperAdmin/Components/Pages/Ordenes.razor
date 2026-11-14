@@ -566,13 +566,55 @@ else
                    title="Trae todas las HC cuyos servicios cuelgan del mismo lote de asignacion"
                    @bind="_codigoAsignacionFiltro" @onkeyup="OnKeyup" />
         </div>
-        <div class="oc-f">
-            <label>Fecha desde</label>
-            <input type="date" class="form-control form-control-sm" @bind="_desde" />
-        </div>
-        <div class="oc-f">
-            <label>Fecha hasta</label>
-            <input type="date" class="form-control form-control-sm" @bind="_hasta" />
+        @* Rangos de fecha en pestanas tipo carpeta: "Fechas de atencion" (fecha de atencion de
+           la HC, el rango historico) y "Fechas de asignacion" (fecha inicial de la asignacion de
+           la que cuelga la HC). Cada pestana guarda su propio rango; si ambas tienen valores se
+           combinan (AND). El punto en la pestana indica que tiene un rango aplicado. *@
+        <div class="oc-f oc-f-fechas">
+            <div class="oc-ftabs" role="tablist">
+                <button type="button" role="tab" class="oc-ftab @(_fechaTab == "atencion" ? "on" : "")"
+                        title="Filtra por la fecha de atencion de la historia clinica"
+                        @onclick='() => _fechaTab = "atencion"'>
+                    <span>Fechas de atención</span>
+                    @if (_desde is not null || _hasta is not null)
+                    {
+                        <span class="oc-ftab-dot"></span>
+                    }
+                </button>
+                <button type="button" role="tab" class="oc-ftab @(_fechaTab == "asignacion" ? "on" : "")"
+                        title="Filtra por la fecha inicial de la asignacion de la que cuelga la historia"
+                        @onclick='() => _fechaTab = "asignacion"'>
+                    <span>Fechas de asignación</span>
+                    @if (_asigDesde is not null || _asigHasta is not null)
+                    {
+                        <span class="oc-ftab-dot"></span>
+                    }
+                </button>
+            </div>
+            <div class="oc-fpanel">
+                @if (_fechaTab == "asignacion")
+                {
+                    <div>
+                        <span class="oc-fsub">Desde</span>
+                        <input type="date" class="form-control form-control-sm" title="Fecha inicial de la asignacion desde" @bind="_asigDesde" />
+                    </div>
+                    <div>
+                        <span class="oc-fsub">Hasta</span>
+                        <input type="date" class="form-control form-control-sm" title="Fecha inicial de la asignacion hasta" @bind="_asigHasta" />
+                    </div>
+                }
+                else
+                {
+                    <div>
+                        <span class="oc-fsub">Desde</span>
+                        <input type="date" class="form-control form-control-sm" title="Fecha de atencion desde" @bind="_desde" />
+                    </div>
+                    <div>
+                        <span class="oc-fsub">Hasta</span>
+                        <input type="date" class="form-control form-control-sm" title="Fecha de atencion hasta" @bind="_hasta" />
+                    </div>
+                }
+            </div>
         </div>
         <div class="oc-f">
             <label>Autorización</label>
@@ -1765,6 +1807,14 @@ else
     .oc-f label { font-size:11px; font-weight:700; color:#334155; text-transform:uppercase; letter-spacing:.3px; margin-bottom:4px; display:block; }
     .oc-f { min-width:0; }  /* permite que el select shrink dentro del track */
     .oc-f-wide { min-width:0; }
+    .oc-f-fechas { grid-column: span 2; min-width:0; }
+    .oc-ftabs { display:flex; gap:2px; margin-bottom:-1px; position:relative; z-index:1; }
+    .oc-ftab { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; color:#64748b; background:#eef2f7; border:1px solid #e2e8f0; border-bottom:none; border-radius:7px 7px 0 0; padding:4px 10px; cursor:pointer; white-space:nowrap; display:inline-flex; align-items:center; gap:5px; }
+    .oc-ftab.on { color:#1d4ed8; background:#fff; border-color:#cbd5e1; }
+    .oc-ftab-dot { width:7px; height:7px; border-radius:50%; background:#2563eb; display:inline-block; }
+    .oc-fpanel { display:grid; grid-template-columns:1fr 1fr; gap:8px; background:#fff; border:1px solid #cbd5e1; border-radius:0 7px 7px 7px; padding:6px 8px; }
+    .oc-fsub { font-size:10px; color:#64748b; display:block; margin-bottom:2px; }
+    @@media (max-width: 640px) { .oc-f-fechas { grid-column: 1 / -1; } }
     .oc-f-acts { display:flex; gap:8px; flex-wrap:wrap; align-items:end; }
     /* Barra inferior full-width: navegador de asignaciones (arriba) + acciones
        (abajo), ambas como filas flex que envuelven de forma ordenada. */
@@ -2093,6 +2143,10 @@ else
     private string _servicioTextoFiltro = "";
     private DateTime? _desde;
     private DateTime? _hasta;
+    // Rango por fecha de ASIGNACION (Asignacion.FechaInicio) y pestana visible del bloque de fechas.
+    private DateTime? _asigDesde;
+    private DateTime? _asigHasta;
+    private string _fechaTab = "atencion";
     private string _especialista = "";
     private string _estadoFiltro = ""; // "", "Cerrada", "Abierta"
 
@@ -2350,7 +2404,9 @@ else
                 SoloSinFirma: _soloSinFirma,
                 SoloTextoRepetido: _soloTextoRepetido,
                 CodigoAutorizacion: string.IsNullOrWhiteSpace(_codigoAutorizacionFiltro) ? null : _codigoAutorizacionFiltro.Trim(),
-                ServicioTexto: string.IsNullOrWhiteSpace(_servicioTextoFiltro) ? null : _servicioTextoFiltro.Trim());
+                ServicioTexto: string.IsNullOrWhiteSpace(_servicioTextoFiltro) ? null : _servicioTextoFiltro.Trim(),
+                AsigDesde: _asigDesde is DateTime ad1 ? DateOnly.FromDateTime(ad1) : (DateOnly?)null,
+                AsigHasta: _asigHasta is DateTime ad2 ? DateOnly.FromDateTime(ad2) : (DateOnly?)null);
             var todas = (await OcSvc.BuscarAsync(f)).ToList();
             if (string.Equals(_estadoFiltro, "Abierta", StringComparison.OrdinalIgnoreCase))
             {
@@ -2369,7 +2425,7 @@ else
 
     private async Task Limpiar()
     {
-        _filtroPaciente = ""; _codigoHcFiltro = ""; _codigoAsignacionFiltro = ""; _codigoAutorizacionFiltro = ""; _servicioTextoFiltro = ""; _desde = null; _hasta = null; _especialista = ""; _aseguradoraFiltro = ""; _sucursalFiltro = ""; _estadoFiltro = ""; _formatoFiltro = ""; _soloSinFirma = false; _soloTextoRepetido = false;
+        _filtroPaciente = ""; _codigoHcFiltro = ""; _codigoAsignacionFiltro = ""; _codigoAutorizacionFiltro = ""; _servicioTextoFiltro = ""; _desde = null; _hasta = null; _asigDesde = null; _asigHasta = null; _especialista = ""; _aseguradoraFiltro = ""; _sucursalFiltro = ""; _estadoFiltro = ""; _formatoFiltro = ""; _soloSinFirma = false; _soloTextoRepetido = false;
         _soloMultiSesion = false; _noMostrarInactivas = false; _asigNavFiltro = null;
         await Buscar();
     }
@@ -2418,6 +2474,8 @@ else
         if (!string.IsNullOrWhiteSpace(_filtroPaciente)) { qs.Add($"paciente={Uri.EscapeDataString(_filtroPaciente.Trim())}"); }
         if (_desde is DateTime d1) { qs.Add($"desde={d1:yyyy-MM-dd}"); }
         if (_hasta is DateTime d2) { qs.Add($"hasta={d2:yyyy-MM-dd}"); }
+        if (_asigDesde is DateTime ad1) { qs.Add($"asigDesde={ad1:yyyy-MM-dd}"); }
+        if (_asigHasta is DateTime ad2) { qs.Add($"asigHasta={ad2:yyyy-MM-dd}"); }
         if (!string.IsNullOrWhiteSpace(_especialista)) { qs.Add($"especialista={Uri.EscapeDataString(_especialista)}"); }
         if (Guid.TryParse(_aseguradoraFiltro, out var aseId)) { qs.Add($"aseguradoraId={aseId}"); }
         if (Guid.TryParse(_sucursalFiltro, out var sedeId)) { qs.Add($"sucursalId={sedeId}"); }
@@ -2458,6 +2516,8 @@ else
         if (!string.IsNullOrWhiteSpace(_filtroPaciente)) { qs.Add($"paciente={Uri.EscapeDataString(_filtroPaciente.Trim())}"); }
         if (_desde is DateTime d1) { qs.Add($"desde={d1:yyyy-MM-dd}"); }
         if (_hasta is DateTime d2) { qs.Add($"hasta={d2:yyyy-MM-dd}"); }
+        if (_asigDesde is DateTime ad1) { qs.Add($"asigDesde={ad1:yyyy-MM-dd}"); }
+        if (_asigHasta is DateTime ad2) { qs.Add($"asigHasta={ad2:yyyy-MM-dd}"); }
         if (!string.IsNullOrWhiteSpace(_especialista)) { qs.Add($"especialista={Uri.EscapeDataString(_especialista)}"); }
         if (Guid.TryParse(_aseguradoraFiltro, out var aseId)) { qs.Add($"aseguradoraId={aseId}"); }
         if (Guid.TryParse(_sucursalFiltro, out var sedeId)) { qs.Add($"sucursalId={sedeId}"); }

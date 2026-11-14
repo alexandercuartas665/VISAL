@@ -132,6 +132,14 @@ else
         {
             <text> &nbsp;·&nbsp; <b>Hasta:</b> @dh.ToString("yyyy-MM-dd")</text>
         }
+        @if (_asigDesdeFiltro is DateOnly ad0)
+        {
+            <text> &nbsp;·&nbsp; <b>Asignacion desde:</b> @ad0.ToString("yyyy-MM-dd")</text>
+        }
+        @if (_asigHastaFiltro is DateOnly ah0)
+        {
+            <text> &nbsp;·&nbsp; <b>Asignacion hasta:</b> @ah0.ToString("yyyy-MM-dd")</text>
+        }
         @if (!string.IsNullOrWhiteSpace(_especialistaFiltro))
         {
             <text> &nbsp;·&nbsp; <b>Especialista:</b> @_especialistaFiltro</text>
@@ -198,6 +206,8 @@ else
     private string? _especialistaFiltro;
     private DateOnly? _desdeFiltro;
     private DateOnly? _hastaFiltro;
+    private DateOnly? _asigDesdeFiltro;
+    private DateOnly? _asigHastaFiltro;
 
     protected override async Task OnInitializedAsync()
     {
@@ -218,6 +228,10 @@ else
             if (q.TryGetValue("asignacionId", out var aiv) && Guid.TryParse(aiv.ToString(), out var aidServ)) { asignacionId = aidServ; }
             if (q.TryGetValue("desde", out var dd) && DateOnly.TryParse(dd.ToString(), out var d1)) { _desdeFiltro = d1; }
             if (q.TryGetValue("hasta", out var dh) && DateOnly.TryParse(dh.ToString(), out var d2)) { _hastaFiltro = d2; }
+            // Rango por fecha de ASIGNACION: solo acota que HC raiz entran; NO se pasa al
+            // paquete (el recorte de evoluciones/docs del paquete sigue siendo por atencion).
+            if (q.TryGetValue("asigDesde", out var ad) && DateOnly.TryParse(ad.ToString(), out var ad1)) { _asigDesdeFiltro = ad1; }
+            if (q.TryGetValue("asigHasta", out var ah) && DateOnly.TryParse(ah.ToString(), out var ah1)) { _asigHastaFiltro = ah1; }
             Guid? aseguradoraId = null;
             Guid? sucursalId = null;
             if (q.TryGetValue("aseguradoraId", out var av) && Guid.TryParse(av.ToString(), out var aid)) { aseguradoraId = aid; }
@@ -235,7 +249,9 @@ else
                 CodigoHc: string.IsNullOrWhiteSpace(codigoHc) ? null : codigoHc.Trim(),
                 CodigoAsignacion: string.IsNullOrWhiteSpace(codigoAsignacion) ? null : codigoAsignacion.Trim(),
                 CodigoAutorizacion: string.IsNullOrWhiteSpace(codigoAutorizacion) ? null : codigoAutorizacion.Trim(),
-                ServicioTexto: string.IsNullOrWhiteSpace(servicioTexto) ? null : servicioTexto.Trim());
+                ServicioTexto: string.IsNullOrWhiteSpace(servicioTexto) ? null : servicioTexto.Trim(),
+                AsigDesde: _asigDesdeFiltro,
+                AsigHasta: _asigHastaFiltro);
 
             var todas = (await OcSvc.BuscarAsync(filtro)).ToList();
             // Las HC INACTIVAS nunca se imprimen: se excluyen de la raiz del paquete

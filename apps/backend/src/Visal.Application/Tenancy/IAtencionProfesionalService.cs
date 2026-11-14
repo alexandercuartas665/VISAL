@@ -140,7 +140,11 @@ public sealed record MiServicioAsignadoDto(
     /// sufijo de modalidad d/f). Para asignaciones legacy sin ese snapshot se resuelve en vivo
     /// del ServicioContrato.CodigoServicio (mismo criterio que el bundle RDA). Se muestra como
     /// columna "CUPS" en la parrilla de Atencion. Null si no hay codigo resoluble.</summary>
-    string? CodigoCups = null);
+    string? CodigoCups = null,
+    /// <summary>Fecha inicial de la asignacion (Asignacion.FechaInicio, la que se captura al
+    /// asignar el servicio). Distinta de FechaAsignacion, que es la fecha de creacion del
+    /// registro. Se muestra como columna "Fecha inicial" en la parrilla de Atencion.</summary>
+    DateOnly? FechaInicial = null);
 
 /// <summary>Resultado del intento de registrar una nota / atender una sesion.</summary>
 public sealed record RegistrarSesionResult(

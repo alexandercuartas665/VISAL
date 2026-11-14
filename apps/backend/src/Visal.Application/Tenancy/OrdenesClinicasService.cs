@@ -113,6 +113,24 @@ public sealed class OrdenesClinicasService(IApplicationDbContextFactory dbFactor
             q = q.Where(h => hcIdsAut.Contains(h.Id));
         }
 
+        // Rango por FECHA DE ASIGNACION (Asignacion.FechaInicio = fecha inicial que se captura
+        // al asignar; DateOnly, sin zona horaria). Mismo recorrido que los filtros de codigo:
+        // asignaciones en rango -> turnos -> sesiones -> pivote -> HC, y acota la query principal.
+        if (filtro.AsigDesde is not null || filtro.AsigHasta is not null)
+        {
+            var asigQ = db.Asignaciones.AsNoTracking().AsQueryable();
+            if (filtro.AsigDesde is DateOnly ad) { asigQ = asigQ.Where(a => a.FechaInicio >= ad); }
+            if (filtro.AsigHasta is DateOnly ah) { asigQ = asigQ.Where(a => a.FechaInicio <= ah); }
+            var asigIdsRango = await asigQ.Select(a => a.Id).ToListAsync(ct);
+            var turnoIdsRango = await db.AsignacionTurnos.AsNoTracking()
+                .Where(t => asigIdsRango.Contains(t.AsignacionId)).Select(t => t.Id).ToListAsync(ct);
+            var sesionIdsRango = await db.AsignacionTurnoSesiones.AsNoTracking()
+                .Where(s => turnoIdsRango.Contains(s.AsignacionTurnoId)).Select(s => s.Id).ToListAsync(ct);
+            var hcIdsRango = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+                .Where(p => sesionIdsRango.Contains(p.SesionId)).Select(p => p.HistoriaClinicaId).Distinct().ToListAsync(ct);
+            q = q.Where(h => hcIdsRango.Contains(h.Id));
+        }
+
         // Filtro "solo sin firma": restringe a HCs con formulas emitidas activas cuyo
         // snapshot quedo sin firma y cuyo profesional hoy SI tiene firma (reparables).
         if (filtro.SoloSinFirma)

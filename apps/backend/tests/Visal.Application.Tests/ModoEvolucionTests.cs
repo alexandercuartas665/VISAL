@@ -182,4 +182,105 @@ public sealed class ModoEvolucionTests
         Assert.Equal("HC-FO-14", Fmt(tB1.Id));  // base de B (aunque sea el 2do turno global)
         Assert.Equal("EVOL-14", Fmt(tB2.Id));   // evolucion de B
     }
+
+    // ── Puente por meses (FormDefinition.MesesPuente) — Opcion A ─────────────────────
+    // Siembra: terapia HC-FO-14 (evolucion EVOL-14, puente 6 meses), un profesional y una
+    // asignacion NUEVA de la terapia con 1 turno (sesion 1) el 2026-08-10. La atencion
+    // PREVIA del mismo profesional (2026-08-01) se hace en "fmtPrevia" y queda vinculada a
+    // una asignacion cuyo formato base es "baseAsigPrevia" (null = HC sin vinculo/huerfana).
+    private static async Task<(Guid userId, Guid turnoNuevo)> SembrarPuenteAsync(
+        VisalDbContext ctx, string fmtPrevia, string? baseAsigPrevia)
+    {
+        var platformUserId = Guid.NewGuid();
+        ctx.TenantUsers.Add(new TenantUser
+        {
+            TenantId = Tenant, PlatformUserId = platformUserId, Email = "admin@t.co", TenantRole = TenantRole.Owner
+        });
+        var prof = new Profesional { TenantId = Tenant, NumeroDocumento = "P1", NombreCompleto = "DR PUENTE" };
+        ctx.Profesionales.Add(prof);
+        var fBase = new FormDefinition
+        {
+            TenantId = Tenant, Codigo = "HC-FO-14", Nombre = "HC TERAPIA", Tipo = "HISTORIA CLINICA",
+            SchemaJson = "{\"children\":[]}", FormatoEvolucionCodigo = "EVOL-14", MesesPuente = 6
+        };
+        var fEvo = new FormDefinition
+        {
+            TenantId = Tenant, Codigo = "EVOL-14", Nombre = "EVOLUCION", Tipo = "HISTORIA CLINICA",
+            SchemaJson = "{\"children\":[]}"
+        };
+        ctx.FormDefinitions.AddRange(fBase, fEvo);
+        var pacienteId = Guid.NewGuid();
+
+        Asignacion NuevaAsig(string formato, string servicio) => new()
+        {
+            TenantId = Tenant, LoteId = Guid.NewGuid(), PacienteId = pacienteId, Sucursal = "CALI",
+            ServicioId = servicio, NombreServicio = servicio, TipoServicio = "TERAPIAS", Modulo = "TERAPIAS",
+            Cantidad = 1, ContratoCodigo = "C1", FormatoHistoria = formato, MesVigencia = 8,
+            FechaInicio = new DateOnly(2026, 8, 1), Estado = AsignacionEstado.Asignado
+        };
+
+        var hcPrevia = new HistoriaClinica
+        {
+            TenantId = Tenant, PacienteId = pacienteId, ProfesionalId = prof.Id,
+            FormDefinitionId = fmtPrevia == "HC-FO-14" ? fBase.Id : fEvo.Id,
+            Estado = HistoriaClinicaEstado.Cerrada,
+            FechaApertura = new DateTimeOffset(2026, 8, 1, 9, 0, 0, TimeSpan.Zero),
+            FechaAtencion = new DateTimeOffset(2026, 8, 1, 9, 0, 0, TimeSpan.Zero),
+        };
+        ctx.HistoriasClinicas.Add(hcPrevia);
+        if (baseAsigPrevia is not null)
+        {
+            var asigPrevia = NuevaAsig(baseAsigPrevia, "SV-PREVIO");
+            ctx.Asignaciones.Add(asigPrevia);
+            var turnoPrevio = new AsignacionTurno
+            {
+                TenantId = Tenant, AsignacionId = asigPrevia.Id, ProfesionalId = prof.Id, Cantidad = 1,
+                CreatedAt = new DateTimeOffset(2026, 8, 1, 8, 0, 0, TimeSpan.Zero)
+            };
+            ctx.AsignacionTurnos.Add(turnoPrevio);
+            var sesion = new AsignacionTurnoSesion
+            {
+                TenantId = Tenant, AsignacionTurnoId = turnoPrevio.Id, SessionNo = 1, FechaAtencion = new DateOnly(2026, 8, 1)
+            };
+            ctx.AsignacionTurnoSesiones.Add(sesion);
+            ctx.AsignacionTurnoSesionHcs.Add(new AsignacionTurnoSesionHc
+            {
+                TenantId = Tenant, SesionId = sesion.Id, HistoriaClinicaId = hcPrevia.Id
+            });
+        }
+
+        var asigNueva = NuevaAsig("HC-FO-14", "SV-TERAPIA");
+        ctx.Asignaciones.Add(asigNueva);
+        var turnoNuevo = new AsignacionTurno
+        {
+            TenantId = Tenant, AsignacionId = asigNueva.Id, ProfesionalId = prof.Id, Cantidad = 1,
+            FechaInicio = new DateOnly(2026, 8, 10),
+            CreatedAt = new DateTimeOffset(2026, 8, 10, 8, 0, 0, TimeSpan.Zero)
+        };
+        ctx.AsignacionTurnos.Add(turnoNuevo);
+        await ctx.SaveChangesAsync();
+        return (platformUserId, turnoNuevo.Id);
+    }
+
+    /// <summary>
+    /// El puente de la sesion 1 solo lo abre una atencion previa de la MISMA terapia.
+    /// Caso real (paciente de prueba 104578855): "Limpieza y cuidados de traqueostomia"
+    /// esta configurado directo con el formato de EVOLUCION de la terapia respiratoria;
+    /// su nota abria el puente y la terapia arrancaba en evolucion sin valoracion inicial.
+    /// </summary>
+    [Theory]
+    [InlineData("EVOL-14", "HC-FO-14", "EVOL-14")]  // evolucion de la MISMA terapia -> puente abierto
+    [InlineData("EVOL-14", "EVOL-14", "HC-FO-14")]  // evolucion de OTRO servicio (traqueostomia) -> base
+    [InlineData("HC-FO-14", null, "EVOL-14")]       // HC base previa (formato exclusivo de la terapia) -> abierto
+    [InlineData("EVOL-14", null, "EVOL-14")]        // evolucion huerfana/legacy -> comportamiento anterior
+    public async Task Puente_por_meses_solo_cuenta_la_misma_terapia(string fmtPrevia, string? baseAsigPrevia, string esperado)
+    {
+        await using var ctx = NewCtx();
+        var (userId, turnoNuevo) = await SembrarPuenteAsync(ctx, fmtPrevia, baseAsigPrevia);
+
+        var svc = new AtencionProfesionalService(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }), new FakeTenantContext { TenantId = Tenant }, null!);
+        var filas = await svc.GetMisServiciosAsync(userId);
+
+        Assert.Equal(esperado, filas.Single(f => f.AsignacionTurnoId == turnoNuevo).FormatoHistoria);
+    }
 }

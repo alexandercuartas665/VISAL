@@ -386,11 +386,14 @@ public sealed class AtencionProfesionalService(
                 }
             }
             var defIdABase = new Dictionary<Guid, string>();
+            // Defs que SON el formato base de su terapia (no la evolucion). El formato base es
+            // exclusivo de la terapia, asi que esas HCs siempre cuentan para el puente.
+            var defEsBase = new HashSet<Guid>();
             foreach (var d in defsTerapia)
             {
                 string? baseCod = null;
-                if (!string.IsNullOrWhiteSpace(d.Codigo) && mesesPuentePorFormato.ContainsKey(d.Codigo)) { baseCod = d.Codigo; }
-                else if (!string.IsNullOrWhiteSpace(d.CodigoSecundario) && mesesPuentePorFormato.ContainsKey(d.CodigoSecundario!)) { baseCod = d.CodigoSecundario; }
+                if (!string.IsNullOrWhiteSpace(d.Codigo) && mesesPuentePorFormato.ContainsKey(d.Codigo)) { baseCod = d.Codigo; defEsBase.Add(d.Id); }
+                else if (!string.IsNullOrWhiteSpace(d.CodigoSecundario) && mesesPuentePorFormato.ContainsKey(d.CodigoSecundario!)) { baseCod = d.CodigoSecundario; defEsBase.Add(d.Id); }
                 else if (!string.IsNullOrWhiteSpace(d.Codigo) && evoABase.TryGetValue(d.Codigo, out var b1)) { baseCod = b1; }
                 else if (!string.IsNullOrWhiteSpace(d.CodigoSecundario) && evoABase.TryGetValue(d.CodigoSecundario!, out var b2)) { baseCod = b2; }
                 if (baseCod != null) { defIdABase[d.Id] = baseCod; }
@@ -404,11 +407,67 @@ public sealed class AtencionProfesionalService(
                                 && h.Estado != HistoriaClinicaEstado.Inactiva
                                 && h.FechaAtencion != null
                                 && h.ProfesionalId != null)
-                    .Select(h => new { h.PacienteId, h.FormDefinitionId, h.FechaAtencion, h.ProfesionalId })
+                    .Select(h => new { h.Id, h.PacienteId, h.FormDefinitionId, h.FechaAtencion, h.ProfesionalId })
                     .ToListAsync(ct);
+
+                // Opcion A (puente solo por la MISMA terapia): una HC en formato de EVOLUCION
+                // puede haber sido generada por OTRO servicio que usa ese formato directamente
+                // (ej. "Limpieza y cuidados de traqueostomia" configurado con PP-FO-85_R, que es
+                // la evolucion de la terapia respiratoria HC-FO-14). Esa nota NO es una atencion
+                // de la terapia: si contara, la sesion 1 de la terapia saltaria a evolucion sin
+                // valoracion inicial. Por eso, para las HCs de evolucion se mira el formato base
+                // de la(s) asignacion(es) a la(s) que estan vinculadas (pivote sesion->turno->
+                // asignacion). Las HCs sin vinculo (huerfanas/legacy) conservan el
+                // comportamiento anterior y si cuentan.
+                var hcEvoIds = atenciones.Where(x => !defEsBase.Contains(x.FormDefinitionId)).Select(x => x.Id).Distinct().ToList();
+                var basesPorHc = new Dictionary<Guid, HashSet<string>>();
+                if (hcEvoIds.Count > 0)
+                {
+                    var vinculos = await (
+                        from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
+                        join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+                        join t2 in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t2.Id
+                        join a2 in db.Asignaciones.AsNoTracking() on t2.AsignacionId equals a2.Id
+                        where hcEvoIds.Contains(p.HistoriaClinicaId)
+                        select new { p.HistoriaClinicaId, a2.FormatoHistoria, a2.ServicioId })
+                        .ToListAsync(ct);
+                    // Base de la asignacion vinculada: snapshot; si esta vacio, el vivo del ServicioContrato.
+                    var scIdsSinSnap = vinculos
+                        .Where(v => string.IsNullOrWhiteSpace(v.FormatoHistoria))
+                        .Select(v => Guid.TryParse(v.ServicioId, out var g) ? (Guid?)g : null)
+                        .Where(g => g.HasValue).Select(g => g!.Value).Distinct().ToList();
+                    var historiaVivaPorSc = scIdsSinSnap.Count == 0
+                        ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                        : (await db.ServiciosContrato.AsNoTracking()
+                                .Where(sc => scIdsSinSnap.Contains(sc.Id) && sc.Historia != null && sc.Historia != "")
+                                .Select(sc => new { sc.Id, sc.Historia })
+                                .ToListAsync(ct))
+                            .ToDictionary(x => x.Id.ToString(), x => x.Historia!, StringComparer.OrdinalIgnoreCase);
+                    foreach (var v in vinculos)
+                    {
+                        var baseAsig = !string.IsNullOrWhiteSpace(v.FormatoHistoria)
+                            ? v.FormatoHistoria!.Trim()
+                            : (v.ServicioId != null && historiaVivaPorSc.TryGetValue(v.ServicioId, out var hv2) ? hv2.Trim() : "");
+                        if (!basesPorHc.TryGetValue(v.HistoriaClinicaId, out var set))
+                        {
+                            set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                            basesPorHc[v.HistoriaClinicaId] = set;
+                        }
+                        set.Add(baseAsig);
+                    }
+                }
+
                 foreach (var at in atenciones)
                 {
                     if (!defIdABase.TryGetValue(at.FormDefinitionId, out var baseCod)) { continue; }
+                    // Evolucion vinculada SOLO a asignaciones de otro formato base -> no es de
+                    // esta terapia; no abre ni mantiene el puente.
+                    if (!defEsBase.Contains(at.FormDefinitionId)
+                        && basesPorHc.TryGetValue(at.Id, out var basesHc)
+                        && !basesHc.Contains(baseCod))
+                    {
+                        continue;
+                    }
                     var key = (at.PacienteId, baseCod, at.ProfesionalId!.Value);
                     var fecha = at.FechaAtencion!.Value;
                     if (!ultimaAtencionPorPacienteFormato.TryGetValue(key, out var prev) || fecha > prev)

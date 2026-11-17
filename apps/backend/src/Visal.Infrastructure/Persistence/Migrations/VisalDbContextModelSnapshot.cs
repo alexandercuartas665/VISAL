@@ -7033,6 +7033,11 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(300)")
                         .HasColumnName("direccion");
 
+                    b.Property<string>("DireccionDetalle")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("direccion_detalle");
+
                     b.Property<int?>("Edad")
                         .HasColumnType("integer")
                         .HasColumnName("edad");

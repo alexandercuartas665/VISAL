@@ -143,4 +143,42 @@ public sealed class CamposRigidosServiceTests
         Assert.Equal(1, docRow.Orden);
         Assert.Equal(2, tipoRow.Orden);
     }
+
+    [Fact]
+    public async Task EnsureDefaults_campo_nuevo_se_inserta_despues_de_su_antecesor()
+    {
+        const string name = nameof(EnsureDefaults_campo_nuevo_se_inserta_despues_de_su_antecesor);
+        await using var db = NewCtx(name);
+        var svc = Svc(name);
+        await svc.EnsureDefaultsAsync();
+
+        // Simula un tenant sembrado ANTES de que existiera "direccion_detalle" y con la ficha
+        // personalizada: direccion movida al tab "extra" en Orden 3, barrio detras (4) y un campo
+        // dinamico en 4 tambien.
+        await using (var prep = NewCtx(name))
+        {
+            prep.PacienteCampoRigidoDefs.Remove(await prep.PacienteCampoRigidoDefs.SingleAsync(r => r.CampoKey == "direccion_detalle"));
+            var dir = await prep.PacienteCampoRigidoDefs.SingleAsync(r => r.CampoKey == "direccion");
+            dir.TabKey = "extra"; dir.Orden = 3;
+            var bar = await prep.PacienteCampoRigidoDefs.SingleAsync(r => r.CampoKey == "barrio");
+            bar.TabKey = "extra"; bar.Orden = 4;
+            prep.PacienteCampoDefs.Add(new PacienteCampoDef { TenantId = Tenant, TabKey = "extra", CampoKey = "din1", Label = "Din 1", Orden = 4 });
+            prep.PacienteCampoDefs.Add(new PacienteCampoDef { TenantId = Tenant, TabKey = "extra", CampoKey = "din0", Label = "Din 0", Orden = 2 });
+            await prep.SaveChangesAsync();
+        }
+
+        await svc.EnsureDefaultsAsync();
+
+        await using var verify = NewCtx(name);
+        var rig = await verify.PacienteCampoRigidoDefs.AsNoTracking().ToListAsync();
+        var din = await verify.PacienteCampoDefs.AsNoTracking().ToListAsync();
+        var det = rig.Single(r => r.CampoKey == "direccion_detalle");
+        Assert.Equal("extra", det.TabKey);                                   // sigue a su antecesor
+        Assert.Equal(4, det.Orden);                                          // justo debajo de direccion (3)
+        Assert.Equal(3, rig.Single(r => r.CampoKey == "direccion").Orden);   // direccion no se mueve
+        Assert.Equal(5, rig.Single(r => r.CampoKey == "barrio").Orden);      // lo de detras corre +1
+        Assert.Equal(5, din.Single(c => c.CampoKey == "din1").Orden);
+        Assert.Equal(2, din.Single(c => c.CampoKey == "din0").Orden);        // lo de antes no se toca
+        Assert.Single(rig, r => r.CampoKey == "direccion_detalle");          // idempotente
+    }
 }

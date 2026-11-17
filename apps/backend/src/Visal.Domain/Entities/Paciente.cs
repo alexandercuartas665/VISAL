@@ -126,6 +126,9 @@ public class Paciente : TenantEntity
     public Guid? DepartamentoId { get; set; }
     public Guid? MunicipioId { get; set; }
     public string? Direccion { get; set; }
+    /// <summary>Detalles de la direccion (texto libre): apartamento, torre, conjunto, puntos de
+    /// referencia... Va debajo de Direccion en la ficha de Admision.</summary>
+    public string? DireccionDetalle { get; set; }
     public string? Barrio { get; set; }
     public string? Ciudad { get; set; }
 

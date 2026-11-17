@@ -85,7 +85,9 @@ public sealed record PacienteDetailDto(
     DateTimeOffset? FechaFallecimiento = null, string? FallecimientoReportadoPor = null,
     string? CertificadoVisal = null, string? MotivoFallecimiento = null,
     // Motivo de ingreso (CENSO): FK a catalogos_paciente (tipo=MotivoIngreso). Lista configurable.
-    Guid? MotivoIngresoId = null);
+    Guid? MotivoIngresoId = null,
+    // Detalles de la direccion (apto, torre, referencias...), debajo de Direccion en Admision.
+    string? DireccionDetalle = null);
 
 public sealed record SavePacienteRequest(
     Guid? Id,
@@ -132,7 +134,9 @@ public sealed record SavePacienteRequest(
     // Condicion del paciente (valor de lista fija). El SLA NO se envia: lo calcula el servidor.
     string? Condicion = null,
     // Motivo de ingreso (CENSO): FK a catalogos_paciente (tipo=MotivoIngreso). Lista configurable.
-    Guid? MotivoIngresoId = null);
+    Guid? MotivoIngresoId = null,
+    // Detalles de la direccion (apto, torre, referencias...). Se guarda tal cual (null = vacio).
+    string? DireccionDetalle = null);
 
 public interface IPacienteService
 {

@@ -74,6 +74,8 @@ public static class CamposRigidosCatalogo
         new("departamento", "Departamento", TabGenerales, "Geografia y contacto", 1, false, true),
         new("municipio", "Municipio", TabGenerales, "Geografia y contacto", 1, false, true),
         new("direccion", "Direccion", TabGenerales, "Geografia y contacto", 2, false, true),
+        // Ancho 3 (fila completa) para que quede DEBAJO de Direccion y no a su lado.
+        new("direccion_detalle", "Detalles de la direccion", TabGenerales, "Geografia y contacto", 3, false, true),
         new("barrio", "Barrio", TabGenerales, "Geografia y contacto", 1, false, true),
         new("ciudad", "Ciudad", TabGenerales, "Geografia y contacto", 1, false, true),
         new("telefonos", "Telefonos", TabGenerales, "Geografia y contacto", 3, true, true),

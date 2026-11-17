@@ -354,6 +354,11 @@ public sealed class RelacionFacturasSelector(IApplicationDbContextFactory dbFact
             .Where(m => munIds.Contains(m.Id)).ToDictionaryAsync(m => m.Id, m => m.Nombre, ct);
         var paisesNombre = paisIds.Count == 0 ? new Dictionary<Guid, string>() : await db.Paises.AsNoTracking()
             .Where(p => paisIds.Contains(p.Id)).ToDictionaryAsync(p => p.Id, p => p.Nombre, ct);
+        // "Tipo Usuario" del paciente (catalogo de Admision) -> columna "Regimen" del snapshot.
+        var tipoUsuarioIds = hechosPrefiltrados.Where(x => x.Paciente.TipoUsuarioId is not null)
+            .Select(x => x.Paciente.TipoUsuarioId!.Value).Distinct().ToList();
+        var tiposUsuario = tipoUsuarioIds.Count == 0 ? new Dictionary<Guid, string>() : await db.CatalogosPaciente.AsNoTracking()
+            .Where(c => tipoUsuarioIds.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.Nombre, ct);
 
         // 7) Construccion de hechos finales.
         var hechos = new List<RelacionFacturasHecho>(hechosPrefiltrados.Count);
@@ -532,7 +537,8 @@ public sealed class RelacionFacturasSelector(IApplicationDbContextFactory dbFact
                 AutorizacionCargadaPorNombre: asigRelevante?.AutorizacionCargadaPorNombre,
                 AutorizacionOrigenModulo: asigRelevante?.AutorizacionOrigenModulo,
                 // Usuario(s) distintos que cargaron los "Lista de firmas" de ESTA HC (por historia).
-                ListadoFirmasCargadoPor: listadoFirmasUsuariosPorHc.GetValueOrDefault(hc.Id)));
+                ListadoFirmasCargadoPor: listadoFirmasUsuariosPorHc.GetValueOrDefault(hc.Id),
+                TipoUsuarioNombre: paciente.TipoUsuarioId is Guid tuId && tiposUsuario.TryGetValue(tuId, out var tuNom) ? tuNom : null));
         }
 
         // ── Lineas primarias de paquete ────────────────────────────────────────────────

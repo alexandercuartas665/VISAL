@@ -1,3 +1,4 @@
+using Visal.Application.Common;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Visal.Application.Facturacion.Selectors;
@@ -175,7 +176,8 @@ public sealed class SnapshotRelacionFacturasBuilder(
             ["Contrato"] = h.Contrato.CodigoContrato,                          //  3  — codigo del contrato de la EPS
             ["codigo habilitacion "] = h.CodigoHabilitacionResuelto,           //  4  — credencial interop x sede (fallback Sucursal.CodigoHabilitacion)
             ["Sede"] = h.Sucursal?.Nombre,                                     //  5  — nombre de la sede que atendio
-            ["Regimen"] = h.Paciente.Regimen,                                  //  6
+            // 6 — "Tipo Usuario" de Admision (catalogo, primer tab), NO el campo Regimen (texto libre).
+            ["Regimen"] = h.TipoUsuarioNombre,                                 //  6
             ["Archivo json"] = h.TipoArchivoRips,                              //  7  — TipoArchivoRips del catalogo tipo servicio (AC/AP/AT/AM)
             ["Autorizacion"] = NormalizarAutorizacion(h.CodigoAutorizacion),   //  8  — Asignacion.CodigoAutorizacion (null si es "." o vacio)
             ["Tipo_Id"] = h.Paciente.TipoDocumento,                            //  9
@@ -213,7 +215,9 @@ public sealed class SnapshotRelacionFacturasBuilder(
             // El correo cae al correo por defecto del tenant (config de pacientes) cuando el
             // paciente no tiene correo propio; si tampoco hay default queda en blanco.
             ["Dirección"] = usarDatosPaciente ? h.Paciente.Direccion : h.Sucursal?.Direccion,
-            ["Telefono"] = usarDatosPaciente ? h.Paciente.Telefono : h.Sucursal?.Telefono,
+            // UN solo telefono: el campo del paciente/sede suele traer varios ("310... - 315...",
+            // "310... y 315...") y la EPS espera uno. Se toma el primero (ver TelefonoPrincipal).
+            ["Telefono"] = TelefonoPrincipal.Primero(usarDatosPaciente ? h.Paciente.Telefono : h.Sucursal?.Telefono),
             ["Correo electrónico"] = usarDatosPaciente
                 ? (string.IsNullOrWhiteSpace(h.Paciente.Email) ? correoDefaultPaciente : h.Paciente.Email)
                 : h.Sucursal?.Email,

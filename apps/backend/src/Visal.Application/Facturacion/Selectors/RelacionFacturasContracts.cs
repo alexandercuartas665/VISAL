@@ -127,4 +127,8 @@ public sealed record RelacionFacturasHecho(
     /// "Lista de firmas" de ESTA HC (NotaMedicaDocumento.CreatedBy, por historia_clinica_id),
     /// separados por coma y ordenados por fecha de carga. Vacio si la HC no tiene ninguno.
     /// Columna "Listado firmas cargado por"; vacio en la cabecera de paquete.</summary>
-    string? ListadoFirmasCargadoPor = null);
+    string? ListadoFirmasCargadoPor = null,
+    /// <summary>Nombre del "Tipo Usuario" del paciente (catalogo de Admision, primer tab;
+    /// Paciente.TipoUsuarioId -> catalogos_paciente.nombre). Alimenta la columna "Regimen".
+    /// Null si el paciente no tiene Tipo Usuario.</summary>
+    string? TipoUsuarioNombre = null);

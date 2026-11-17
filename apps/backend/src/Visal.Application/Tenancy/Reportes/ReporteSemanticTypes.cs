@@ -172,6 +172,7 @@ public sealed class ReportSemanticModel : IReportSemanticModel
                 new("diagnostico_secundario", "Diagnostico secundario", nameof(Paciente.DiagnosticoSecundario), ReportFieldKind.Text),
                 new("tutela", "Tutela", nameof(Paciente.Tutela), ReportFieldKind.Text),
                 new("direccion", "Direccion", nameof(Paciente.Direccion), ReportFieldKind.Text),
+                new("direccion_detalle", "Detalles de la direccion", nameof(Paciente.DireccionDetalle), ReportFieldKind.Text),
                 new("barrio", "Barrio", nameof(Paciente.Barrio), ReportFieldKind.Text),
                 new("ciudad", "Ciudad", nameof(Paciente.Ciudad), ReportFieldKind.Text),
                 new("telefono", "Telefono Paciente", nameof(Paciente.Telefono), ReportFieldKind.Text),

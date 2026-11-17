@@ -1519,6 +1519,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.MotivoFallecimiento).HasColumnType("text");
             // Geografia
             b.Property(x => x.Direccion).HasMaxLength(300);
+            b.Property(x => x.DireccionDetalle).HasMaxLength(500);
             b.Property(x => x.Barrio).HasMaxLength(120);
             b.Property(x => x.Ciudad).HasMaxLength(120);
             // Contacto

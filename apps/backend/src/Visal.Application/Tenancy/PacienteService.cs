@@ -88,7 +88,7 @@ public sealed class PacienteService : IPacienteService
             p.Condicion, p.SlaIngresoMinutos,
             p.BarthelTotal, p.BarthelClasificacion, p.BarthelDatosJson, p.BarthelActualizadoEn,
             p.FechaFallecimiento, p.FallecimientoReportadoPor, p.CertificadoVisal, p.MotivoFallecimiento,
-            p.MotivoIngresoId);
+            p.MotivoIngresoId, p.DireccionDetalle);
     }
 
     /// <summary>Nombre legible de un usuario de plataforma: DisplayName, o la concatenacion de sus
@@ -180,6 +180,7 @@ public sealed class PacienteService : IPacienteService
         p.DepartamentoId = req.DepartamentoId;
         p.MunicipioId = req.MunicipioId;
         p.Direccion = req.Direccion?.Trim();
+        p.DireccionDetalle = string.IsNullOrWhiteSpace(req.DireccionDetalle) ? null : req.DireccionDetalle.Trim();
         p.Barrio = req.Barrio?.Trim();
         p.Ciudad = req.Ciudad?.Trim();
 

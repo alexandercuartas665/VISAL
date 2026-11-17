@@ -354,6 +354,7 @@
                             </select>
                         </div>;
                         _rigidFrag["direccion"] = @<div class="ase-f"><label>Direccion</label><input class="form-control form-control-sm" @bind="_dir" /></div>;
+                        _rigidFrag["direccion_detalle"] = @<div class="ase-f"><label>Detalles de la direccion</label><input class="form-control form-control-sm" maxlength="500" placeholder="Apto, torre, conjunto, puntos de referencia..." @bind="_dirDetalle" /></div>;
                         _rigidFrag["barrio"] = @<div class="ase-f"><label>Barrio</label><input class="form-control form-control-sm" @bind="_barrio" /></div>;
                         _rigidFrag["ciudad"] = @<div class="ase-f"><label>Ciudad</label><input class="form-control form-control-sm" @bind="_ciudad" /></div>;
                         _rigidFrag["telefonos"] = @<div class="ase-f"><label>Telefonos <span class="text-muted" style="font-weight:normal;font-size:11px;">(varios permitidos)</span></label>
@@ -1886,6 +1887,7 @@
 
     // Geografia
     private string? _dir, _barrio, _ciudad;
+    private string? _dirDetalle;
     private string _codPaisTel = "+57";
     private string? _email;
     // Multi-telefono: la UI muestra chips (una fila por telefono) y guardamos
@@ -2537,6 +2539,7 @@
         _mortModal = false; _mortFecha = null; _mortCertVisal = "NO"; _mortMotivo = null; _mortPdfBytes = null; _mortPdfNombre = null; _mortPdfContentType = null; _mortError = null;
         _cie10Codigo = null;
         _dir = _barrio = _ciudad = null;
+        _dirDetalle = null;
         _codPaisTel = "+57";
         _telefonos = new List<TelRow>();
         _email = null; _sedeId = "";
@@ -2610,6 +2613,7 @@
         _mortModal = false; _mortFecha = null; _mortCertVisal = "NO"; _mortMotivo = null; _mortPdfBytes = null; _mortPdfNombre = null; _mortPdfContentType = null; _mortError = null;
         _cie10Codigo = d.Cie10Codigo;
         _dir = d.Direccion; _barrio = d.Barrio; _ciudad = d.Ciudad;
+        _dirDetalle = d.DireccionDetalle;
         _codPaisTel = string.IsNullOrWhiteSpace(d.CodigoPaisTelefono) ? "+57" : d.CodigoPaisTelefono!;
         _telefonos = Visal.Application.Common.PacienteTelefonoHelper.Enumerar(d.Telefono)
             .Select(n => new TelRow { Numero = n }).ToList();
@@ -2700,7 +2704,8 @@
                 FechaAtencion: AOffset(_fAtencion),
                 UsuarioIngresoId: Try(_usuarioIngresoId),
                 Condicion: _condicion,
-                MotivoIngresoId: Try(_motivoIngreso));
+                MotivoIngresoId: Try(_motivoIngreso),
+                DireccionDetalle: _dirDetalle);
             var saved = await Svc.SaveAsync(req, await Actor());
             if (saved is null) { _error = "No se pudo guardar (sin tenant activo)."; return; }
             await Select(saved.Id); await LoadLista(); _ok = $"Paciente \"{saved.NombreCompleto}\" guardado.";
@@ -3179,7 +3184,9 @@
                         // El Excel no trae fecha de atencion, usuario del ingreso ni condicion: conservamos los que ya tuviera el paciente.
                         FechaAtencion: prev?.FechaAtencion,
                         UsuarioIngresoId: prev?.UsuarioIngresoId,
-                        Condicion: prev?.Condicion);
+                        Condicion: prev?.Condicion,
+                        // El Excel no trae detalles de la direccion: se conservan los del paciente.
+                        DireccionDetalle: prev?.DireccionDetalle);
 
                     var saved = await Svc.SaveAsync(req, actor);
                     if (saved is null)

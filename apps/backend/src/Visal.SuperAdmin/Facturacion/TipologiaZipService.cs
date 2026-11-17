@@ -190,6 +190,12 @@ public sealed class TipologiaZipService : ITipologiaZipService
         }
         progreso?.Report(new ZipProgreso("Armando PDFs", allUrls.Count, allUrls.Count));
 
+        // Membrete tambien en las HISTORIAS renderizadas (no solo en los anexos): una sola
+        // consulta para todas las HC del lote. Null si el archivo no tiene el flag.
+        var membreteHc = archivo.MembreteHcCup
+            ? await ResolverMembretePorHcAsync(db, planes.SelectMany(x => x.partes).Where(x => x.HcId != Guid.Empty).Select(x => x.HcId).Distinct().ToList(), ct)
+            : null;
+
         // --- Pase 2: ensambla el PDF de CADA paciente con sus partes resueltas/renderizadas. ---
         var salidas = new List<(string Name, byte[] Pdf)>();
         {
@@ -197,7 +203,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
             foreach (var (pac, partes) in planes)
             {
                 ct.ThrowIfCancellationRequested();
-                var bytesPartes = EnsamblarPartes(partes, rendered, EmitirPaginaRotuloCup && archivo.RotuloSeparadorCup, logoRotulo);
+                var bytesPartes = EnsamblarPartes(partes, rendered, EmitirPaginaRotuloCup && archivo.RotuloSeparadorCup, logoRotulo, membreteHc);
                 // Solo se incluye el paciente si REALMENTE quedo contenido (firma,
                 // autorizacion o formularios renderizados). Los vacios se omiten.
                 if (bytesPartes.Count == 0) { continue; }
@@ -323,13 +329,18 @@ public sealed class TipologiaZipService : ITipologiaZipService
         }
         progreso?.Report(new ZipProgreso("Armando PDFs", allUrls.Count, allUrls.Count));
 
+        // Membrete tambien en las HISTORIAS renderizadas (ver modo por paciente).
+        var membreteHc = archivo.MembreteHcCup
+            ? await ResolverMembretePorHcAsync(db, unidades.SelectMany(x => x.Partes).Where(x => x.HcId != Guid.Empty).Select(x => x.HcId).Distinct().ToList(), ct)
+            : null;
+
         // --- Pase 2: ensambla el PDF de cada (paciente, autorizacion). ---
         var salidas = new List<(string Name, byte[] Pdf)>();
         var usados = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (pac, codigo, partes) in unidades)
         {
             ct.ThrowIfCancellationRequested();
-            var bytesPartes = EnsamblarPartes(partes, rendered, EmitirPaginaRotuloCup && archivo.RotuloSeparadorCup, logoRotulo);
+            var bytesPartes = EnsamblarPartes(partes, rendered, EmitirPaginaRotuloCup && archivo.RotuloSeparadorCup, logoRotulo, membreteHc);
             if (bytesPartes.Count == 0) { continue; }
 
             var pdf = FusionarPdfs(bytesPartes);
@@ -1997,7 +2008,8 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// de historia; las partes sin CUP (autorizacion/firma/anexo) no disparan separador y
     /// quedan en su lugar. El conteo de CUP arranca de cero en cada paciente.</summary>
     private List<byte[]> EnsamblarPartes(
-        IReadOnlyList<PartePlan> partes, IReadOnlyList<byte[]> rendered, bool rotulo, byte[]? logo)
+        IReadOnlyList<PartePlan> partes, IReadOnlyList<byte[]> rendered, bool rotulo, byte[]? logo,
+        IReadOnlyDictionary<Guid, (string Hc, string Cup, string Serv, DateTimeOffset? Fecha)>? membreteHc = null)
     {
         var bytes = new List<byte[]>(partes.Count);
         string? ultimoCup = null;
@@ -2008,6 +2020,15 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 : (p.RenderIdx >= 0 && p.RenderIdx < rendered.Count
                    && rendered[p.RenderIdx] is { Length: > 0 } rb ? rb : null);
             if (b is null) { continue; }
+
+            // Membrete por documento (flag MembreteHcCup) tambien en las HISTORIAS: cada HC
+            // renderizada recibe en su 1a pagina la misma franja que los anexos (HC + CUP +
+            // servicio + fecha de atencion). Cae en el margen superior de 12mm del render, asi
+            // que no tapa contenido. Si no se puede estampar, la HC sale tal cual.
+            if (membreteHc is not null && p.HcId != Guid.Empty && p.Inline is null)
+            {
+                b = EstamparMembrete(b, ConstruirTextoMembrete(p.HcId, membreteHc)) ?? b;
+            }
 
             if (rotulo && p.Cup is not null
                 && (!iniciado || !string.Equals(p.Cup, ultimoCup, StringComparison.OrdinalIgnoreCase)))

@@ -25,29 +25,65 @@ public sealed class PacienteCampoRigidoService(IApplicationDbContextFactory dbFa
         var faltantes = CamposRigidosCatalogo.Todos.Where(i => !existentesSet.Contains(i.Key)).ToList();
         if (faltantes.Count == 0) { return; }
 
-        // Orden de los campos nuevos = al final de su tab (detras de lo que ya exista, fijo o dinamico).
+        // Colocacion de los campos nuevos: si su ANTECESOR en el catalogo (el campo inmediatamente
+        // anterior del mismo tab por defecto) ya existe para el tenant, el nuevo se inserta JUSTO
+        // DESPUES de el (mismo tab y Orden+1, corriendo una posicion lo que venia detras, fijo o
+        // dinamico). Asi "Detalles de la direccion" cae debajo de "Direccion" aunque el tenant ya
+        // haya personalizado su ficha. Sin antecesor -> al final de su tab (comportamiento previo).
+        var rigTracked = await db.PacienteCampoRigidoDefs.ToListAsync(ct);
+        var porKey = rigTracked.ToDictionary(r => r.CampoKey, StringComparer.Ordinal);
         var maxPorTab = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var info in faltantes)
         {
-            if (!maxPorTab.TryGetValue(info.TabDefault, out var n))
+            PacienteCampoRigidoDef? antecesor = null;
+            var idx = -1;
+            for (var k = 0; k < CamposRigidosCatalogo.Todos.Count; k++)
             {
-                var maxRig = await db.PacienteCampoRigidoDefs
-                    .Where(r => r.TabKey == info.TabDefault).MaxAsync(r => (int?)r.Orden, ct) ?? -1;
-                var maxDin = await db.PacienteCampoDefs
-                    .Where(c => c.TabKey == info.TabDefault).MaxAsync(c => (int?)c.Orden, ct) ?? -1;
-                n = Math.Max(maxRig, maxDin);
+                if (CamposRigidosCatalogo.Todos[k].Key == info.Key) { idx = k; break; }
             }
-            n += 1;
-            maxPorTab[info.TabDefault] = n;
-            db.PacienteCampoRigidoDefs.Add(new PacienteCampoRigidoDef
+            if (idx > 0)
+            {
+                var prev = CamposRigidosCatalogo.Todos[idx - 1];
+                if (prev.TabDefault == info.TabDefault) { porKey.TryGetValue(prev.Key, out antecesor); }
+            }
+
+            string tab;
+            int orden;
+            if (antecesor is not null)
+            {
+                tab = antecesor.TabKey;
+                orden = antecesor.Orden + 1;
+                foreach (var r in rigTracked.Where(r => r.TabKey == tab && r.Orden >= orden)) { r.Orden += 1; }
+                var dinTab = await db.PacienteCampoDefs.Where(c => c.TabKey == tab && c.Orden >= orden).ToListAsync(ct);
+                foreach (var c in dinTab) { c.Orden += 1; }
+                maxPorTab.Remove(tab);
+            }
+            else
+            {
+                tab = info.TabDefault;
+                if (!maxPorTab.TryGetValue(tab, out var n))
+                {
+                    var maxRig = rigTracked.Where(r => r.TabKey == tab).Select(r => (int?)r.Orden).Max() ?? -1;
+                    var maxDin = await db.PacienteCampoDefs
+                        .Where(c => c.TabKey == tab).MaxAsync(c => (int?)c.Orden, ct) ?? -1;
+                    n = Math.Max(maxRig, maxDin);
+                }
+                orden = n + 1;
+                maxPorTab[tab] = orden;
+            }
+
+            var nuevo = new PacienteCampoRigidoDef
             {
                 TenantId = tid,
                 CampoKey = info.Key,
-                TabKey = info.TabDefault,
-                Orden = n,
+                TabKey = tab,
+                Orden = orden,
                 Ancho = info.AnchoDefault,
                 Oculto = false,
-            });
+            };
+            db.PacienteCampoRigidoDefs.Add(nuevo);
+            rigTracked.Add(nuevo);
+            porKey[info.Key] = nuevo;
         }
         try
         {

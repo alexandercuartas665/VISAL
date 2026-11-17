@@ -120,6 +120,28 @@ public sealed class RelacionFacturasSelectorV3Tests
     }
 
     [Fact]
+    public async Task Regimen_sale_del_Tipo_Usuario_de_Admision_no_del_campo_Regimen()
+    {
+        var s = await SembrarBaseAsync();
+        var pid = await SembrarPacienteAsync(s, s.ContratoId, s.SucursalId);
+        var tu = new CatalogoPaciente { Id = Guid.NewGuid(), TenantId = TenantId, Tipo = CatalogoPacienteTipo.TipoUsuario, Codigo = "04", Nombre = "Subsidiado" };
+        s.Ctx.CatalogosPaciente.Add(tu);
+        var pac = await s.Ctx.Pacientes.SingleAsync(p => p.Id == pid);
+        pac.TipoUsuarioId = tu.Id;
+        pac.Regimen = "Atencion"; // texto libre que NO debe salir
+        var pid2 = await SembrarPacienteAsync(s, s.ContratoId, s.SucursalId, doc: "2"); // sin Tipo Usuario
+        await s.Ctx.SaveChangesAsync();
+        await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 7, 15, 10, 0, 0, TimeSpan.Zero));
+        await SembrarHcCerradaAsync(s, pid2, new DateTimeOffset(2026, 7, 16, 10, 0, 0, TimeSpan.Zero));
+
+        var sel = new RelacionFacturasSelector(new TestDbContextFactory(s.Ctx, new FakeTenantContext { TenantId = TenantId }));
+        var hechos = await sel.SelectAsync(Filtros(s, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31)));
+
+        Assert.Equal("Subsidiado", hechos.Single(h => h.Paciente.Id == pid).TipoUsuarioNombre);
+        Assert.Null(hechos.Single(h => h.Paciente.Id == pid2).TipoUsuarioNombre);
+    }
+
+    [Fact]
     public async Task Excluye_HCs_fuera_del_rango_de_fecha_cierre()
     {
         var s = await SembrarBaseAsync();

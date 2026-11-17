@@ -10,6 +10,7 @@
 @using Visal.Infrastructure.Pdf
 @inject IAsignacionService AsigSvc
 @inject IAutorizacionExtractorService Extractor
+@inject ICuotaCopagoService CuotaSvc
 @inject Microsoft.AspNetCore.Hosting.IWebHostEnvironment Env
 
 @if (Visible && _info is not null)
@@ -65,6 +66,52 @@
                         <div class="asg-hint">Se autollena con la IA al subir el PDF. Si no lo detecta o lo lee mal, escríbelo/corrígelo aquí.</div>
                         @if (_extBusy && string.IsNullOrWhiteSpace(_codigo)) { <div class="asg-hint">Extrayendo el número con IA…</div> }
                     </div>
+
+                    @* ── Pago del paciente (cuota moderadora / copago): se guarda aparte del numero/PDF,
+                       asi se puede registrar aunque la autorizacion siga pendiente. ── *@
+                    @if (!_draft)
+                    {
+                        <div class="ase-f aut-pago">
+                            <label>Cuota moderadora / Copago</label>
+                            <div class="aut-pago-tipos">
+                                <button type="button" class="btn btn-sm @(_pTipo == "SIN_CARGO" ? "btn-secondary" : "btn-outline-secondary")" @onclick="@(() => SetPTipo("SIN_CARGO"))">Sin cargo</button>
+                                <button type="button" class="btn btn-sm @(_pTipo == "CUOTA" ? "btn-primary" : "btn-outline-primary")" @onclick="@(() => SetPTipo("CUOTA"))">Cuota moderadora</button>
+                                <button type="button" class="btn btn-sm @(_pTipo == "COPAGO" ? "btn-success" : "btn-outline-success")" @onclick="@(() => SetPTipo("COPAGO"))">Copago</button>
+                            </div>
+                            @if (_pTipo is "CUOTA" or "COPAGO")
+                            {
+                                <div class="aut-pago-vals">
+                                    <div>
+                                        <span class="asg-hint">Rango (opcional)</span>
+                                        <select class="form-select form-select-sm" value="@(_pCategoria ?? "")" @onchange="OnPCategoria">
+                                            <option value="">--</option>
+                                            @foreach (var c in _catPago.Where(x => x.Tipo == _pTipo))
+                                            {
+                                                <option value="@c.Categoria">@c.Categoria ($ @c.ValorSugerido.ToString("N0"))</option>
+                                            }
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <span class="asg-hint">Valor pagado *</span>
+                                        <input type="number" class="form-control form-control-sm" min="0" step="100" @bind="_pReal" />
+                                    </div>
+                                </div>
+                            }
+                            <div class="aut-pago-acts">
+                                <button type="button" class="btn btn-outline-primary btn-sm" @onclick="GuardarPagoAsync" disabled="@(_pBusy || string.IsNullOrEmpty(_pTipo))">
+                                    @(_pBusy ? "Guardando..." : "💾 Guardar pago")
+                                </button>
+                                @if (_pMsg is not null)
+                                {
+                                    <span class="asg-hint @(_pOk ? "asg-hint-ok" : "aut-pago-err")">@_pMsg</span>
+                                }
+                                else if (string.IsNullOrEmpty(_info.TipoPago))
+                                {
+                                    <span class="asg-hint aut-pago-warn">Sin registrar</span>
+                                }
+                            </div>
+                        </div>
+                    }
 
                     @if (!string.IsNullOrWhiteSpace(_pdfUrl))
                     {
@@ -197,6 +244,12 @@
     .asg-input-row > input, .asg-input-row > select { flex:1; min-width:0; }
     .asg-hint { font-size:11px; color:#64748b; margin-top:4px; }
     .asg-hint-ok { color:#059669; }
+    .aut-pago { border:1px solid #e2e8f0; border-radius:8px; padding:8px 10px; background:#f8fafc; }
+    .aut-pago-tipos { display:flex; gap:6px; flex-wrap:wrap; }
+    .aut-pago-vals { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:8px; }
+    .aut-pago-acts { display:flex; gap:8px; align-items:center; margin-top:8px; flex-wrap:wrap; }
+    .aut-pago-err { color:#b91c1c; }
+    .aut-pago-warn { color:#b45309; }
     .asg-pdf-frame { width:100%; height:55vh; border:1px solid #e2e8f0; border-radius:8px; margin-top:8px; background:#525659; }
     /* Layout de dos columnas: documento (izq) + datos (der). */
     .asg-cols { display:flex; gap:16px; align-items:stretch; }
@@ -241,6 +294,8 @@
     [Parameter] public string? Origen { get; set; }
     [Parameter] public EventCallback OnCerrar { get; set; }
     [Parameter] public EventCallback OnGuardado { get; set; }
+    /// <summary>Se dispara al guardar el pago (cuota/copago) SIN cerrar el modal: el padre refresca su parrilla.</summary>
+    [Parameter] public EventCallback OnPagoGuardado { get; set; }
     // Modo BORRADOR (crear asignacion): la asignacion aun no existe. Se pasa la info del
     // paciente/servicio/contrato en DraftInfo (AsignacionId = Guid.Empty) y, al confirmar,
     // el modal devuelve (numero, pdfUrl) por OnDraftConfirmado en vez de persistir.
@@ -258,6 +313,65 @@
         _exNombre = _exTipoDoc = _exDocumento = _exCorreo = _exDireccion = null; _exTelefonos = "";
         _metaBusy = false; _metaMsg = null; _aplicarTel = _aplicarCorreo = _aplicarDir = false;
         _pdfHash = null; _dupInfo = null; _dupConfirmado = false;
+        _pTipo = ""; _pCategoria = null; _pSugerido = null; _pReal = null; _pBusy = false; _pMsg = null; _pOk = false;
+    }
+
+    // ── Pago del paciente (cuota moderadora / copago) ───────────────────────
+    private IReadOnlyList<CuotaCopagoDto> _catPago = Array.Empty<CuotaCopagoDto>();
+    private string _pTipo = "";
+    private string? _pCategoria;
+    private decimal? _pSugerido;
+    private decimal? _pReal;
+    private bool _pBusy;
+    private string? _pMsg;
+    private bool _pOk;
+
+    private void SetPTipo(string tipo)
+    {
+        if (_pTipo != tipo)
+        {
+            _pCategoria = null; _pSugerido = null;
+            if (tipo == "SIN_CARGO") { _pReal = null; }
+        }
+        _pTipo = tipo; _pMsg = null;
+    }
+
+    private void OnPCategoria(ChangeEventArgs e)
+    {
+        _pCategoria = string.IsNullOrWhiteSpace(e.Value?.ToString()) ? null : e.Value!.ToString();
+        var c = _catPago.FirstOrDefault(x => x.Tipo == _pTipo && x.Categoria == _pCategoria);
+        _pSugerido = c?.ValorSugerido;
+        // El valor sugerido del rango prellena el pagado si aun esta vacio (editable).
+        if (c is not null && _pReal is null) { _pReal = c.ValorSugerido; }
+        _pMsg = null;
+    }
+
+    private async Task GuardarPagoAsync()
+    {
+        if (AsignacionId is not Guid aid || string.IsNullOrEmpty(_pTipo)) { return; }
+        _pBusy = true; _pMsg = null;
+        try
+        {
+            var actor = await Actor();
+            var ok = await RetryDb(() => AsigSvc.ActualizarPagoAsync(aid, _pTipo, _pCategoria, _pSugerido, _pReal, actor));
+            _pOk = ok;
+            _pMsg = ok ? "Pago guardado." : "No se encontro la asignacion.";
+            if (ok && _info is not null)
+            {
+                var sin = _pTipo == "SIN_CARGO";
+                _info = _info with
+                {
+                    TipoPago = _pTipo,
+                    CategoriaCopago = sin ? null : _pCategoria,
+                    ValorPagoSugerido = sin ? null : _pSugerido,
+                    ValorPagoReal = sin ? null : _pReal,
+                };
+                await OnPagoGuardado.InvokeAsync();
+            }
+        }
+        catch (InvalidOperationException ex) { _pOk = false; _pMsg = ex.Message; }
+        catch (Exception) { _pOk = false; _pMsg = "No se pudo guardar el pago. Intenta de nuevo."; }
+        finally { _pBusy = false; }
     }
 
     private AutorizacionInfoDto? _info;
@@ -324,6 +438,11 @@
             ResetEstado();
             _info = await RetryDb(() => AsigSvc.GetAutorizacionAsync(aid));
             _codigo = _info?.CodigoAutorizacion ?? "";
+            _pTipo = _info?.TipoPago ?? "";
+            _pCategoria = _info?.CategoriaCopago;
+            _pSugerido = _info?.ValorPagoSugerido;
+            _pReal = _info?.ValorPagoReal;
+            if (_catPago.Count == 0) { _catPago = await RetryDb(() => CuotaSvc.ListarAsync(soloActivos: true)); }
             _pdfUrl = _info?.PdfAutorizacionUrl;
             // Si ya hay PDF cargado, lo mostramos embebido de una vez: este modal ES el
             // visor de la autorizacion de ESTE registro (no se abre otra pagina).

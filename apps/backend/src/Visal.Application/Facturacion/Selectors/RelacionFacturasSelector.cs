@@ -33,6 +33,12 @@ namespace Visal.Application.Facturacion.Selectors;
 // Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
 public sealed class RelacionFacturasSelector(IApplicationDbContextFactory dbFactory) : IRelacionFacturasSelector
 {
+    // Prioridad de la heuristica: solo cuota/copago reales (SIN_CARGO = registrado sin cobro, no
+    // aporta valores al snapshot y no debe desplazar a la asignacion mas cercana en fecha).
+    private static bool TienePagoConValor(string? tipoPago)
+        => string.Equals(tipoPago, "CUOTA", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(tipoPago, "COPAGO", StringComparison.OrdinalIgnoreCase);
+
     public async Task<IReadOnlyList<RelacionFacturasHecho>> SelectAsync(
         RelacionFacturasFiltros filtros,
         CancellationToken ct = default)
@@ -405,11 +411,11 @@ public sealed class RelacionFacturasSelector(IApplicationDbContextFactory dbFact
                 var fechaCierre = hc.FechaCierre?.LocalDateTime ?? hc.UpdatedAt?.LocalDateTime ?? hc.CreatedAt.LocalDateTime;
                 asigRelevante = listaAsig
                     .Where(a => a.ContratoCodigo == contrato.CodigoContrato)
-                    .OrderByDescending(a => !string.IsNullOrEmpty(a.TipoPago))
+                    .OrderByDescending(a => TienePagoConValor(a.TipoPago))
                     .ThenBy(a => Math.Abs((a.FechaInicio.ToDateTime(TimeOnly.MinValue) - fechaCierre).TotalDays))
                     .FirstOrDefault()
                     ?? listaAsig
-                        .OrderByDescending(a => !string.IsNullOrEmpty(a.TipoPago))
+                        .OrderByDescending(a => TienePagoConValor(a.TipoPago))
                         .ThenBy(a => Math.Abs((a.FechaInicio.ToDateTime(TimeOnly.MinValue) - fechaCierre).TotalDays))
                         .FirstOrDefault();
             }

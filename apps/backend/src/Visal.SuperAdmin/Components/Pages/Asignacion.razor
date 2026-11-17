@@ -550,6 +550,10 @@ else
                         <input type="checkbox" @bind="_fSoloPendiente" />
                         <span>Solo autorizaciones pendientes</span>
                     </label>
+                    <label class="asg-chk" title="Asignaciones sin cuota moderadora/copago registrado, o con cuota/copago sin valor pagado. Las marcadas 'Sin cargo' cuentan como registradas.">
+                        <input type="checkbox" @bind="_fSoloSinPago" />
+                        <span>Solo sin copago / cuota moderadora cargado</span>
+                    </label>
                 </div>
                 <div class="ase-f ase-f-wide">
                     <div class="d-flex gap-2">
@@ -586,6 +590,7 @@ else
                             <th>Vigencia</th>
                             <th>Fecha inicio</th>
                             <th>Autorizacion</th>
+                            <th>Copago / Cuota</th>
                             <th>Observaciones</th>
                             <th class="text-center">Acciones</th>
                         </tr>
@@ -593,7 +598,7 @@ else
                     <tbody>
                         @if (_listado.Count == 0)
                         {
-                            <tr><td colspan="16" class="text-center text-muted p-3">Sin resultados para los filtros aplicados.</td></tr>
+                            <tr><td colspan="17" class="text-center text-muted p-3">Sin resultados para los filtros aplicados.</td></tr>
                         }
                         @foreach (var a in _listado)
                         {
@@ -622,6 +627,29 @@ else
                                         <span>@(a.CodigoAutorizacion ?? "")</span>
                                         <button class="btn btn-outline-secondary btn-sm asg-aut-btn" title="Ver / editar la autorización (número y PDF)"
                                                 @onclick="() => AbrirModalAutorizacion(a)">Ver</button>
+                                    }
+                                </td>
+                                <td class="mono">
+                                    @switch (a.TipoPago)
+                                    {
+                                        case "CUOTA":
+                                        case "COPAGO":
+                                            var lbl = a.TipoPago == "CUOTA" ? "Cuota" : "Copago";
+                                            @if (a.ValorPagoReal is decimal vp && vp > 0)
+                                            {
+                                                <span class="asg-pago-cel asg-pago-@a.TipoPago.ToLower()">@lbl $ @vp.ToString("N0")</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="asg-pago-cel asg-pago-falta" title="Tipo registrado pero sin valor pagado">@lbl (sin valor)</span>
+                                            }
+                                            break;
+                                        case "SIN_CARGO":
+                                            <span class="asg-pago-cel asg-pago-sin">Sin cargo</span>
+                                            break;
+                                        default:
+                                            <span class="asg-pago-cel asg-pago-falta" title="Cárgalo desde el botón Ver / Completar de la autorización">Sin registrar</span>
+                                            break;
                                     }
                                 </td>
                                 <td class="text-muted small">@(a.Observaciones ?? "")</td>
@@ -745,7 +773,8 @@ else
    permite editar numero y subir PDF. Reusa IAsignacionService (sin duplicar logica). *@
 <AutorizacionModal AsignacionId="_autAsigId" Visible="_autVisible" Origen="Asignaciones"
                    OnCerrar="() => _autVisible = false"
-                   OnGuardado="OnAutorizacionGuardada" />
+                   OnGuardado="OnAutorizacionGuardada"
+                   OnPagoGuardado="AplicarFiltrosListado" />
 
 @* Asistente en modo BORRADOR (crear asignacion): sin AsignacionId; devuelve numero + PDF. *@
 <AutorizacionModal Visible="_draftAutVisible" DraftInfo="_draftAutInfo"
@@ -983,6 +1012,11 @@ else
     .asg-chk { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #334155; cursor: pointer; }
     .asg-chk input { width: 15px; height: 15px; }
     .asg-aut-pend { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: #fee2e2; color: #b91c1c; }
+    .asg-pago-cel { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+    .asg-pago-cuota { background: #dbeafe; color: #1d4ed8; }
+    .asg-pago-copago { background: #dcfce7; color: #15803d; }
+    .asg-pago-sin { background: #f1f5f9; color: #475569; }
+    .asg-pago-falta { background: #fef3c7; color: #b45309; }
     .asg-aut-btn { padding: 0 8px; line-height: 18px; margin-left: 6px; }
     .asg-del-confirm { display:inline-flex; align-items:center; gap:4px; white-space:nowrap; font-size:11px; color:#b91c1c; font-weight:600; }
     .asg-del-confirm .btn { padding:0 8px; line-height:20px; }
@@ -1268,6 +1302,7 @@ else
     private string _fDocumento = "";
     private string _fNombreServ = "";
     private bool _fSoloPendiente;
+    private bool _fSoloSinPago;
     private string _fSede = "";
     private string _fAutorizacion = "";
     private string _fConsecutivo = "";
@@ -1332,7 +1367,8 @@ else
                 string.IsNullOrWhiteSpace(_fSede) ? null : _fSede,
                 string.IsNullOrWhiteSpace(_fAutorizacion) ? null : _fAutorizacion,
                 consec,
-                creadoPor);
+                creadoPor,
+                SoloSinPago: _fSoloSinPago);
             var lista = await Svc.ListarAsignacionesAsync(filtro);
             // Filtro por documento en memoria (evita joinar en el backend por texto libre).
             if (!string.IsNullOrWhiteSpace(_fDocumento))
@@ -1354,6 +1390,7 @@ else
         _fAseId = _fContratoCod = _fModulo = _fDocumento = _fNombreServ = _fSede = _fAutorizacion = "";
         _fConsecutivo = _fCreadoPorId = "";
         _fSoloPendiente = false;
+        _fSoloSinPago = false;
         await AplicarFiltrosListado();
     }
 

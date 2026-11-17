@@ -581,6 +581,51 @@ public sealed class AsignacionService(ITenantContext tenant, IAuditWriter audit,
         return true;
     }
 
+    public async Task<bool> ActualizarPagoAsync(
+        Guid asignacionId, string tipoPago, string? categoria, decimal? valorSugerido, decimal? valorReal,
+        Guid actor, CancellationToken ct = default)
+    {
+        var tipo = (tipoPago ?? "").Trim().ToUpperInvariant();
+        if (tipo is not ("CUOTA" or "COPAGO" or "SIN_CARGO"))
+        {
+            throw new InvalidOperationException("Tipo de pago invalido: elige Sin cargo, Cuota moderadora o Copago.");
+        }
+        if (tipo != "SIN_CARGO" && (valorReal is null || valorReal < 0))
+        {
+            throw new InvalidOperationException("Indica el valor que pago el paciente.");
+        }
+        if (valorSugerido < 0) { valorSugerido = null; }
+
+        using var db = dbFactory.Create();
+        var a = await db.Asignaciones.FirstOrDefaultAsync(x => x.Id == asignacionId, ct);
+        if (a is null) { return false; }
+
+        var antes = new { tipoPago = a.TipoPago, categoria = a.CategoriaCopago, valorSugerido = a.ValorPagoSugerido, valorReal = a.ValorPagoReal };
+        a.TipoPago = tipo;
+        if (tipo == "SIN_CARGO")
+        {
+            a.CategoriaCopago = null; a.ValorPagoSugerido = null; a.ValorPagoReal = null;
+        }
+        else
+        {
+            a.CategoriaCopago = string.IsNullOrWhiteSpace(categoria) ? null : categoria.Trim();
+            a.ValorPagoSugerido = valorSugerido;
+            a.ValorPagoReal = valorReal;
+        }
+        long? cons = a.Consecutivo;
+        audit.Write(db, actor, "Asignacion.PagoActualizado", nameof(Asignacion), a.Id,
+            previousValue: antes,
+            newValue: new
+            {
+                tipoPago = a.TipoPago, categoria = a.CategoriaCopago,
+                valorSugerido = a.ValorPagoSugerido, valorReal = a.ValorPagoReal,
+                codigoPublico = cons is long cc && cc > 0 ? CodigoPublico.Asignacion(cc) : null,
+            },
+            tenantId: tenant.TenantId);
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
     public async Task<bool> CompletarAutorizacionAsync(
         Guid asignacionId, string codigoAutorizacion, string? pdfAutorizacionUrl,
         Guid actor, string? pdfAutorizacionHash = null, string? origenModulo = null,
@@ -686,7 +731,8 @@ public sealed class AsignacionService(ITenantContext tenant, IAuditWriter audit,
             {
                 a.Id, a.CodigoAutorizacion, a.PdfAutorizacionUrl, a.NombreServicio, a.ContratoCodigo,
                 p.PrimerNombre, p.PrimerApellido, p.TipoDocumento, p.NumeroDocumento,
-                PacienteId = p.Id, p.CodigoPaisTelefono, p.Telefono, p.Email, p.Direccion
+                PacienteId = p.Id, p.CodigoPaisTelefono, p.Telefono, p.Email, p.Direccion,
+                a.TipoPago, a.CategoriaCopago, a.ValorPagoSugerido, a.ValorPagoReal
             }).FirstOrDefaultAsync(ct);
         if (row is null) { return null; }
         var nombre = ((row.PrimerNombre ?? "") + " " + (row.PrimerApellido ?? "")).Trim();
@@ -696,7 +742,8 @@ public sealed class AsignacionService(ITenantContext tenant, IAuditWriter audit,
             : (string.IsNullOrWhiteSpace(row.CodigoPaisTelefono) ? row.Telefono : $"{row.CodigoPaisTelefono} {row.Telefono}");
         return new AutorizacionInfoDto(row.Id, row.CodigoAutorizacion, row.PdfAutorizacionUrl,
             row.NombreServicio, row.ContratoCodigo, nombre, doc,
-            row.PacienteId, tel, row.Email, row.Direccion);
+            row.PacienteId, tel, row.Email, row.Direccion,
+            row.TipoPago, row.CategoriaCopago, row.ValorPagoSugerido, row.ValorPagoReal);
     }
 
     public async Task<bool> ActualizarContactoPacienteAsync(ActualizarContactoPacienteRequest req, Guid actor, CancellationToken ct = default)
@@ -808,6 +855,12 @@ public sealed class AsignacionService(ITenantContext tenant, IAuditWriter audit,
         {
             q = q.Where(x => x.a.AutorizacionPendiente);
         }
+        if (filtro.SoloSinPago)
+        {
+            // Sin registrar, o cuota/copago sin valor pagado. "SIN_CARGO" = cargado (no paga).
+            q = q.Where(x => x.a.TipoPago == null || x.a.TipoPago == ""
+                || ((x.a.TipoPago == "CUOTA" || x.a.TipoPago == "COPAGO") && (x.a.ValorPagoReal == null || x.a.ValorPagoReal <= 0)));
+        }
         if (!string.IsNullOrWhiteSpace(filtro.CodigoAutorizacionFiltro))
         {
             var ca = filtro.CodigoAutorizacionFiltro.Trim().ToLower();
@@ -866,7 +919,9 @@ public sealed class AsignacionService(ITenantContext tenant, IAuditWriter audit,
                 x.a.AutorizacionPendiente,
                 x.a.PdfAutorizacionUrl,
                 Consecutivo = (long?)x.a.Consecutivo,
-                x.a.CreatedBy
+                x.a.CreatedBy,
+                x.a.TipoPago,
+                x.a.ValorPagoReal
             })
             .ToListAsync(ct);
 
@@ -909,7 +964,8 @@ public sealed class AsignacionService(ITenantContext tenant, IAuditWriter audit,
             r.Sucursal,
             r.AutorizacionPendiente, r.PdfAutorizacionUrl,
             r.Consecutivo,
-            r.CreatedBy is Guid cb && creadores.TryGetValue(cb, out var cn) ? cn : null)).ToList();
+            r.CreatedBy is Guid cb && creadores.TryGetValue(cb, out var cn) ? cn : null,
+            r.TipoPago, r.ValorPagoReal)).ToList();
     }
 
     // Construye el nombre visible de un usuario a partir de los campos del PlatformUser

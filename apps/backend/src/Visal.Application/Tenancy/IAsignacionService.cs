@@ -62,7 +62,11 @@ public sealed record AutorizacionInfoDto(
     string? NombreServicio, string? ContratoCodigo, string? PacienteNombre, string? PacienteDoc,
     // Contacto actual del paciente, para comparar con lo extraido de la autorizacion.
     Guid PacienteId = default, string? PacienteTelefono = null, string? PacienteCorreo = null,
-    string? PacienteDireccion = null);
+    string? PacienteDireccion = null,
+    // Pago del paciente (cuota moderadora / copago) registrado en la asignacion.
+    // TipoPago: "CUOTA", "COPAGO", "SIN_CARGO" (registrado explicitamente sin cobro) o null (sin registrar).
+    string? TipoPago = null, string? CategoriaCopago = null,
+    decimal? ValorPagoSugerido = null, decimal? ValorPagoReal = null);
 
 /// <summary>Resultado del control anti-duplicados de una autorizacion. Cada match trae
 /// una descripcion de DONDE esta en uso (paciente + AS-xxxxxx) para el aviso al usuario.</summary>
@@ -408,7 +412,10 @@ public sealed record AsignacionListadoFiltro(
     // Consecutivo publico del servicio (AS-NNNNNN -> numero). Match EXACTO. Null = todos.
     long? ConsecutivoFiltro = null,
     // Usuario que registro la asignacion (CreatedBy). Match EXACTO por id. Null = todos.
-    Guid? CreadoPorUserId = null);
+    Guid? CreadoPorUserId = null,
+    // Solo asignaciones SIN cuota moderadora/copago cargado: TipoPago sin registrar, o CUOTA/COPAGO
+    // sin valor pagado (> 0). Las marcadas "SIN_CARGO" cuentan como cargadas.
+    bool SoloSinPago = false);
 
 /// <summary>Fila del listado tabular de asignaciones. Incluye todos los datos
 /// relacionados (paciente + aseguradora + contrato + programacion) para que el
@@ -429,7 +436,9 @@ public sealed record AsignacionListadoDto(
     long? Consecutivo = null,
     // Nombre del usuario que registro la asignacion (CreatedBy resuelto via PlatformUsers).
     // Null si CreatedBy es null o no se pudo resolver.
-    string? CreadoPorNombre = null);
+    string? CreadoPorNombre = null,
+    // Pago del paciente: "CUOTA" / "COPAGO" / "SIN_CARGO" / null (sin registrar) + valor pagado.
+    string? TipoPago = null, decimal? ValorPagoReal = null);
 
 /// <summary>Usuario que ha creado asignaciones, para el dropdown del filtro
 /// "usuario que asigno" del Listado. Id = PlatformUser.Id; Nombre = nombre resuelto.</summary>
@@ -488,6 +497,14 @@ public interface IAsignacionService
     /// la marca de pendiente. Si el contrato exige PDF y la asignacion no tiene uno (ni se
     /// adjunta ahora) lanza InvalidOperationException. Se puede completar en cualquier
     /// estado de la asignacion (es un dato administrativo).</summary>
+    /// <summary>Registra/actualiza el pago del paciente de una asignacion ya creada (cuota
+    /// moderadora o copago), desde el modal de Autorizacion. <paramref name="tipoPago"/>:
+    /// "CUOTA", "COPAGO" o "SIN_CARGO" (el paciente no paga; queda registrado como cargado).
+    /// Con CUOTA/COPAGO el valor pagado es obligatorio (&gt;= 0). Queda auditado.</summary>
+    Task<bool> ActualizarPagoAsync(
+        Guid asignacionId, string tipoPago, string? categoria, decimal? valorSugerido, decimal? valorReal,
+        Guid actor, CancellationToken ct = default);
+
     Task<bool> CompletarAutorizacionAsync(
         Guid asignacionId, string codigoAutorizacion, string? pdfAutorizacionUrl,
         Guid actor, string? pdfAutorizacionHash = null, string? origenModulo = null,

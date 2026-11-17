@@ -47,7 +47,7 @@ public sealed class PuppeteerQuotePdfRenderer : IQuotePdfRenderer
         return await RenderPageAsync(page, url, waitForSelector);
     }
 
-    public async Task<IReadOnlyList<byte[]>> RenderUrlsToPdfAsync(IReadOnlyList<string> urls, string waitForSelector, int maxConcurrency = 4, IProgress<int>? onProgress = null, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<byte[]>> RenderUrlsToPdfAsync(IReadOnlyList<string> urls, string waitForSelector, int maxConcurrency = 4, IProgress<int>? onProgress = null, CancellationToken cancellationToken = default, Func<string, string>? prepararUrl = null)
     {
         if (urls.Count == 0) { return Array.Empty<byte[]>(); }
         var hechos = 0;
@@ -70,15 +70,32 @@ public sealed class PuppeteerQuotePdfRenderer : IQuotePdfRenderer
             await gate.WaitAsync(cancellationToken);
             tasks.Add(Task.Run(async () =>
             {
+                // Un reintento por URL (con la URL re-preparada: token nuevo). Se loguea la URL
+                // SIN preparar (plantilla), asi el token de impresion no queda en el log.
+                const int maxIntentos = 2;
                 try
                 {
-                    await using var page = await browser.NewPageAsync();
-                    res[idx] = await RenderPageAsync(page, url, waitForSelector);
-                }
-                catch (Exception ex)
-                {
-                    _log.LogWarning(ex, "RenderUrlsToPdf: fallo el render de {Url}; se omite esa pagina", url);
-                    res[idx] = Array.Empty<byte>();
+                    for (var intento = 1; ; intento++)
+                    {
+                        try
+                        {
+                            var destino = prepararUrl is null ? url : prepararUrl(url);
+                            await using var page = await browser.NewPageAsync();
+                            res[idx] = await RenderPageAsync(page, destino, waitForSelector);
+                            break;
+                        }
+                        catch (Exception ex) when (intento < maxIntentos && !cancellationToken.IsCancellationRequested)
+                        {
+                            _log.LogWarning("RenderUrlsToPdf: fallo el render de {Url} (intento {Intento}): {Error}; se reintenta",
+                                url, intento, ex.Message);
+                        }
+                        catch (Exception ex)
+                        {
+                            _log.LogWarning(ex, "RenderUrlsToPdf: fallo el render de {Url}; se omite esa pagina", url);
+                            res[idx] = Array.Empty<byte>();
+                            break;
+                        }
+                    }
                 }
                 finally
                 {
@@ -101,7 +118,15 @@ public sealed class PuppeteerQuotePdfRenderer : IQuotePdfRenderer
             WaitUntil = new[] { WaitUntilNavigation.DOMContentLoaded },
             Timeout = 30000
         });
-        await page.WaitForSelectorAsync(waitForSelector, new WaitForSelectorOptions { Timeout = 25000 });
+        // Espera el selector de "render terminado" O el marcador de error de la pagina
+        // (.pack-error, p. ej. "Enlace invalido o expirado"): asi un error falla de inmediato
+        // en vez de quemar los 25 s del timeout por cada documento.
+        await page.WaitForSelectorAsync($"{waitForSelector}, .pack-error", new WaitForSelectorOptions { Timeout = 25000 });
+        if (await page.QuerySelectorAsync(".pack-error") is { } errEl)
+        {
+            var msg = await errEl.EvaluateFunctionAsync<string>("e => e.textContent");
+            throw new InvalidOperationException($"La pagina reporto error: {msg?.Trim()}");
+        }
 
         // Las firmas, logos y QR son <img src="/uploads/..."> que se descargan por red
         // DESPUES de que aparece el selector del render. Si capturamos el PDF sin esperarlas,

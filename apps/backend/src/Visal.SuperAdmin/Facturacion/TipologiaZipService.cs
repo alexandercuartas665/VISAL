@@ -49,6 +49,45 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// <see cref="Cup"/> (CodigoRips), <see cref="CupNombre"/> y <see cref="Sede"/> solo se
     /// llenan en las partes de historia cuando el archivo pide rotulo separador por CUP;
     /// null = la parte no tiene CUP (autorizacion/firma/anexo) y no dispara separador.</summary>
+    /// <summary>Marcador del token de impresion en las URLs del lote; se reemplaza por un
+    /// token real (de vida corta, un solo uso) justo antes de renderizar cada pagina.</summary>
+    private const string TokenPendiente = "__HCTK__";
+
+    private static readonly Regex HcFormIdRx = new(@"/p/hc-form/([0-9a-fA-F-]{36})\?", RegexOptions.Compiled);
+
+    /// <summary>Mintea el token de impresion de la HC de <paramref name="url"/> en el momento
+    /// del render (lo invoca el renderizador justo antes de navegar, y otra vez si reintenta).</summary>
+    private string MintarTokenEnUrl(string url, Guid? tenantId)
+    {
+        if (tenantId is not Guid tid || !url.Contains(TokenPendiente, StringComparison.Ordinal)) { return url; }
+        var m = HcFormIdRx.Match(url);
+        if (!m.Success || !Guid.TryParse(m.Groups[1].Value, out var hcId)) { return url; }
+        return url.Replace(TokenPendiente, _printTokens.Mint(hcId, tid), StringComparison.Ordinal);
+    }
+
+    /// <summary>Historias que NO se pudieron renderizar (su posicion quedo vacia tras el
+    /// reintento), como lineas legibles "paciente | HC" para avisar en el ZIP/PDF.</summary>
+    private static List<string> HistoriasNoGeneradas(
+        IEnumerable<(string Quien, IReadOnlyList<PartePlan> Partes)> grupos, IReadOnlyList<byte[]> rendered)
+    {
+        var res = new List<string>();
+        foreach (var (quien, partes) in grupos)
+        {
+            foreach (var p in partes)
+            {
+                if (p.RenderIdx < 0 || p.RenderIdx >= rendered.Count) { continue; }
+                if (rendered[p.RenderIdx] is { Length: > 0 }) { continue; }
+                res.Add($"{quien} | {p.Etiqueta ?? "HC"}{(p.HcId != Guid.Empty ? $" ({p.HcId})" : "")}");
+            }
+        }
+        return res;
+    }
+
+    private static string NotaNoGeneradas(List<string> fallidas) =>
+        $"ATENCION: {fallidas.Count} historia(s) no se pudieron generar y NO estan en este archivo.\n" +
+        "Vuelve a descargar el archivo; si se repite, reporta este listado a soporte.\n\n" +
+        string.Join("\n", fallidas);
+
     private readonly record struct PartePlan(
         byte[]? Inline, int RenderIdx, string? Cup = null, string? CupNombre = null, string? Sede = null,
         string? Etiqueta = null, Guid HcId = default);
@@ -182,13 +221,17 @@ public sealed class TipologiaZipService : ITipologiaZipService
             progreso?.Report(new ZipProgreso("Renderizando formularios", 0, allUrls.Count));
             var onEach = progreso is null ? null
                 : new Progress<int>(n => progreso.Report(new ZipProgreso("Renderizando formularios", n, allUrls.Count)));
-            rendered = await _pdfRenderer.RenderUrlsToPdfAsync(allUrls, ".pack-doc", MaxRenderConcurrency, onEach, ct);
+            var tidRender = _tenant.TenantId;
+            rendered = await _pdfRenderer.RenderUrlsToPdfAsync(allUrls, ".pack-doc", MaxRenderConcurrency, onEach, ct,
+                prepararUrl: u => MintarTokenEnUrl(u, tidRender));
         }
         else
         {
             rendered = Array.Empty<byte[]>();
         }
         progreso?.Report(new ZipProgreso("Armando PDFs", allUrls.Count, allUrls.Count));
+        var noGeneradas = HistoriasNoGeneradas(
+            planes.Select(x => ($"{x.pac.TipoDocumento} {x.pac.Documento} {x.pac.Nombre}", (IReadOnlyList<PartePlan>)x.partes)), rendered);
 
         // Membrete tambien en las HISTORIAS renderizadas (no solo en los anexos): una sola
         // consulta para todas las HC del lote. Null si el archivo no tiene el flag.
@@ -229,6 +272,8 @@ public sealed class TipologiaZipService : ITipologiaZipService
             var unico = salidas.Count == 0
                 ? PaginaNota(notaSinContenido)
                 : FusionarPdfs(salidas.Select(s => s.Pdf).ToList());
+            // Aviso al final del PDF si alguna historia no se pudo generar (no se omite en silencio).
+            if (noGeneradas.Count > 0) { unico = FusionarPdfs(new List<byte[]> { unico, PaginaNota(NotaNoGeneradas(noGeneradas)) }); }
             var nombrePdf = SanitizarNombre($"{archivo.Alias}_{detalle.Metadata.Nombre}") + ".pdf";
             return new ArchivoExportado(unico, "application/pdf", nombrePdf);
         }
@@ -242,6 +287,13 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 var entry = zip.CreateEntry(name, CompressionLevel.Optimal);
                 await using var es = entry.Open();
                 await es.WriteAsync(pdf, ct);
+            }
+            // Aviso dentro del ZIP si alguna historia no se pudo generar (no se omite en silencio).
+            if (noGeneradas.Count > 0)
+            {
+                var entry = zip.CreateEntry("_HISTORIAS_NO_GENERADAS.txt", CompressionLevel.Optimal);
+                await using var es = entry.Open();
+                await es.WriteAsync(Encoding.UTF8.GetBytes(NotaNoGeneradas(noGeneradas)), ct);
             }
             // Si ningun paciente tenia contenido, dejamos una unica nota resumen para
             // que el ZIP no baje totalmente vacio y quede claro el porque.
@@ -321,13 +373,17 @@ public sealed class TipologiaZipService : ITipologiaZipService
             progreso?.Report(new ZipProgreso("Renderizando formularios", 0, allUrls.Count));
             var onEach = progreso is null ? null
                 : new Progress<int>(n => progreso.Report(new ZipProgreso("Renderizando formularios", n, allUrls.Count)));
-            rendered = await _pdfRenderer.RenderUrlsToPdfAsync(allUrls, ".pack-doc", MaxRenderConcurrency, onEach, ct);
+            var tidRender = _tenant.TenantId;
+            rendered = await _pdfRenderer.RenderUrlsToPdfAsync(allUrls, ".pack-doc", MaxRenderConcurrency, onEach, ct,
+                prepararUrl: u => MintarTokenEnUrl(u, tidRender));
         }
         else
         {
             rendered = Array.Empty<byte[]>();
         }
         progreso?.Report(new ZipProgreso("Armando PDFs", allUrls.Count, allUrls.Count));
+        var noGeneradas = HistoriasNoGeneradas(
+            unidades.Select(x => ($"{x.Pac.TipoDocumento} {x.Pac.Documento} {x.Pac.Nombre} | Aut {x.Codigo}", (IReadOnlyList<PartePlan>)x.Partes)), rendered);
 
         // Membrete tambien en las HISTORIAS renderizadas (ver modo por paciente).
         var membreteHc = archivo.MembreteHcCup
@@ -368,6 +424,8 @@ public sealed class TipologiaZipService : ITipologiaZipService
             var unico = salidas.Count == 0
                 ? PaginaNota(notaSinContenido)
                 : FusionarPdfs(salidas.Select(s => s.Pdf).ToList());
+            // Aviso al final del PDF si alguna historia no se pudo generar (no se omite en silencio).
+            if (noGeneradas.Count > 0) { unico = FusionarPdfs(new List<byte[]> { unico, PaginaNota(NotaNoGeneradas(noGeneradas)) }); }
             var nombrePdf = SanitizarNombre($"{archivo.Alias}_{detalle.Metadata.Nombre}") + ".pdf";
             return new ArchivoExportado(unico, "application/pdf", nombrePdf);
         }
@@ -380,6 +438,13 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 var entry = zip.CreateEntry(name, CompressionLevel.Optimal);
                 await using var es = entry.Open();
                 await es.WriteAsync(pdf, ct);
+            }
+            // Aviso dentro del ZIP si alguna historia no se pudo generar (no se omite en silencio).
+            if (noGeneradas.Count > 0)
+            {
+                var entry = zip.CreateEntry("_HISTORIAS_NO_GENERADAS.txt", CompressionLevel.Optimal);
+                await using var es = entry.Open();
+                await es.WriteAsync(Encoding.UTF8.GetBytes(NotaNoGeneradas(noGeneradas)), ct);
             }
             if (salidas.Count == 0)
             {
@@ -1803,7 +1868,10 @@ public sealed class TipologiaZipService : ITipologiaZipService
         if (hasta is DateOnly hr) { rango += $"&hasta={hr:yyyy-MM-dd}"; }
         return filas.Select(f =>
         {
-            var url = $"{baseUrl}/p/hc-form/{f.Id}?t={_printTokens.Mint(f.Id, tid)}&docs={docsRender}{rango}";
+            // El token NO se mintea aqui (al armar el lote) sino justo antes de navegar la
+            // pagina (MintarTokenEnUrl): en snapshots grandes el render dura mas que la vida
+            // del token y las ultimas historias salian "Enlace invalido o expirado" (omitidas).
+            var url = $"{baseUrl}/p/hc-form/{f.Id}?t={TokenPendiente}&docs={docsRender}{rango}";
             if (!rotuloPorCup) { return new UrlCup(url, null, null, null, f.Fecha, f.Consecutivo, f.Id); }
             var ci = cupInfo.TryGetValue(f.Id, out var c) ? c : ("", "", "");
             return new UrlCup(url, ci.Item1, ci.Item2, ci.Item3, f.Fecha, f.Consecutivo, f.Id);

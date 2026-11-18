@@ -100,7 +100,80 @@ public sealed class TipologiaZipService : ITipologiaZipService
 
     /// <summary>Fila de HC para ordenar el contenido "Formulario por tipo": id + fecha
     /// de atencion (para orden cronologico) — el CUP se resuelve aparte por lote.</summary>
-    private readonly record struct FilaHcOrden(Guid Id, DateTimeOffset Fecha, long Consecutivo = 0);
+    private readonly record struct FilaHcOrden(Guid Id, DateTimeOffset Fecha, long Consecutivo = 0, Guid? DocId = null);
+
+    /// <summary>Documento de evolucion/nota (<c>historia_clinica_documentos</c>) cerrado cuyo
+    /// formato es de un tipo pedido por "Formulario por tipo". Cuelga de una HC base (de la que
+    /// hereda CUP, autorizacion y token de render); <see cref="Fecha"/> = su fecha de atencion
+    /// (cuerpo, con fallback cierre/apertura).</summary>
+    private sealed record DocFormTipo(Guid DocId, Guid BaseHcId, Guid PacienteId, string Tipo, DateTimeOffset Fecha, long Consecutivo);
+
+    /// <summary>Documentos (evoluciones/notas guardadas como documento dentro de una HC base)
+    /// Cerrados de los pacientes dados, cuyo FormDefinition.Tipo esta en <paramref name="tipos"/>.
+    /// Desde el modelo PLANO (v0.155.0) la HC base ya no anida sus documentos, asi que deben
+    /// entrar por su propio contenido "Formulario por tipo" o se pierden del ZIP (caso
+    /// HC-021233, evolucion PP-FO-85_F colgada de la valoracion HC-017280). Base Inactiva = fuera.</summary>
+    private static async Task<List<DocFormTipo>> CargarDocumentosFormularioPorTipoAsync(
+        IApplicationDbContext db, IReadOnlyCollection<Guid> pacienteIds, IReadOnlyCollection<string> tipos, CancellationToken ct)
+    {
+        if (pacienteIds.Count == 0 || tipos.Count == 0) { return new(); }
+        var pids = pacienteIds.ToList();
+        var tps = tipos.ToList();
+        var rows = await (
+            from d in db.HistoriaClinicaDocumentos.AsNoTracking()
+            join h in db.HistoriasClinicas.AsNoTracking() on d.HistoriaClinicaId equals h.Id
+            join f in db.FormDefinitions.AsNoTracking() on d.FormDefinitionId equals f.Id
+            where pids.Contains(h.PacienteId)
+                  && d.Estado == HistoriaClinicaEstado.Cerrada
+                  && h.Estado != HistoriaClinicaEstado.Inactiva
+                  && f.Tipo != null && tps.Contains(f.Tipo)
+            select new
+            {
+                d.Id, BaseId = h.Id, h.PacienteId, Tipo = f.Tipo!, d.FormDefinitionId,
+                d.ValoresJson, d.FechaCierre, d.FechaApertura, d.Consecutivo,
+            })
+            .ToListAsync(ct);
+        if (rows.Count == 0) { return new(); }
+
+        // Schema de cada formato (una vez) para ubicar el/los campos IsFechaAtencion.
+        var formIds = rows.Select(r => r.FormDefinitionId).Distinct().ToList();
+        var schemas = (await db.FormDefinitions.AsNoTracking()
+                .Where(f => formIds.Contains(f.Id))
+                .Select(f => new { f.Id, f.SchemaJson })
+                .ToListAsync(ct))
+            .ToDictionary(f => f.Id, f => Visal.Application.Tenancy.Forms.FormSchema.FromJson(f.SchemaJson));
+
+        return rows.Select(r =>
+        {
+            schemas.TryGetValue(r.FormDefinitionId, out var sch);
+            var fecha = Visal.Application.Tenancy.Forms.FechaAtencionHelper.Calcular(sch, ValoresPlanos(r.ValoresJson))
+                        ?? r.FechaCierre ?? r.FechaApertura;
+            return new DocFormTipo(r.Id, r.BaseId, r.PacienteId, r.Tipo, fecha, r.Consecutivo);
+        }).ToList();
+    }
+
+    /// <summary>ValoresJson -> diccionario clave->texto (no-string = texto JSON crudo).</summary>
+    private static Dictionary<string, string?> ValoresPlanos(string? json)
+    {
+        var res = new Dictionary<string, string?>(StringComparer.Ordinal);
+        if (string.IsNullOrWhiteSpace(json)) { return res; }
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) { return res; }
+            foreach (var pr in doc.RootElement.EnumerateObject())
+            {
+                res[pr.Name] = pr.Value.ValueKind switch
+                {
+                    JsonValueKind.String => pr.Value.GetString(),
+                    JsonValueKind.Null => null,
+                    _ => pr.Value.GetRawText(),
+                };
+            }
+        }
+        catch (JsonException) { /* valores corruptos: sin fecha del cuerpo */ }
+        return res;
+    }
 
     /// <summary>Clave de orden para CUPS: primero los que empiezan por digito (orden numerico
     /// ascendente), luego los que empiezan por letra (alfabetico + su parte numerica); vacio
@@ -1093,6 +1166,13 @@ public sealed class TipologiaZipService : ITipologiaZipService
                 if (!conFormTipo.TryGetValue(x.Tipo!, out var set)) { conFormTipo[x.Tipo!] = set = new(); }
                 set.Add(x.PacienteId);
             }
+            // Documentos de evolucion/nota de esos tipos (entran al ZIP por el mismo contenido).
+            foreach (var d in await CargarDocumentosFormularioPorTipoAsync(db, idSet, tiposReferenciados, ct))
+            {
+                if (!EnRango(d.Fecha, pDesde, pHasta)) { continue; }
+                if (!conFormTipo.TryGetValue(d.Tipo, out var set)) { conFormTipo[d.Tipo] = set = new(); }
+                set.Add(d.PacienteId);
+            }
         }
 
         // Documentos externos por tipologia (origenes DocumentoHc / DocumentoPacienteLibre /
@@ -1735,6 +1815,11 @@ public sealed class TipologiaZipService : ITipologiaZipService
             .ToListAsync(ct))
             .Select(x => new FilaHcOrden(x.Id, x.Fecha, x.Consecutivo))
             .ToList();
+
+        // + documentos (evoluciones/notas guardadas DENTRO de una HC base) de este tipo. Id =
+        // la HC base (hereda CUP/autorizacion y el token del render); DocId = el documento.
+        var docsTipo = await CargarDocumentosFormularioPorTipoAsync(db, new[] { pacienteId }, new[] { tipo }, ct);
+        filas.AddRange(docsTipo.Select(d => new FilaHcOrden(d.BaseHcId, d.Fecha, d.Consecutivo, d.DocId)));
         if (filas.Count == 0) { return new(); }
 
         // Acota al periodo del snapshot por FECHA DE ATENCION (dia Bogota), para no colar
@@ -1871,10 +1956,16 @@ public sealed class TipologiaZipService : ITipologiaZipService
             // El token NO se mintea aqui (al armar el lote) sino justo antes de navegar la
             // pagina (MintarTokenEnUrl): en snapshots grandes el render dura mas que la vida
             // del token y las ultimas historias salian "Enlace invalido o expirado" (omitidas).
-            var url = $"{baseUrl}/p/hc-form/{f.Id}?t={TokenPendiente}&docs={docsRender}{rango}";
-            if (!rotuloPorCup) { return new UrlCup(url, null, null, null, f.Fecha, f.Consecutivo, f.Id); }
+            // Documento de evolucion/nota: se renderiza SOLO ese documento (sin la hoja de su
+            // HC base, que ya sale por su propio contenido) via &doc=. La ruta y el token van
+            // con la HC base (el documento se valida como hijo de ella en el render).
+            var url = f.DocId is Guid did
+                ? $"{baseUrl}/p/hc-form/{f.Id}?t={TokenPendiente}&docs=EVO&doc={did}{rango}"
+                : $"{baseUrl}/p/hc-form/{f.Id}?t={TokenPendiente}&docs={docsRender}{rango}";
+            var idParte = f.DocId ?? f.Id;
+            if (!rotuloPorCup) { return new UrlCup(url, null, null, null, f.Fecha, f.Consecutivo, idParte); }
             var ci = cupInfo.TryGetValue(f.Id, out var c) ? c : ("", "", "");
-            return new UrlCup(url, ci.Item1, ci.Item2, ci.Item3, f.Fecha, f.Consecutivo, f.Id);
+            return new UrlCup(url, ci.Item1, ci.Item2, ci.Item3, f.Fecha, f.Consecutivo, idParte);
         }).ToList();
     }
 

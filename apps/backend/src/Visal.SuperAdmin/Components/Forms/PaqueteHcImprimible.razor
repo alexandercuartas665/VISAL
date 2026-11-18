@@ -629,6 +629,12 @@ else
     [Parameter] public DateOnly? Desde { get; set; }
     [Parameter] public DateOnly? Hasta { get; set; }
 
+    /// <summary>Si viene, imprime SOLO ese documento de evolucion (hijo de <see cref="HcId"/>),
+    /// sin la hoja de la HC base, sin evoluciones de terapia ligadas y sin ordenes. Lo usa el
+    /// ZIP de Cuenta Medica (modelo plano): cada documento de evolucion es una linea propia
+    /// del contenido "Formulario por tipo". Un id que no sea hijo de la HC no imprime nada.</summary>
+    [Parameter] public Guid? SoloDocumentoId { get; set; }
+
     private bool _loading = true;
     private Guid _loadedHcId;  // guarda contra recargas repetidas en el mismo HcId
     private HistoriaClinicaDetailDto? _hc;
@@ -807,6 +813,14 @@ else
         _incluirInsExt = _docs.Contains("INSEXT");
         _incluirSrvExt = _docs.Contains("SRVEXT");
         _incluirRegMed = _docs.Contains("REGMED");
+        if (SoloDocumentoId is not null)
+        {
+            // Solo el documento pedido: nada de HC base, ordenes, escalas ni consentimientos.
+            _incluirHc = _incluirMed = _incluirSrv = _incluirInc = _incluirCert = _incluirRem = false;
+            _incluirEsc = _incluirCon = false;
+            _incluirIns = _incluirRxExt = _incluirLabExt = _incluirInsExt = _incluirSrvExt = _incluirRegMed = false;
+            _incluirEvo = true;
+        }
         // AutoEmitir: emite la orden de medicamentos (firma + QR) si aun no lo
         // estaba. El "Consultar" de /ordenes y el listado pasan false -> solo lectura.
         _autoEmitir = AutoEmitir;
@@ -882,6 +896,12 @@ else
             // para numerar los DOCUMENTOS de evolucion (que no cuelgan de un turno) por su
             // sesion real, emparejando por fecha — en vez de mandarlos al final con un
             // contador posicional.
+            try { _sesionesPorFecha = await HcSvc.GetSesionesPorFechaAtencionAsync(HcId); }
+            catch { _sesionesPorFecha = new Dictionary<DateOnly, int>(); }
+        }
+        else if (SoloDocumentoId is not null)
+        {
+            // Documento suelto: igual numera su "Sesion N" por la sesion del mismo dia.
             try { _sesionesPorFecha = await HcSvc.GetSesionesPorFechaAtencionAsync(HcId); }
             catch { _sesionesPorFecha = new Dictionary<DateOnly, int>(); }
         }
@@ -1025,7 +1045,8 @@ else
         {
             // Solo los documentos cerrados se incluyen en el paquete impreso.
             var items = await DocSvc.ListarPorHistoriaAsync(HcId, "EVOLUCION");
-            foreach (var it in items.Where(x => x.Estado == "Cerrada"))
+            foreach (var it in items.Where(x => x.Estado == "Cerrada"
+                                                && (SoloDocumentoId is null || x.Id == SoloDocumentoId)))
             {
                 var d = await DocSvc.GetAsync(it.Id);
                 if (d is null) { continue; }

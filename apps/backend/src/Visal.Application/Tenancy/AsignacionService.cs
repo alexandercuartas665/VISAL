@@ -1872,6 +1872,89 @@ public sealed class AsignacionService(ITenantContext tenant, IAuditWriter audit,
         return EstadoTablero.Coordinado;
     }
 
+    public async Task<IReadOnlyList<ResumenProfesionalDto>> ListarResumenProfesionalesAsync(
+        IReadOnlyList<string> modulosPermitidos,
+        int anio, int? mesVigencia = null,
+        string? sucursalNombre = null,
+        string? aseguradoraNombre = null,
+        CancellationToken ct = default)
+    {
+        using var db = dbFactory.Create();
+        if (modulosPermitidos is null || modulosPermitidos.Count == 0)
+        {
+            return Array.Empty<ResumenProfesionalDto>();
+        }
+
+        var permisos = ExpandirSinonimosModulo(modulosPermitidos);
+
+        var asigsQ = db.Asignaciones.AsNoTracking()
+            .Where(a => a.AnioServicio == (short)anio)
+            .Where(a => (a.Modulo != null && permisos.Contains(a.Modulo.ToUpper()))
+                     || permisos.Contains(a.TipoServicio.ToUpper()));
+        if (mesVigencia is int mv && mv >= 1 && mv <= 12) { asigsQ = asigsQ.Where(a => a.MesVigencia == (short)mv); }
+        if (!string.IsNullOrWhiteSpace(sucursalNombre))
+        {
+            var s = sucursalNombre.Trim();
+            asigsQ = asigsQ.Where(a => a.Sucursal == s);
+        }
+        if (!string.IsNullOrWhiteSpace(aseguradoraNombre))
+        {
+            var asg = aseguradoraNombre.Trim();
+            asigsQ = asigsQ.Where(a => a.Paciente != null && a.Paciente.Aseguradora != null
+                                    && a.Paciente.Aseguradora.Nombre == asg);
+        }
+
+        // Turnos vigentes (no anulados por cierre de periodo) con profesional asignado.
+        var turnos = await (
+            from t in db.AsignacionTurnos.AsNoTracking()
+            join a in asigsQ on t.AsignacionId equals a.Id
+            where t.CierrePeriodoId == null && t.ProfesionalId != Guid.Empty && t.Cantidad > 0
+            select new { t.Id, t.ProfesionalId, a.PacienteId, t.Cantidad })
+            .ToListAsync(ct);
+        if (turnos.Count == 0) { return Array.Empty<ResumenProfesionalDto>(); }
+
+        // Sesiones completadas de esos turnos (slot = SessionNo dentro de 1..Cantidad).
+        var completadas = await (
+            from s in db.AsignacionTurnoSesiones.AsNoTracking()
+            join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+            join a in asigsQ on t.AsignacionId equals a.Id
+            where s.Completado && t.CierrePeriodoId == null
+            select new { s.AsignacionTurnoId, s.SessionNo })
+            .ToListAsync(ct);
+        var completadasPorTurno = completadas
+            .GroupBy(x => x.AsignacionTurnoId)
+            .ToDictionary(g => g.Key, g => g.Select(x => x.SessionNo).ToHashSet());
+
+        // Por (profesional, paciente): sesiones pendientes acumuladas en todos sus turnos.
+        var pendientesPorProfPac = new Dictionary<(Guid Prof, Guid Pac), int>();
+        foreach (var t in turnos)
+        {
+            var hechas = completadasPorTurno.TryGetValue(t.Id, out var set)
+                ? set.Count(n => n >= 1 && n <= t.Cantidad)
+                : 0;
+            var key = (t.ProfesionalId, t.PacienteId);
+            pendientesPorProfPac[key] = (pendientesPorProfPac.TryGetValue(key, out var prev) ? prev : 0)
+                                        + (t.Cantidad - hechas);
+        }
+
+        var profIds = turnos.Select(t => t.ProfesionalId).Distinct().ToList();
+        var profNombres = await db.Profesionales.AsNoTracking()
+            .Where(p => profIds.Contains(p.Id))
+            .Select(p => new { p.Id, p.NombreCompleto })
+            .ToDictionaryAsync(p => p.Id, p => p.NombreCompleto, ct);
+
+        return pendientesPorProfPac
+            .GroupBy(kv => kv.Key.Prof)
+            .Select(g => new ResumenProfesionalDto(
+                g.Key,
+                profNombres.TryGetValue(g.Key, out var nm) && !string.IsNullOrWhiteSpace(nm) ? nm : "(profesional no encontrado)",
+                PacientesPendientes: g.Count(kv => kv.Value > 0),
+                PacientesAtendidos: g.Count(kv => kv.Value <= 0)))
+            .OrderByDescending(r => r.PacientesPendientes)
+            .ThenBy(r => r.ProfesionalNombre)
+            .ToList();
+    }
+
     public async Task<IReadOnlyList<SesionCalendarioDto>> ListarTableroCalendarioAsync(
         IReadOnlyList<string> modulosPermitidos,
         int anio, int mes,

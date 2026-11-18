@@ -242,6 +242,14 @@ public sealed record AsignacionTableroKanbanDto(
 /// <summary>Chip del calendario: una sesion en un dia especifico. Incluye el estado
 /// derivado del turno + paciente/profesional/servicio para el tooltip. El color se
 /// deriva del estado por CSS.</summary>
+/// <summary>Fila del tab "Profesionales" de Coordinacion: pacientes pendientes por
+/// atender y pacientes atendidos (todas sus sesiones completadas) por profesional.</summary>
+public sealed record ResumenProfesionalDto(
+    Guid ProfesionalId,
+    string ProfesionalNombre,
+    int PacientesPendientes,
+    int PacientesAtendidos);
+
 public sealed record SesionCalendarioDto(
     Guid Id, DateOnly Fecha,
     Guid AsignacionTurnoId, Guid AsignacionId,
@@ -635,6 +643,23 @@ public interface IAsignacionService
         IReadOnlyList<string> modulosPermitidos,
         int anio, int mes,
         string? sucursalNombre = null,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Resumen por profesional para el tab "Profesionales" de Coordinacion: cuantos
+    /// pacientes tiene pendientes por atender y cuantos ya atendio. Mismos filtros base
+    /// que el Kanban (modulos permitidos + periodo/mes de la asignacion + sede + EPS).
+    /// Regla (misma de la parrilla de Atencion): cada turno tiene Cantidad sesiones y una
+    /// sesion esta atendida cuando su flag Completado es true (HC cerrada vinculada).
+    /// Por profesional, cada paciente cae en UNA sola columna: Pendiente si le queda al
+    /// menos una sesion sin completar con ese profesional; Atendido si todas estan
+    /// completadas. Se excluyen turnos anulados por cierre de periodo.
+    /// </summary>
+    Task<IReadOnlyList<ResumenProfesionalDto>> ListarResumenProfesionalesAsync(
+        IReadOnlyList<string> modulosPermitidos,
+        int anio, int? mesVigencia = null,
+        string? sucursalNombre = null,
+        string? aseguradoraNombre = null,
         CancellationToken ct = default);
 
     /// <summary>

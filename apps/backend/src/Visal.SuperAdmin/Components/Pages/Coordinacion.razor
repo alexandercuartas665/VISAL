@@ -871,6 +871,118 @@ else if (_tabSel == "Calendario")
         </div>
     }
 }
+else if (_tabSel == "Profesionales")
+{
+    @if (_modulos.Count == 0)
+    {
+        <div class="ase-card"><div class="ase-empty cd-no-perm">Sin permisos de coordinacion.</div></div>
+    }
+    else
+    {
+        <div class="ase-card">
+            <div class="ase-card-h">Filtros</div>
+            <div class="ase-form cd-form">
+                <div class="ase-f ase-f-wide">
+                    <label>Tipo asignacion</label>
+                    <select class="form-select form-select-sm" @bind="_rpTipoSel">
+                        <option value="">Todos los tipos</option>
+                        @foreach (var m in _modulos) { <option value="@m">@m</option> }
+                    </select>
+                </div>
+                <div class="ase-f">
+                    <label>Periodo</label>
+                    <select class="form-select form-select-sm" @bind="_rpAnio">
+                        @for (int y = DateTime.Now.Year - 2; y <= DateTime.Now.Year + 2; y++) { <option value="@y">@y</option> }
+                    </select>
+                </div>
+                <div class="ase-f">
+                    <label>Mes Vigente</label>
+                    <select class="form-select form-select-sm" @bind="_rpMes">
+                        <option value="0">(Todos los meses)</option>
+                        @for (int m = 1; m <= 12; m++) { <option value="@m">@MesNombre(m)</option> }
+                    </select>
+                </div>
+                <div class="ase-f">
+                    <label>Sede</label>
+                    @if (_puedeElegirSede)
+                    {
+                        <select class="form-select form-select-sm" @bind="_rpSedeSel">
+                            <option value="">(Todas las sedes)</option>
+                            @foreach (var sd in _sedes) { <option value="@sd">@sd</option> }
+                        </select>
+                    }
+                    else
+                    {
+                        <input class="form-control form-control-sm asg-ro" readonly value="@(_miSucursalNombre ?? "(Todas)")" title="Sede fijada por tu usuario" />
+                    }
+                </div>
+                <div class="ase-f">
+                    <label>EPS</label>
+                    <select class="form-select form-select-sm" @bind="_rpEpsSel">
+                        <option value="">(Todas las EPS)</option>
+                        @foreach (var eps in _epsList) { <option value="@eps">@eps</option> }
+                    </select>
+                </div>
+                <div class="ase-f ase-f-wide cd-actions">
+                    <button class="btn btn-primary btn-sm" @onclick="CargarResumenProfesionales" disabled="@_busy">
+                        @(_busy ? "Cargando..." : "Consultar")
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="ase-card">
+            <div class="cd-coord-h">
+                <div>
+                    <div class="ase-card-h" style="margin-bottom:2px;">Resumen por profesional</div>
+                    <div class="small text-muted">Pendientes = pacientes a los que el profesional aun les debe al menos una sesion. Atendidos = pacientes con todas sus sesiones completadas (historia cerrada). Cada paciente cuenta en una sola columna.</div>
+                </div>
+                <input class="form-control form-control-sm cd-rp-buscar" @bind="_rpBuscar" @bind:event="oninput" placeholder="Buscar profesional..." />
+            </div>
+
+            @if (_rpList is null)
+            {
+                <div class="ase-empty">Elige los filtros y pulsa Consultar.</div>
+            }
+            else if (!RpFiltrados.Any())
+            {
+                <div class="ase-empty">Sin profesionales con pacientes para estos filtros.</div>
+            }
+            else
+            {
+                var filas = RpFiltrados.ToList();
+                <div class="table-responsive">
+                    <table class="table table-sm cd-coord-tbl cd-rp-tbl">
+                        <thead>
+                            <tr>
+                                <th>Profesional</th>
+                                <th class="text-end">Pacientes pendientes por atender</th>
+                                <th class="text-end">Pacientes atendidos</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var r in filas)
+                            {
+                                <tr>
+                                    <td>@r.ProfesionalNombre</td>
+                                    <td class="text-end"><span class="cd-rp-num @(r.PacientesPendientes > 0 ? "cd-rp-pend" : "")">@r.PacientesPendientes</span></td>
+                                    <td class="text-end"><span class="cd-rp-num cd-rp-ok">@r.PacientesAtendidos</span></td>
+                                </tr>
+                            }
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <th>Total (@filas.Count profesionales)</th>
+                                <th class="text-end">@filas.Sum(r => r.PacientesPendientes)</th>
+                                <th class="text-end">@filas.Sum(r => r.PacientesAtendidos)</th>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+}
 
 else if (_tabSel == "Cierre de periodos")
 {
@@ -1402,6 +1514,13 @@ else if (_tabSel == "Cierre de periodos")
     .cd-cierre-confirm-acts { display:flex; gap:8px; flex:0 0 auto; }
     /* Tarjeta de resumen del cierre hecho. */
     .cd-cierre-ok { border:1px solid #a7f3d0; }
+    /* Tab Profesionales (resumen pendientes / atendidos). */
+    .cd-rp-buscar { max-width: 240px; }
+    .cd-rp-tbl tfoot th { border-top: 2px solid #cbd5e1; background: #f8fafc; }
+    .cd-rp-num { display: inline-block; min-width: 34px; padding: 2px 8px; border-radius: 10px; font-weight: 700; font-size: 12px; text-align: center; background: #f1f5f9; color: #475569; }
+    .cd-rp-num.cd-rp-pend { background: #fef3c7; color: #92400e; }
+    .cd-rp-num.cd-rp-ok { background: #dcfce7; color: #166534; }
+
     /* Sub-tabs del modulo de cierre (Preparar / Historicos). */
     .cd-cierre-subtabs { display:flex; gap:8px; margin-bottom:12px; }
     .cd-cierre-subtab { border:1px solid #e2e8f0; background:#fff; color:#475569; font-size:13px; font-weight:600; padding:7px 16px; border-radius:8px; cursor:pointer; }
@@ -1586,7 +1705,7 @@ else if (_tabSel == "Cierre de periodos")
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
 
-    private readonly string[] _tabs = new[] { "Solicitudes", "Coordinaciones", "Kanban", "Calendario", "Cierre de periodos" };
+    private readonly string[] _tabs = new[] { "Solicitudes", "Coordinaciones", "Kanban", "Calendario", "Profesionales", "Cierre de periodos" };
     private string _tabSel = "Solicitudes";
 
     // Permisos del usuario logueado (que modulos puede coordinar).
@@ -2377,6 +2496,7 @@ else if (_tabSel == "Cierre de periodos")
         if (tab == "Kanban" && _kbCards.Count == 0) { await CargarKanban(); }
         else if (tab == "Calendario" && _calChips.Count == 0) { await CargarCalendario(); }
         else if (tab == "Coordinaciones" && _coordList is null) { await CargarCoordinaciones(); }
+        else if (tab == "Profesionales" && _rpList is null) { await CargarResumenProfesionales(); }
     }
 
     // ============ Tab Coordinaciones (asignaciones eliminables) ============
@@ -2581,6 +2701,39 @@ else if (_tabSel == "Cierre de periodos")
                 x.NombreServicio, x.TipoServicio,
                 x.Cantidad, x.SesionesTotales, x.NotasDefinitivas,
                 x.TurnosCoordinados, x.EspecialistasNombres)).ToList();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    // ============ Tab Profesionales (resumen pendientes / atendidos) ============
+    private List<ResumenProfesionalDto>? _rpList;
+    private string _rpTipoSel = "";
+    private int _rpAnio = DateTime.Now.Year;
+    private int _rpMes = 0;
+    private string _rpSedeSel = "";
+    private string _rpEpsSel = "";
+    private string _rpBuscar = "";
+
+    private IEnumerable<ResumenProfesionalDto> RpFiltrados =>
+        string.IsNullOrWhiteSpace(_rpBuscar)
+            ? (_rpList ?? new())
+            : (_rpList ?? new()).Where(r => r.ProfesionalNombre.Contains(_rpBuscar.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private async Task CargarResumenProfesionales()
+    {
+        if (_modulos.Count == 0) { return; }
+        _busy = true; _error = null; _ok = null;
+        try
+        {
+            var modulos = string.IsNullOrEmpty(_rpTipoSel) ? _modulos : new List<string> { _rpTipoSel };
+            int? mes = _rpMes >= 1 && _rpMes <= 12 ? _rpMes : null;
+            var sede = _puedeElegirSede
+                ? (string.IsNullOrWhiteSpace(_rpSedeSel) ? null : _rpSedeSel)
+                : _miSucursalNombre;
+            _rpList = (await Svc.ListarResumenProfesionalesAsync(
+                modulos, _rpAnio, mes, sede,
+                string.IsNullOrWhiteSpace(_rpEpsSel) ? null : _rpEpsSel)).ToList();
         }
         catch (Exception ex) { _error = ex.Message; }
         finally { _busy = false; }

@@ -36,6 +36,9 @@ public class RevisionAgenteLog : TenantEntity
     public string? Nota { get; set; }
     /// <summary>Hallazgos concretos del modelo, como array JSON de strings.</summary>
     public string? HallazgosJson { get; set; }
+    /// <summary>Texto sugerido por el agente para los campos con hallazgo, como array JSON de
+    /// { campo, texto_sugerido }. Solo lectura: no se aplica a la HC.</summary>
+    public string? SugerenciasJson { get; set; }
 
     // ── Log completo ─────────────────────────────────────────────────────────────
     /// <summary>Instrucciones (system prompt) que recibio el agente.</summary>

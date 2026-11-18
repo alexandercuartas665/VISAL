@@ -48,7 +48,8 @@ public sealed record RevisionAgenteLogDto(
     string? ContextoEnviado,
     string? CamposLegiblesJson,
     string? ToolsJson,
-    string? RespuestaCruda);
+    string? RespuestaCruda,
+    IReadOnlyList<Visal.Application.Revision.Ia.SugerenciaTexto>? Sugerencias = null);
 
 /// <summary>Comando para abrir el ciclo. Si ya existe una revision viva para la HC, la devuelve.</summary>
 public sealed record SolicitarRevisionCmd(Guid HistoriaClinicaId, Guid? SolicitadaPor, string? Nota);

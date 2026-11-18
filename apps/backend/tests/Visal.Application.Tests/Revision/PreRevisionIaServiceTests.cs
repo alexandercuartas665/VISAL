@@ -37,6 +37,7 @@ public sealed class PreRevisionIaServiceTests
         public required FakeAiClient AiClient { get; init; }
         public required Guid RevisionId { get; init; }
         public required Guid AgenteId { get; init; }
+        public Guid HcId { get; init; }
     }
 
     // Ola 4c: AiUsageService ahora abre contexto corto via IApplicationDbContextFactory.
@@ -61,7 +62,10 @@ public sealed class PreRevisionIaServiceTests
         bool agenteActivo = true,
         bool providerHabilitado = true,
         string? dbName = null,
-        bool sembrarCupoAgotadoDuro = false)
+        bool sembrarCupoAgotadoDuro = false,
+        bool crearRevision = true,
+        HistoriaClinicaEstado estadoHc = HistoriaClinicaEstado.Cerrada,
+        RevisionPolicy? politica = null)
     {
         var name = dbName ?? Guid.NewGuid().ToString();
         var opts = new DbContextOptionsBuilder<VisalDbContext>()
@@ -78,10 +82,15 @@ public sealed class PreRevisionIaServiceTests
             TenantId = tenantId,
             PacienteId = paciente.Id,
             FormDefinitionId = form.Id,
-            Estado = HistoriaClinicaEstado.Cerrada,
+            Estado = estadoHc,
             FechaApertura = FixedNow.AddDays(-1),
-            FechaCierre = FixedNow,
+            FechaCierre = estadoHc == HistoriaClinicaEstado.Cerrada ? FixedNow : null,
         };
+        if (politica is not null)
+        {
+            politica.TenantId = tenantId;
+            db.RevisionPolicies.Add(politica);
+        }
         db.Pacientes.Add(paciente);
         db.FormDefinitions.Add(form);
         db.HistoriasClinicas.Add(hc);
@@ -111,7 +120,9 @@ public sealed class PreRevisionIaServiceTests
         await db.SaveChangesAsync();
 
         var revisionSvc = new RevisionClinicaService(new SingleStoreDbContextFactory(opts, tenant), tenant, clock);
-        var rev = await revisionSvc.SolicitarAsync(new SolicitarRevisionCmd(hc.Id, Actor, null));
+        var revId = crearRevision
+            ? (await revisionSvc.SolicitarAsync(new SolicitarRevisionCmd(hc.Id, Actor, null))).Id
+            : Guid.Empty;
 
         if (sembrarCupoAgotadoDuro)
         {
@@ -155,7 +166,7 @@ public sealed class PreRevisionIaServiceTests
         var aiClient = new FakeAiClient(aiResponse);
         var svc = new PreRevisionIaService(new SingleStoreDbContextFactory(opts, tenant), aiClient, usage, protector, tools, revisionSvc, policy);
 
-        return new Fixture { Db = db, Svc = svc, AiClient = aiClient, RevisionId = rev.Id, AgenteId = agenteId };
+        return new Fixture { Db = db, Svc = svc, AiClient = aiClient, RevisionId = revId, AgenteId = agenteId, HcId = hc.Id };
     }
 
     private static AiChatResult OkResponse(string body, int inTokens = 120, int outTokens = 40)
@@ -275,6 +286,148 @@ public sealed class PreRevisionIaServiceTests
         Assert.False(res.Ok);
         Assert.Contains(IPreRevisionIaService.AgenteNombre, res.Error);
         Assert.Equal(0, fxB.AiClient.CantidadLlamadas);
+    }
+
+    // ---- Auditoria IA al cerrar (Atencion -> "Guardar definitivamente") ----
+
+    private const string BodyRechazoConSugerencia =
+        "{\"resultado\":\"Rechazado\",\"confianza\":0.74,\"nota\":\"Copia de otro turno\"," +
+        "\"hallazgos\":[\"ENTREGA identica a HC-028780\"]," +
+        "\"sugerencias\":[{\"campo\":\"DURANTE NOCHE\",\"texto_sugerido\":\"[COMPLETAR: eventos de este turno]\"}]}";
+
+    [Fact]
+    public async Task AuditarHc_con_hc_abierta_no_crea_ciclo_ni_log_solo_consumo()
+    {
+        var fx = await BuildAsync(TenantA, OkResponse(BodyRechazoConSugerencia), crearRevision: false,
+            estadoHc: HistoriaClinicaEstado.Abierta);
+
+        var a = await fx.Svc.AuditarHcAsync(fx.HcId);
+
+        Assert.True(a.Ok, a.Error);
+        Assert.Equal(RevisionResultado.Rechazado, a.Resultado);
+        Assert.Single(a.Sugerencias);
+        Assert.Equal("DURANTE NOCHE", a.Sugerencias[0].Campo);
+        Assert.NotNull(a.Traza);
+        Assert.Equal(0, await fx.Db.RevisionesClinica.CountAsync());
+        Assert.Equal(0, await fx.Db.RevisionAgenteLogs.CountAsync());
+        Assert.Equal(1, await fx.Db.AiUsageLogs.CountAsync());
+    }
+
+    [Fact]
+    public async Task RegistrarAuditoriaCierre_registra_veredicto_log_y_sugerencias_sin_segunda_llamada()
+    {
+        var fx = await BuildAsync(TenantA, OkResponse(BodyRechazoConSugerencia), crearRevision: false,
+            estadoHc: HistoriaClinicaEstado.Abierta);
+        var a = await fx.Svc.AuditarHcAsync(fx.HcId);
+
+        var res = await fx.Svc.RegistrarAuditoriaCierreAsync(fx.HcId, a, cerradaPeseARechazo: true, Actor);
+
+        Assert.True(res.Ok, res.Error);
+        Assert.Equal(1, fx.AiClient.CantidadLlamadas); // no reprocesa
+        var rev = await fx.Db.RevisionesClinica.AsNoTracking().SingleAsync(r => r.HistoriaClinicaId == fx.HcId);
+        var ev = await fx.Db.RevisionClinicaEventos.AsNoTracking()
+            .Where(e => e.RevisionClinicaId == rev.Id && e.Tipo == RevisionTipoEvento.PreRevisionAgente).ToListAsync();
+        Assert.Single(ev);
+        Assert.Equal(RevisionResultado.Rechazado, ev[0].Resultado);
+        var log = await fx.Db.RevisionAgenteLogs.AsNoTracking().SingleAsync();
+        Assert.Equal(rev.Id, log.RevisionClinicaId);
+        Assert.Contains("DURANTE NOCHE", log.SugerenciasJson);
+        Assert.Equal(1, await fx.Db.AiUsageLogs.CountAsync());
+    }
+
+    [Fact]
+    public async Task RegistrarAuditoriaCierre_rechaza_resultado_de_otra_hc()
+    {
+        var fx = await BuildAsync(TenantA, OkResponse(BodyRechazoConSugerencia), crearRevision: false);
+        var a = await fx.Svc.AuditarHcAsync(fx.HcId);
+
+        var res = await fx.Svc.RegistrarAuditoriaCierreAsync(Guid.NewGuid(), a, false, Actor);
+
+        Assert.False(res.Ok);
+        Assert.Equal(0, await fx.Db.RevisionesClinica.CountAsync());
+    }
+
+    [Theory]
+    [InlineData(0.90, true)]
+    [InlineData(0.70, false)]
+    public async Task RegistrarAuditoriaCierre_aprueba_automaticamente_si_confianza_supera_umbral(double conf, bool esperaAprobada)
+    {
+        var body = "{\"resultado\":\"Aprobado\",\"confianza\":" + conf.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                   + ",\"nota\":\"OK\",\"hallazgos\":[]}";
+        var fx = await BuildAsync(TenantA, OkResponse(body), crearRevision: false,
+            politica: new RevisionPolicy { AdopcionAutomaticaAgente = true, UmbralConfianza = 0.80m });
+        var a = await fx.Svc.AuditarHcAsync(fx.HcId);
+
+        await fx.Svc.RegistrarAuditoriaCierreAsync(fx.HcId, a, false, Actor);
+
+        var rev = await fx.Db.RevisionesClinica.AsNoTracking().SingleAsync(r => r.HistoriaClinicaId == fx.HcId);
+        Assert.Equal(esperaAprobada, rev.EstadoAgregado == RevisionEstadoAgregado.Aprobada);
+    }
+
+    [Fact]
+    public async Task ConfigAuditoriaAlCerrar_respeta_interruptor_y_lista_de_formatos()
+    {
+        var off = await BuildAsync(TenantA, OkResponse("{}"), crearRevision: false);
+        Assert.Null(await off.Svc.ConfigAuditoriaAlCerrarAsync(off.HcId));
+
+        var todos = await BuildAsync(TenantA, OkResponse("{}"), crearRevision: false,
+            politica: new RevisionPolicy { AuditoriaIaAlCerrar = true, AuditoriaIaTimeoutSeg = 60 });
+        Assert.Equal(60, (await todos.Svc.ConfigAuditoriaAlCerrarAsync(todos.HcId))?.TimeoutSeg);
+
+        var otro = await BuildAsync(TenantA, OkResponse("{}"), crearRevision: false,
+            politica: new RevisionPolicy { AuditoriaIaAlCerrar = true, AuditoriaIaFormatosJson = "[\"PP-FO-84\"]" });
+        Assert.Null(await otro.Svc.ConfigAuditoriaAlCerrarAsync(otro.HcId));
+
+        var incluido = await BuildAsync(TenantA, OkResponse("{}"), crearRevision: false,
+            politica: new RevisionPolicy { AuditoriaIaAlCerrar = true, AuditoriaIaFormatosJson = "[\"hc-fo-01\"]" });
+        Assert.NotNull(await incluido.Svc.ConfigAuditoriaAlCerrarAsync(incluido.HcId));
+    }
+
+    [Fact]
+    public void ParsearSugerencias_tolera_ausencia_y_nombres_alternos()
+    {
+        Assert.Empty(PreRevisionIaService.ParsearSugerencias("{\"resultado\":\"Aprobado\",\"confianza\":0.9}"));
+        var s = PreRevisionIaService.ParsearSugerencias(
+            "{\"resultado\":\"Rechazado\",\"sugerencias\":[{\"field\":\"PLAN\",\"sugerencia\":\"texto\"},{\"campo\":\"\"}]}");
+        var sg = Assert.Single(s);
+        Assert.Equal("PLAN", sg.Campo);
+        Assert.Equal("texto", sg.TextoSugerido);
+    }
+
+    [Fact]
+    public async Task EjecutarAsync_tras_refactor_guarda_sugerencias_en_el_log()
+    {
+        var fx = await BuildAsync(TenantA, OkResponse(BodyRechazoConSugerencia));
+
+        var res = await fx.Svc.EjecutarAsync(fx.RevisionId);
+
+        Assert.True(res.Ok, res.Error);
+        Assert.Single(res.Sugerencias!);
+        var log = await fx.Db.RevisionAgenteLogs.AsNoTracking().SingleAsync();
+        Assert.Contains("[COMPLETAR", log.SugerenciasJson);
+        Assert.Contains("TEXTO SUGERIDO", fx.AiClient.LastSystemPrompt);
+    }
+
+    [Fact]
+    public async Task Politica_valida_tiempo_de_auditoria_al_cerrar()
+    {
+        var opts = new DbContextOptionsBuilder<VisalDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        var tenant = new FakeTenantContext { TenantId = TenantA, UserId = Actor };
+        var svc = new RevisionPolicyService(new SingleStoreDbContextFactory(opts, tenant), tenant,
+            new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()));
+
+        var def = await svc.GetAsync();
+        Assert.False(def.AuditoriaIaAlCerrar);
+        Assert.Equal(90, def.AuditoriaIaTimeoutSeg);
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            svc.SaveAsync(def with { AuditoriaIaTimeoutSeg = 10 }, Actor));
+
+        await svc.SaveAsync(def with { AuditoriaIaAlCerrar = true, AuditoriaIaFormatos = new[] { "PP-FO-84", "pp-fo-84", " " } }, Actor);
+        var leida = await new RevisionPolicyService(new SingleStoreDbContextFactory(opts, tenant), tenant,
+            new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions())).GetAsync();
+        Assert.True(leida.AuditoriaIaAlCerrar);
+        Assert.Equal(new[] { "PP-FO-84" }, leida.AuditoriaIaFormatos);
     }
 
     // ---- Fakes ----

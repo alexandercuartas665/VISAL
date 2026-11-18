@@ -22,6 +22,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
     private readonly IRevisionMcpToolsService _tools;
     private readonly IRevisionClinicaService _revision;
     private readonly IRevisionPolicyService _policy;
+    private readonly IAuditWriter? _audit;
 
     // Nombre de un AiAgentPrompt opcional que, si existe en el agente REVISOR CLINICO IA,
     // define el allow-list de tools como CSV en el Body. Si no existe, se usan las 9 tools.
@@ -35,7 +36,8 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         ISecretProtector secretProtector,
         IRevisionMcpToolsService tools,
         IRevisionClinicaService revision,
-        IRevisionPolicyService policy)
+        IRevisionPolicyService policy,
+        IAuditWriter? audit = null)
     {
         _dbFactory = dbFactory;
         _client = client;
@@ -44,46 +46,67 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         _tools = tools;
         _revision = revision;
         _policy = policy;
+        _audit = audit;
     }
 
     public async Task<PreRevisionIaResult> EjecutarAsync(Guid revisionClinicaId, Guid? agenteId = null, CancellationToken ct = default)
     {
+        Guid hcId;
+        using (var db = _dbFactory.Create())
+        {
+            var revision = await db.RevisionesClinica.AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == revisionClinicaId, ct);
+            if (revision is null) { return Err("El ciclo de revision no existe."); }
+            hcId = revision.HistoriaClinicaId;
+        }
+
+        // Auditar (LLM) y registrar (veredicto + log + adopcion) son dos pasos separados para
+        // que la auditoria AL CERRAR (Atencion) pueda auditar con la HC aun abierta y registrar
+        // el MISMO resultado despues del cierre, sin una segunda llamada al proveedor.
+        var auditoria = await AuditarHcAsync(hcId, agenteId, ct);
+        return await RegistrarAuditoriaAsync(revisionClinicaId, auditoria, ct);
+    }
+
+    public async Task<AuditoriaIaResultado> AuditarHcAsync(Guid historiaClinicaId, Guid? agenteId = null, CancellationToken ct = default)
+    {
         using var db = _dbFactory.Create();
-        var revision = await db.RevisionesClinica.AsNoTracking()
-            .FirstOrDefaultAsync(r => r.Id == revisionClinicaId, ct);
-        if (revision is null) { return Err("El ciclo de revision no existe."); }
+        var hcExiste = await db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.Id == historiaClinicaId)
+            .Select(h => new { h.ValoresJson })
+            .FirstOrDefaultAsync(ct);
+        if (hcExiste is null) { return AuditoriaIaResultado.Fallo(historiaClinicaId, "La historia clinica no existe."); }
 
         // Resolucion del agente:
         //   - Si viene agenteId (usuario eligio en el selector) buscamos por Id.
         //     El global query filter por tenant garantiza que no se pueda usar
         //     un agente de otro tenant aunque el Id se conozca.
-        //   - Sin agenteId (triggers automaticos, botones legacy) caemos al
+        //   - Sin agenteId (triggers automaticos, cierre, botones legacy) caemos al
         //     canonico REVISOR CLINICO IA por nombre.
         AiAgent? agent;
         if (agenteId is Guid aid)
         {
             agent = await db.AiAgents.AsNoTracking().FirstOrDefaultAsync(a => a.Id == aid, ct);
-            if (agent is null) { return Err("El agente seleccionado no existe o no pertenece a este tenant."); }
-            if (!agent.IsActive) { return Err($"El agente '{agent.Name}' esta apagado."); }
+            if (agent is null) { return AuditoriaIaResultado.Fallo(historiaClinicaId, "El agente seleccionado no existe o no pertenece a este tenant."); }
+            if (!agent.IsActive) { return AuditoriaIaResultado.Fallo(historiaClinicaId, $"El agente '{agent.Name}' esta apagado."); }
         }
         else
         {
             agent = await db.AiAgents.AsNoTracking()
                 .FirstOrDefaultAsync(a => a.Name == IPreRevisionIaService.AgenteNombre, ct);
-            if (agent is null) { return Err($"No hay agente '{IPreRevisionIaService.AgenteNombre}' configurado para este tenant."); }
-            if (!agent.IsActive) { return Err($"El agente '{IPreRevisionIaService.AgenteNombre}' esta apagado."); }
+            if (agent is null) { return AuditoriaIaResultado.Fallo(historiaClinicaId, $"No hay agente '{IPreRevisionIaService.AgenteNombre}' configurado para este tenant."); }
+            if (!agent.IsActive) { return AuditoriaIaResultado.Fallo(historiaClinicaId, $"El agente '{IPreRevisionIaService.AgenteNombre}' esta apagado."); }
         }
 
         var providerCfg = await db.AiProviderConfigs.AsNoTracking()
             .FirstOrDefaultAsync(c => c.Provider == agent.Provider, ct);
         if (providerCfg is null || !providerCfg.IsEnabled || string.IsNullOrWhiteSpace(providerCfg.ApiKeyEncrypted))
         {
-            return Err($"El proveedor {agent.Provider} no esta habilitado en la plataforma.");
+            return AuditoriaIaResultado.Fallo(historiaClinicaId, $"El proveedor {agent.Provider} no esta habilitado en la plataforma.");
         }
 
         string apiKey;
         try { apiKey = _secretProtector.Unprotect(providerCfg.ApiKeyEncrypted); }
-        catch { return Err("La API key del proveedor esta cifrada con una version anterior. Vuelve a guardarla en Servidores de IA."); }
+        catch { return AuditoriaIaResultado.Fallo(historiaClinicaId, "La API key del proveedor esta cifrada con una version anterior. Vuelve a guardarla en Servidores de IA."); }
 
         var meta = AiProviderCatalog.For(agent.Provider);
         var model = !string.IsNullOrWhiteSpace(agent.Model) ? agent.Model!
@@ -93,16 +116,16 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         var quota = await _usage.GetQuotaAsync(ct);
         if (quota.Exceeded && quota.Hard)
         {
-            return Err($"Alcanzaste el limite de tokens de IA de tu plan este mes ({quota.MonthlyLimitTokens:N0}).");
+            return AuditoriaIaResultado.Fallo(historiaClinicaId, $"Alcanzaste el limite de tokens de IA de tu plan este mes ({quota.MonthlyLimitTokens:N0}).");
         }
 
         var allowed = await ResolveAllowedToolsAsync(db, agent.Id, ct);
-        if (allowed.Count == 0) { return Err("El agente no tiene tools permitidas configuradas."); }
+        if (allowed.Count == 0) { return AuditoriaIaResultado.Fallo(historiaClinicaId, "El agente no tiene tools permitidas configuradas."); }
 
         var policy = await _policy.GetAsync(ct);
 
         var contexto = await _tools.ArmarContextoAsync(
-            revision.HistoriaClinicaId,
+            historiaClinicaId,
             RevisionMcpToolNames.Todas,
             allowed,
             policy.VentanaAsignacionesRelacionadasDias,
@@ -124,47 +147,81 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
 
         await _usage.RecordAsync(agent.Id, agent.Provider, model, result.InputTokens, result.OutputTokens, "revision", result.Ok, ct);
 
+        var traza = new AuditoriaIaTraza(
+            string.IsNullOrWhiteSpace(agent.Name) ? IPreRevisionIaService.AgenteNombre : agent.Name,
+            agent.Provider.ToString(), model, systemPrompt, contextoJson, contexto, result.Text,
+            HashValores(hcExiste.ValoresJson));
+
         if (!result.Ok || string.IsNullOrWhiteSpace(result.Text))
         {
-            await GuardarAgenteLogAsync(db, revision, agent, model, systemPrompt, contextoJson, contexto,
-                ok: false, error: result.Error ?? "El proveedor no devolvio texto.", resultado: null, confianza: null,
-                result.InputTokens, result.OutputTokens, result.Text, ct);
-            return Err(result.Error ?? "El proveedor no devolvio texto.") with { InputTokens = result.InputTokens, OutputTokens = result.OutputTokens };
+            return AuditoriaIaResultado.Fallo(historiaClinicaId, result.Error ?? "El proveedor no devolvio texto.",
+                result.InputTokens, result.OutputTokens, traza);
         }
 
         VeredictoParsed parsed;
         try { parsed = ParseVeredicto(result.Text!); }
         catch (Exception ex)
         {
-            await GuardarAgenteLogAsync(db, revision, agent, model, systemPrompt, contextoJson, contexto,
-                ok: false, error: "No se pudo interpretar la respuesta del agente: " + ex.Message, resultado: null, confianza: null,
-                result.InputTokens, result.OutputTokens, result.Text, ct);
-            return new PreRevisionIaResult(false, null, 0m, null, null, "No se pudo interpretar la respuesta del agente: " + ex.Message, result.InputTokens, result.OutputTokens);
+            return AuditoriaIaResultado.Fallo(historiaClinicaId, "No se pudo interpretar la respuesta del agente: " + ex.Message,
+                result.InputTokens, result.OutputTokens, traza);
         }
 
+        return new AuditoriaIaResultado(true, null, parsed.Resultado, parsed.Confianza, parsed.Nota,
+            parsed.Hallazgos, parsed.Sugerencias, result.InputTokens, result.OutputTokens)
+        {
+            HistoriaClinicaId = historiaClinicaId,
+            Traza = traza,
+        };
+    }
+
+    /// <summary>Registra en el ciclo de revision el resultado de una auditoria YA hecha: evento
+    /// PreRevisionAgente, log completo del agente y adopcion automatica (si la politica lo permite).
+    /// Si la auditoria fallo, deja el log del fallo (cuando alcanzo a llamar al proveedor).</summary>
+    private async Task<PreRevisionIaResult> RegistrarAuditoriaAsync(Guid revisionClinicaId, AuditoriaIaResultado a, CancellationToken ct)
+    {
+        using var db = _dbFactory.Create();
+        var revision = await db.RevisionesClinica.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == revisionClinicaId, ct);
+        if (revision is null) { return Err("El ciclo de revision no existe."); }
+
+        if (!a.Ok || a.Resultado is not RevisionResultado resultado)
+        {
+            if (a.Traza is not null)
+            {
+                await GuardarAgenteLogAsync(db, revision, a.Traza,
+                    ok: false, error: a.Error, resultado: null, confianza: null,
+                    a.InputTokens, a.OutputTokens, ct);
+            }
+            return Err(a.Error ?? "La auditoria no produjo veredicto.") with { InputTokens = a.InputTokens, OutputTokens = a.OutputTokens };
+        }
+
+        var policy = await _policy.GetAsync(ct);
         var payload = new
         {
-            resultado = parsed.Resultado.ToString(),
-            confianza = parsed.Confianza,
-            hallazgos = parsed.Hallazgos,
+            resultado = resultado.ToString(),
+            confianza = a.Confianza,
+            hallazgos = a.Hallazgos,
             umbral = policy.UmbralConfianza,
-            tools_ok = contexto.InvocacionesExitosas.Count,
-            tools_fail = contexto.InvocacionesFallidas.Count,
-            tokens_in = result.InputTokens,
-            tokens_out = result.OutputTokens,
+            tools_ok = a.Traza?.Contexto?.InvocacionesExitosas.Count ?? 0,
+            tools_fail = a.Traza?.Contexto?.InvocacionesFallidas.Count ?? 0,
+            tokens_in = a.InputTokens,
+            tokens_out = a.OutputTokens,
         };
         var payloadJson = JsonSerializer.Serialize(payload);
 
         await _revision.RegistrarVeredictoAgenteAsync(
-            new VeredictoAgenteCmd(revisionClinicaId, IPreRevisionIaService.AgenteNombre, parsed.Resultado, parsed.Nota, payloadJson),
+            new VeredictoAgenteCmd(revisionClinicaId, IPreRevisionIaService.AgenteNombre, resultado, a.Nota, payloadJson),
             ct);
 
         // Log completo del agente (que recibio, que proceso hizo, que respondio) para el
         // panel "Log del agente". Best-effort: nunca rompe la revision ya registrada.
-        await GuardarAgenteLogAsync(db, revision, agent, model, systemPrompt, contextoJson, contexto,
-            ok: true, error: null, resultado: parsed.Resultado.ToString(), confianza: parsed.Confianza,
-            result.InputTokens, result.OutputTokens, result.Text, ct,
-            nota: parsed.Nota, hallazgos: parsed.Hallazgos);
+        if (a.Traza is not null)
+        {
+            await GuardarAgenteLogAsync(db, revision, a.Traza,
+                ok: true, error: null, resultado: resultado.ToString(), confianza: a.Confianza,
+                a.InputTokens, a.OutputTokens, ct,
+                nota: a.Nota, hallazgos: a.Hallazgos, sugerencias: a.Sugerencias);
+        }
 
         // Ola 6 RC6c — Adopcion automatica del veredicto agente.
         // Reglas: solo aplica si (a) la policy del tenant lo permite explicitamente,
@@ -172,22 +229,102 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         // Cualquier fallo aqui NO invalida el veredicto ya registrado — la HC queda
         // con el evento PreRevisionAgente y el revisor humano puede decidir.
         if (policy.AdopcionAutomaticaAgente
-            && parsed.Resultado == RevisionResultado.Aprobado
-            && parsed.Confianza >= policy.UmbralConfianza)
+            && resultado == RevisionResultado.Aprobado
+            && a.Confianza >= policy.UmbralConfianza)
         {
             try
             {
                 await _revision.AprobarPorSistemaAsync(new AprobarPorSistemaCmd(
                     revisionClinicaId,
                     IPreRevisionIaService.AgenteNombre,
-                    parsed.Confianza,
+                    a.Confianza,
                     policy.UmbralConfianza,
                     "Adopcion automatica por confianza >= umbral."), ct);
             }
             catch { /* Silencio: el veredicto quedo grabado, la adopcion es best-effort. */ }
         }
 
-        return new PreRevisionIaResult(true, parsed.Resultado, parsed.Confianza, parsed.Nota, parsed.Hallazgos, null, result.InputTokens, result.OutputTokens);
+        return new PreRevisionIaResult(true, resultado, a.Confianza, a.Nota, a.Hallazgos, null, a.InputTokens, a.OutputTokens, a.Sugerencias);
+    }
+
+    // ───────────── Auditoria IA AL CERRAR (Atencion -> "Guardar definitivamente") ─────────────
+
+    public async Task<AuditoriaCierreConfig?> ConfigAuditoriaAlCerrarAsync(Guid historiaClinicaId, CancellationToken ct = default)
+    {
+        var policy = await _policy.GetAsync(ct);
+        if (!policy.AuditoriaIaAlCerrar) { return null; }
+        if (policy.AuditoriaIaFormatos is { Count: > 0 } formatos)
+        {
+            using var db = _dbFactory.Create();
+            var codigo = await db.HistoriasClinicas.AsNoTracking()
+                .Where(h => h.Id == historiaClinicaId)
+                .Join(db.FormDefinitions.AsNoTracking(), h => h.FormDefinitionId, f => f.Id, (h, f) => f.Codigo)
+                .FirstOrDefaultAsync(ct);
+            if (codigo is null || !formatos.Any(f => string.Equals(f, codigo, StringComparison.OrdinalIgnoreCase)))
+            {
+                return null;
+            }
+        }
+        return new AuditoriaCierreConfig(Math.Clamp(policy.AuditoriaIaTimeoutSeg, 30, 180));
+    }
+
+    public async Task<PreRevisionIaResult> RegistrarAuditoriaCierreAsync(
+        Guid historiaClinicaId, AuditoriaIaResultado auditoria, bool cerradaPeseARechazo, Guid actor, CancellationToken ct = default)
+    {
+        if (auditoria.HistoriaClinicaId != historiaClinicaId)
+        {
+            return Err("La auditoria no corresponde a esta historia clinica.");
+        }
+        // Abre (o reusa) el ciclo de revision de la HC ya cerrada y registra el MISMO resultado
+        // que vio el profesional: Ordenes Clinicas llega con el veredicto cargado, sin reprocesar.
+        var rev = await _revision.SolicitarAsync(new SolicitarRevisionCmd(historiaClinicaId, actor, null), ct);
+        var res = await RegistrarAuditoriaAsync(rev.Id, auditoria, ct);
+
+        await AuditarEventoAsync(actor, historiaClinicaId,
+            cerradaPeseARechazo ? "historia-clinica.cerrar-pese-rechazo-ia" : "historia-clinica.auditoria-ia-cierre",
+            new
+            {
+                momento = "cierre",
+                resultado = auditoria.Resultado?.ToString(),
+                confianza = auditoria.Confianza,
+                hallazgos = auditoria.Hallazgos.Count,
+                cerradaPeseARechazo,
+                revisionId = rev.Id,
+            }, ct);
+        return res;
+    }
+
+    public Task RegistrarIntentoCierreAsync(Guid historiaClinicaId, AuditoriaIaResultado auditoria, Guid actor, CancellationToken ct = default)
+        => AuditarEventoAsync(actor, historiaClinicaId, "historia-clinica.auditoria-ia-cierre", new
+        {
+            momento = "intento-corregir",
+            resultado = auditoria.Resultado?.ToString(),
+            confianza = auditoria.Confianza,
+            hallazgos = auditoria.Hallazgos.Count,
+            error = auditoria.Error,
+        }, ct);
+
+    private async Task AuditarEventoAsync(Guid actor, Guid hcId, string accion, object valor, CancellationToken ct)
+    {
+        if (_audit is null) { return; }
+        try
+        {
+            using var db = _dbFactory.Create();
+            var tenantId = await db.HistoriasClinicas.AsNoTracking()
+                .Where(h => h.Id == hcId).Select(h => (Guid?)h.TenantId).FirstOrDefaultAsync(ct);
+            _audit.Write(db, actor, accion, nameof(HistoriaClinica), hcId,
+                previousValue: null, newValue: valor, tenantId: tenantId);
+            await db.SaveChangesAsync(ct);
+        }
+        catch { /* la auditoria de metricas es best-effort */ }
+    }
+
+    /// <summary>Huella de los valores auditados: permite saber si el profesional cambio el texto
+    /// despues de la auditoria (en cuyo caso hay que volver a auditar).</summary>
+    public static string HashValores(string? valoresJson)
+    {
+        var bytes = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(valoresJson ?? ""));
+        return Convert.ToHexString(bytes);
     }
 
     /// <summary>
@@ -280,7 +417,8 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         sb.AppendLine("  \"resultado\": \"Aprobado\" | \"Rechazado\" | \"Neutral\",");
         sb.AppendLine("  \"confianza\": number entre 0 y 1,");
         sb.AppendLine("  \"nota\": \"justificacion clara y especifica de tu decision, en 2 a 4 frases\",");
-        sb.AppendLine("  \"hallazgos\": [\"hallazgo concreto 1\", \"hallazgo concreto 2\"]");
+        sb.AppendLine("  \"hallazgos\": [\"hallazgo concreto 1\", \"hallazgo concreto 2\"],");
+        sb.AppendLine("  \"sugerencias\": [{ \"campo\": \"etiqueta del campo\", \"texto_sugerido\": \"redaccion mejorada\" }]");
         sb.AppendLine("}");
         sb.AppendLine();
         sb.AppendLine("Reglas:");
@@ -352,6 +490,15 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         sb.AppendLine("  'indice' lista el resto en una linea cada una: solo prueban que la atencion existio, no infieras");
         sb.AppendLine("  su contenido. Si el historial viene vacio o 'SIN HISTORIAL', evalua sin ese contraste y no lo");
         sb.AppendLine("  reportes como faltante.");
+        sb.AppendLine("- TEXTO SUGERIDO ('sugerencias'): SOLO si el resultado NO es 'Aprobado', y SOLO para los campos de");
+        sb.AppendLine("  texto del documento_a_revisar que motivaron un hallazgo (maximo 5). 'campo' = la etiqueta del campo");
+        sb.AppendLine("  tal como aparece en el catalogo del formato. 'texto_sugerido' = como deberia haber quedado ese texto.");
+        sb.AppendLine("  REGLAS DURAS: reescribe usando UNICAMENTE hechos que YA estan escritos en el documento_a_revisar;");
+        sb.AppendLine("  NUNCA inventes ni completes signos vitales, dosis, horas, diagnosticos, actividades, respuestas del");
+        sb.AppendLine("  paciente ni datos de otro turno o de otra historia. Si falta un dato que el profesional debe aportar,");
+        sb.AppendLine("  deja el marcador [COMPLETAR: que dato falta]. Si el problema es texto copiado de otra atencion, quita");
+        sb.AppendLine("  lo ajeno a esta atencion y marca con [COMPLETAR: ...] lo que debe describir de ESTE turno. Si el");
+        sb.AppendLine("  resultado es 'Aprobado', devuelve \"sugerencias\": [].");
         sb.AppendLine("- Devuelve JSON puro. Nada de markdown, ni prefijos, ni sufijos, ni ```json```.");
         return sb.ToString();
     }
@@ -451,12 +598,13 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
     /// <summary>Persiste el log completo de una corrida del agente (best-effort). Nunca lanza.</summary>
     private async Task GuardarAgenteLogAsync(
         IApplicationDbContext db,
-        RevisionClinica revision, AiAgent agent, string model,
-        string? systemPrompt, string? contextoEnviado, HistoriaClinicaContextoIa? contexto,
+        RevisionClinica revision, AuditoriaIaTraza traza,
         bool ok, string? error, string? resultado, decimal? confianza,
-        int tokensIn, int tokensOut, string? respuestaCruda, CancellationToken ct,
-        string? nota = null, IReadOnlyList<string>? hallazgos = null)
+        int tokensIn, int tokensOut, CancellationToken ct,
+        string? nota = null, IReadOnlyList<string>? hallazgos = null,
+        IReadOnlyList<SugerenciaTexto>? sugerencias = null)
     {
+        var contexto = traza.Contexto;
         try
         {
             var camposJson = await BuildCamposLegiblesAsync(db, revision.HistoriaClinicaId, ct);
@@ -475,9 +623,9 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
                 TenantId = revision.TenantId,
                 RevisionClinicaId = revision.Id,
                 HistoriaClinicaId = revision.HistoriaClinicaId,
-                AgenteCodigo = string.IsNullOrWhiteSpace(agent.Name) ? IPreRevisionIaService.AgenteNombre : agent.Name,
-                Proveedor = agent.Provider.ToString(),
-                Modelo = model,
+                AgenteCodigo = traza.AgenteNombre,
+                Proveedor = traza.Proveedor,
+                Modelo = traza.Modelo,
                 Ok = ok,
                 Error = error,
                 Resultado = resultado,
@@ -488,11 +636,15 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
                 HallazgosJson = hallazgos is { Count: > 0 }
                     ? JsonSerializer.Serialize(hallazgos, new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping })
                     : null,
-                SystemPrompt = systemPrompt,
-                ContextoEnviado = contextoEnviado,
+                SugerenciasJson = sugerencias is { Count: > 0 }
+                    ? JsonSerializer.Serialize(sugerencias.Select(x => new { campo = x.Campo, texto_sugerido = x.TextoSugerido }),
+                        new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping })
+                    : null,
+                SystemPrompt = traza.SystemPrompt,
+                ContextoEnviado = traza.ContextoJson,
                 CamposLegiblesJson = camposJson,
                 ToolsJson = toolsJson,
-                RespuestaCruda = respuestaCruda,
+                RespuestaCruda = traza.RespuestaCruda,
             });
             await db.SaveChangesAsync(ct);
         }
@@ -573,7 +725,11 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         });
     }
 
-    private sealed record VeredictoParsed(RevisionResultado Resultado, decimal Confianza, string? Nota, IReadOnlyList<string> Hallazgos);
+    private sealed record VeredictoParsed(RevisionResultado Resultado, decimal Confianza, string? Nota,
+        IReadOnlyList<string> Hallazgos, IReadOnlyList<SugerenciaTexto> Sugerencias);
+
+    /// <summary>Solo para tests: parsea la respuesta del modelo y devuelve las sugerencias.</summary>
+    public static IReadOnlyList<SugerenciaTexto> ParsearSugerencias(string texto) => ParseVeredicto(texto).Sugerencias;
 
     private static VeredictoParsed ParseVeredicto(string texto)
     {
@@ -605,7 +761,32 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             }
         }
 
-        return new VeredictoParsed(resultado, confianza, nota, hallazgos);
+        // Texto sugerido (opcional): [{ campo, texto_sugerido }]. Se toleran nombres alternos y
+        // la ausencia del bloque. Solo lectura: nunca se aplica a la HC.
+        var sugerencias = new List<SugerenciaTexto>();
+        if (root.TryGetProperty("sugerencias", out var sEl) && sEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var it in sEl.EnumerateArray())
+            {
+                if (it.ValueKind != JsonValueKind.Object) { continue; }
+                string? Prop(params string[] nombres)
+                {
+                    foreach (var n in nombres)
+                    {
+                        if (it.TryGetProperty(n, out var v) && v.ValueKind == JsonValueKind.String) { return v.GetString(); }
+                    }
+                    return null;
+                }
+                var campo = Prop("campo", "field");
+                var sugerido = Prop("texto_sugerido", "textoSugerido", "sugerencia");
+                if (!string.IsNullOrWhiteSpace(campo) && !string.IsNullOrWhiteSpace(sugerido))
+                {
+                    sugerencias.Add(new SugerenciaTexto(campo!.Trim(), sugerido!.Trim()));
+                }
+            }
+        }
+
+        return new VeredictoParsed(resultado, confianza, nota, hallazgos, sugerencias);
     }
 
     private static RevisionResultado ParseResultado(string? s)

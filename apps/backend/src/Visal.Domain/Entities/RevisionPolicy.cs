@@ -84,4 +84,17 @@ public class RevisionPolicy : TenantEntity
 
     /// <summary>Presupuesto aproximado de tokens del bloque de historial (chars/4). Default 60000.</summary>
     public int HistorialMaxTokens { get; set; } = 60000;
+
+    /// <summary>Auditoria IA AL CERRAR (Atencion -> "Guardar definitivamente"): el agente revisa la
+    /// HC antes de cerrarla y muestra el resultado al profesional. Informativo, no bloquea el cierre.
+    /// Apagado por defecto (consume tokens por cada cierre).</summary>
+    public bool AuditoriaIaAlCerrar { get; set; }
+
+    /// <summary>Codigos de formato (FormDefinition.Codigo) que se auditan al cerrar, como array JSON.
+    /// Null o vacio = todos los formatos.</summary>
+    public string? AuditoriaIaFormatosJson { get; set; }
+
+    /// <summary>Segundos maximos que el profesional espera la auditoria al cerrar; si se pasa, la HC
+    /// se cierra normal y la auditoria sigue en segundo plano.</summary>
+    public int AuditoriaIaTimeoutSeg { get; set; } = 90;
 }

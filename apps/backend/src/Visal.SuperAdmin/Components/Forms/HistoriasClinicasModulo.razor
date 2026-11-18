@@ -10,6 +10,7 @@
 @inject IFormDefinitionService FormsSvc
 @inject IAsignacionService AsigSvc
 @inject IHistoriaClinicaService HcSvc
+@inject Visal.Application.Revision.Ia.IPreRevisionIaService PreIaSvc
 @inject IAutorizacionTokenService AutTokenSvc
 @inject IOrdenMedicamentoService OrdMedSvc
 @inject IOrdenServicioService OrdSrvSvc
@@ -1140,7 +1141,141 @@
     .hc-sol-aviso { border: 1px solid; border-radius: 999px; padding: 2px 10px; font-size: 12px; cursor: pointer; white-space: nowrap; }
     .hc-sol-pend { background: #eff6ff; border-color: #bfdbfe; color: #1e3a8a; }
     .hc-sol-rech { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
+    /* ===== Auditoria IA al cerrar ===== */
+    .aud-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:3000; }
+    .aud-modal { position:fixed; z-index:3001; top:50%; left:50%; transform:translate(-50%,-50%); width:min(680px, 94vw);
+                 max-height:88vh; display:flex; flex-direction:column; background:#fff; border-radius:12px;
+                 box-shadow:0 20px 60px rgba(0,0,0,.35); overflow:hidden; }
+    .aud-head { display:flex; gap:14px; align-items:center; padding:18px 22px; border-bottom:1px solid #e2e8f0; }
+    .aud-head-run { background:linear-gradient(135deg,#eef2ff,#f0f9ff); }
+    .aud-head-bad { background:#fef2f2; }
+    .aud-head-warn { background:#fffbeb; }
+    .aud-title { font-size:16px; font-weight:700; color:#0f172a; }
+    .aud-sub { font-size:12.5px; color:#475569; margin-top:2px; }
+    .aud-ic { font-size:28px; line-height:1; }
+    .aud-radar { position:relative; width:54px; height:54px; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
+    .aud-radar b { font-size:26px; position:relative; z-index:1; }
+    .aud-radar span { position:absolute; inset:0; border-radius:50%; border:2px solid #6366f1; opacity:0; animation:aud-pulse 2.4s infinite; }
+    .aud-radar span:nth-child(2) { animation-delay:.8s; }
+    .aud-radar span:nth-child(3) { animation-delay:1.6s; }
+    @@keyframes aud-pulse { 0% { transform:scale(.4); opacity:.9; } 100% { transform:scale(1.25); opacity:0; } }
+    .aud-steps { list-style:none; margin:0; padding:14px 22px 6px; }
+    .aud-step { display:flex; gap:10px; align-items:center; font-size:13px; padding:5px 0; color:#94a3b8; }
+    .aud-step-ok { color:#15803d; }
+    .aud-step-run { color:#3730a3; font-weight:600; }
+    .aud-step-run .aud-step-ic { animation:aud-blink 1s infinite; }
+    @@keyframes aud-blink { 50% { opacity:.25; } }
+    .aud-step-ic { width:16px; text-align:center; }
+    .aud-bar { height:6px; margin:8px 22px 4px; background:#e2e8f0; border-radius:3px; overflow:hidden; }
+    .aud-bar-fill { height:100%; background:linear-gradient(90deg,#6366f1,#0ea5e9); transition:width 1s linear; }
+    .aud-time { text-align:right; font-size:11px; color:#64748b; padding:0 22px 14px; }
+    .aud-ok-wrap { text-align:center; padding:30px 22px; }
+    .aud-ok-check { width:64px; height:64px; margin:0 auto 12px; border-radius:50%; background:#16a34a; color:#fff;
+                    font-size:34px; display:flex; align-items:center; justify-content:center; animation:aud-pop .45s ease-out; }
+    @@keyframes aud-pop { 0% { transform:scale(.3); opacity:0; } 80% { transform:scale(1.1); } 100% { transform:scale(1); opacity:1; } }
+    .aud-body { padding:14px 22px; overflow-y:auto; }
+    .aud-nota { font-size:13px; color:#1e293b; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px 12px; margin-top:10px; text-align:left; }
+    .aud-sec { font-size:12px; font-weight:700; text-transform:uppercase; color:#334155; margin:14px 0 6px; letter-spacing:.03em; }
+    .aud-hall { margin:0; padding-left:20px; font-size:13px; color:#1e293b; }
+    .aud-hall li { margin-bottom:6px; }
+    .aud-sug-help { font-size:11.5px; color:#64748b; margin-bottom:6px; }
+    .aud-sug { border:1px solid #c7d2fe; border-radius:8px; margin-bottom:8px; overflow:hidden; }
+    .aud-sug-h { display:flex; justify-content:space-between; align-items:center; background:#eef2ff; padding:6px 10px; font-size:12.5px; }
+    .aud-sug-t { padding:8px 10px; font-size:12.5px; white-space:pre-wrap; color:#1e293b; }
+    .aud-copy { border:1px solid #a5b4fc; background:#fff; color:#3730a3; border-radius:6px; font-size:11.5px; padding:2px 8px; cursor:pointer; }
+    .aud-foot { display:flex; justify-content:flex-end; gap:8px; padding:12px 22px; border-top:1px solid #e2e8f0; background:#f8fafc; }
 </style>
+
+@* ===== Auditoria IA al cerrar ("Guardar definitivamente") ===== *@
+@if (_audShow)
+{
+    <div class="aud-backdrop"></div>
+    <div class="aud-modal" role="dialog" aria-modal="true">
+        @if (_audFase == "auditando")
+        {
+            <div class="aud-head aud-head-run">
+                <div class="aud-radar"><span></span><span></span><span></span><b>&#129302;</b></div>
+                <div>
+                    <div class="aud-title">El auditor IA está revisando la historia</div>
+                    <div class="aud-sub">Esto puede tardar hasta @_audTimeout s. No cierres esta ventana.</div>
+                </div>
+            </div>
+            <ul class="aud-steps">
+                @for (var i = 0; i < AudPasos.Length; i++)
+                {
+                    var est = i < _audPaso ? "ok" : i == _audPaso ? "run" : "pend";
+                    <li class="aud-step aud-step-@est">
+                        <span class="aud-step-ic">@(est == "ok" ? "✔" : est == "run" ? "●" : "○")</span>
+                        @AudPasos[i]
+                    </li>
+                }
+            </ul>
+            <div class="aud-bar"><div class="aud-bar-fill" style="width:@(Math.Min(100, _audSeg * 100 / Math.Max(1, _audTimeout)))%"></div></div>
+            <div class="aud-time">@_audSeg s</div>
+        }
+        else if (_audFase == "aprobada" && _audRes is not null)
+        {
+            <div class="aud-ok-wrap">
+                <div class="aud-ok-check">&#10004;</div>
+                <div class="aud-title">Aprobada por el auditor IA</div>
+                <div class="aud-sub">Confianza @((_audRes.Confianza * 100m).ToString("0"))%. Cerrando la historia...</div>
+                @if (!string.IsNullOrWhiteSpace(_audRes.Nota)) { <div class="aud-nota">@_audRes.Nota</div> }
+            </div>
+        }
+        else if (_audFase == "rechazada" && _audRes is not null)
+        {
+            var esRech = _audRes.Resultado == Visal.Domain.Entities.RevisionResultado.Rechazado;
+            <div class="aud-head @(esRech ? "aud-head-bad" : "aud-head-warn")">
+                <div class="aud-ic">@(esRech ? "⚠" : "❓")</div>
+                <div>
+                    <div class="aud-title">@(esRech ? "El auditor IA rechazaría esta historia" : "El auditor IA no pudo aprobar esta historia")</div>
+                    <div class="aud-sub">Confianza @((_audRes.Confianza * 100m).ToString("0"))%. Revisa los hallazgos; puedes corregir o cerrar de todas formas.</div>
+                </div>
+            </div>
+            <div class="aud-body">
+                @if (!string.IsNullOrWhiteSpace(_audRes.Nota)) { <div class="aud-nota">@_audRes.Nota</div> }
+                @if (_audRes.Hallazgos.Count > 0)
+                {
+                    <div class="aud-sec">Hallazgos</div>
+                    <ol class="aud-hall">
+                        @foreach (var hz in _audRes.Hallazgos) { <li>@hz</li> }
+                    </ol>
+                }
+                @if (_audRes.Sugerencias.Count > 0)
+                {
+                    <div class="aud-sec">Cómo podría quedar el texto (sugerencia del auditor)</div>
+                    <div class="aud-sug-help">Usa solo lo que ya escribiste; lo marcado como [COMPLETAR: ...] debes aportarlo tú. No se aplica solo: cópialo si te sirve.</div>
+                    @foreach (var sg in _audRes.Sugerencias)
+                    {
+                        <div class="aud-sug">
+                            <div class="aud-sug-h">
+                                <b>@sg.Campo</b>
+                                <button type="button" class="aud-copy" @onclick="() => CopiarSugerenciaAsync(sg.TextoSugerido)">&#128203; Copiar</button>
+                            </div>
+                            <div class="aud-sug-t">@sg.TextoSugerido</div>
+                        </div>
+                    }
+                }
+            </div>
+            <div class="aud-foot">
+                <button class="btn btn-outline-secondary btn-sm" disabled="@_audCerrando" @onclick="VolverACorregirAsync">&#9998; Volver a corregir</button>
+                <button class="btn btn-warning btn-sm" disabled="@_audCerrando" @onclick="CerrarDeTodasFormasAsync">
+                    @(_audCerrando ? "Cerrando..." : "Cerrar de todas formas")
+                </button>
+            </div>
+        }
+        else if (_audFase == "sinresultado")
+        {
+            <div class="aud-head aud-head-warn">
+                <div class="aud-ic">&#8987;</div>
+                <div>
+                    <div class="aud-title">La auditoría no alcanzó a terminar</div>
+                    <div class="aud-sub">@(_audMsg ?? "La historia se cerrará normalmente.")</div>
+                </div>
+            </div>
+        }
+    </div>
+}
 
 @if (_tokenModalOpen)
 {
@@ -1967,6 +2102,7 @@
     public void Dispose()
     {
         _acompSelector.StateChanged -= OnAcompStateChanged;
+        try { _audCts?.Cancel(); _audCts?.Dispose(); } catch { }
     }
 
     private bool _autoCargaIntentada;
@@ -3008,6 +3144,18 @@
             // proximos documentos la resuelvan en vivo y la ficha deje de salir
             // "sin firma". No debe bloquear el cierre si algo falla.
             await AutoguardarFirmaProfesionalSiFaltaAsync(h);
+
+            // Auditoria IA al cerrar: si la politica la tiene encendida para este formato, el
+            // agente audita ANTES de cerrar y el profesional ve el resultado. Nunca bloquea.
+            Visal.Application.Revision.Ia.AuditoriaCierreConfig? audCfg = null;
+            try { audCfg = await PreIaSvc.ConfigAuditoriaAlCerrarAsync(h.Id); }
+            catch (Exception exCfg) { Log.LogWarning(exCfg, "No se pudo leer la config de auditoria IA al cerrar"); }
+            if (audCfg is not null)
+            {
+                await AuditarYCerrarAsync(h, audCfg);
+                return;
+            }
+
             try
             {
                 await HcSvc.CerrarAsync(h.Id, SerializeValores(_valores), await ResolverActorAsync());
@@ -3023,11 +3171,212 @@
             }
             h.Estado = "Cerrada";
         }
+        LimpiarTrasCierre();
+    }
+
+    private void LimpiarTrasCierre()
+    {
         _schemaActual = null; _valores = new();
         _imprimirMsg = null;
         _saveStatus = "limpio";
         _solAviso = null; _solEstado = null;
         _ultimoGuardado = null;
+    }
+
+    // ───────────── Auditoria IA al cerrar ─────────────
+    private static readonly string[] AudPasos =
+    {
+        "Leyendo la historia clínica",
+        "Comparando con el historial del paciente",
+        "Verificando órdenes, medicamentos y fechas",
+        "Emitiendo el concepto de auditoría",
+    };
+    private bool _audShow;
+    private string _audFase = "";           // auditando | aprobada | rechazada | sinresultado
+    private Visal.Application.Revision.Ia.AuditoriaIaResultado? _audRes;
+    private int _audSeg, _audTimeout = 90, _audPaso;
+    private bool _audCerrando;
+    private string? _audMsg;
+    private CancellationTokenSource? _audCts;
+    private HistoriaRow? _audHc;
+    // Ultima auditoria hecha (hc + texto auditado + decision): si el cierre se interrumpe por el
+    // token de fecha y se reintenta SIN cambios, se reusa en vez de volver a pagar la auditoria.
+    private (Guid HcId, string Valores, Visal.Application.Revision.Ia.AuditoriaIaResultado Res, bool PeseRechazo)? _audReuso;
+
+    private async Task AuditarYCerrarAsync(HistoriaRow h, Visal.Application.Revision.Ia.AuditoriaCierreConfig cfg)
+    {
+        var actor = await ResolverActorAsync();
+        var valoresJson = SerializeValores(_valores);
+
+        // Reuso: mismo texto ya auditado (p.ej. volvio de autorizar el token de fecha).
+        if (_audReuso is { } prev && prev.HcId == h.Id && prev.Valores == valoresJson)
+        {
+            _audHc = h; _audRes = prev.Res;
+            await CerrarYRegistrarAsync(prev.PeseRechazo);
+            return;
+        }
+
+        // 1) El agente lee la HC de la BD: persistir lo que hay en pantalla.
+        try { await HcSvc.GuardarValoresAsync(h.Id, valoresJson, Guid.Empty); }
+        catch (Exception ex) { Log.LogWarning(ex, "No se pudieron guardar los valores antes de auditar"); }
+
+        // 2) Control de fecha ANTES de gastar IA: si pide token, se pide primero (como hoy).
+        try
+        {
+            var ctrl = await HcSvc.EvaluarControlFechaAsync(h.Id, actor);
+            if (ctrl.RequiereToken)
+            {
+                AplicarEstadoSolicitud(ctrl);
+                AbrirTokenModal(ctrl.Detalle, cerrarTrasAutorizar: true);
+                return;
+            }
+        }
+        catch { /* si falla la evaluacion, CerrarAsync la vuelve a hacer */ }
+
+        // 3) Auditoria con tope de tiempo.
+        _audHc = h; _audRes = null; _audMsg = null; _audCerrando = false;
+        _audTimeout = cfg.TimeoutSeg; _audSeg = 0; _audPaso = 0;
+        _audFase = "auditando"; _audShow = true;
+        StateHasChanged();
+
+        _audCts?.Dispose();
+        _audCts = new CancellationTokenSource(TimeSpan.FromSeconds(cfg.TimeoutSeg));
+        var tick = TickAuditoriaAsync(_audCts.Token);
+        Visal.Application.Revision.Ia.AuditoriaIaResultado? res = null;
+        var vencida = false;
+        try { res = await PreIaSvc.AuditarHcAsync(h.Id, null, _audCts.Token); }
+        catch (OperationCanceledException) { vencida = true; }
+        catch (Exception ex)
+        {
+            Log.LogWarning(ex, "Auditoria IA al cerrar fallo");
+            res = Visal.Application.Revision.Ia.AuditoriaIaResultado.Fallo(h.Id, ex.Message);
+        }
+        try { _audCts.Cancel(); } catch { }
+        try { await tick; } catch { }
+
+        if (res is null || !res.Ok || res.Resultado is null)
+        {
+            // Sin veredicto: se cierra normal. Si fue por tiempo o el proveedor fallo, la
+            // auditoria sigue en segundo plano (worker); si es de configuracion, segun politica.
+            var seguir = vencida || res?.Traza is not null;
+            _audFase = "sinresultado";
+            _audMsg = vencida
+                ? "Tardó más de " + cfg.TimeoutSeg + " s. La historia se cerrará y la auditoría continuará en segundo plano; el resultado quedará en Órdenes Clínicas."
+                : "No fue posible auditar (" + (res?.Error ?? "error desconocido") + "). La historia se cerrará normalmente.";
+            StateHasChanged();
+            await Task.Delay(3500);
+            await CerrarSinAuditoriaAsync(seguir
+                ? Visal.Application.Tenancy.PreRevisionAlCerrar.Forzar
+                : Visal.Application.Tenancy.PreRevisionAlCerrar.SegunPolitica);
+            return;
+        }
+
+        _audRes = res;
+        _audReuso = (h.Id, valoresJson, res, false);
+        if (res.Resultado == Visal.Domain.Entities.RevisionResultado.Aprobado)
+        {
+            _audFase = "aprobada";
+            StateHasChanged();
+            await Task.Delay(1800);
+            await CerrarYRegistrarAsync(peseRechazo: false);
+            return;
+        }
+        _audFase = "rechazada";
+        StateHasChanged();
+    }
+
+    private async Task TickAuditoriaAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct))
+            {
+                _audSeg++;
+                _audPaso = _audSeg < 4 ? 0 : _audSeg < 12 ? 1 : _audSeg < 24 ? 2 : 3;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task VolverACorregirAsync()
+    {
+        if (_audHc is HistoriaRow h && _audRes is not null)
+        {
+            try { await PreIaSvc.RegistrarIntentoCierreAsync(h.Id, _audRes, await ResolverActorAsync()); }
+            catch { /* metricas best-effort */ }
+        }
+        _audReuso = null;
+        _audShow = false; _audFase = ""; _audRes = null;
+    }
+
+    private Task CerrarDeTodasFormasAsync()
+    {
+        if (_audReuso is { } r) { _audReuso = (r.HcId, r.Valores, r.Res, true); }
+        return CerrarYRegistrarAsync(peseRechazo: true);
+    }
+
+    /// <summary>Cierra la HC (sin pre-revision en segundo plano: ya se audito) y registra el MISMO
+    /// resultado en el ciclo de revision, para que Ordenes Clinicas no reprocese.</summary>
+    private async Task CerrarYRegistrarAsync(bool peseRechazo)
+    {
+        if (_audHc is not HistoriaRow h || _audRes is null) { _audShow = false; return; }
+        _audCerrando = true;
+        StateHasChanged();
+        var actor = await ResolverActorAsync();
+        try
+        {
+            await HcSvc.CerrarAsync(h.Id, SerializeValores(_valores), actor,
+                Visal.Application.Tenancy.PreRevisionAlCerrar.Omitir);
+        }
+        catch (Visal.Application.Tenancy.CierreRequiereAutorizacionException ex)
+        {
+            // El token de fecha se pide igual que hoy; la auditoria queda guardada para reusarla.
+            _audShow = false; _audCerrando = false;
+            try { AplicarEstadoSolicitud(await HcSvc.EvaluarControlFechaAsync(h.Id, actor)); } catch { }
+            AbrirTokenModal(ex.Message, cerrarTrasAutorizar: true);
+            return;
+        }
+        catch (Exception ex)
+        {
+            _audCerrando = false;
+            _audFase = "sinresultado";
+            _audMsg = "No se pudo cerrar la historia: " + ex.Message;
+            StateHasChanged();
+            return;
+        }
+        h.Estado = "Cerrada";
+        try { await PreIaSvc.RegistrarAuditoriaCierreAsync(h.Id, _audRes, peseRechazo, actor); }
+        catch (Exception ex) { Log.LogWarning(ex, "No se pudo registrar la auditoria IA del cierre"); }
+        _audReuso = null;
+        _audShow = false; _audFase = ""; _audRes = null; _audCerrando = false;
+        LimpiarTrasCierre();
+        StateHasChanged();
+    }
+
+    private async Task CerrarSinAuditoriaAsync(Visal.Application.Tenancy.PreRevisionAlCerrar modo)
+    {
+        if (_audHc is not HistoriaRow h) { _audShow = false; return; }
+        var actor = await ResolverActorAsync();
+        try { await HcSvc.CerrarAsync(h.Id, SerializeValores(_valores), actor, modo); }
+        catch (Visal.Application.Tenancy.CierreRequiereAutorizacionException ex)
+        {
+            _audShow = false;
+            try { AplicarEstadoSolicitud(await HcSvc.EvaluarControlFechaAsync(h.Id, actor)); } catch { }
+            AbrirTokenModal(ex.Message, cerrarTrasAutorizar: true);
+            return;
+        }
+        h.Estado = "Cerrada";
+        _audShow = false; _audFase = "";
+        LimpiarTrasCierre();
+        StateHasChanged();
+    }
+
+    private async Task CopiarSugerenciaAsync(string texto)
+    {
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", texto); }
+        catch { /* sin permiso de portapapeles: el texto sigue visible para copiarlo a mano */ }
     }
 
     /// <summary>

@@ -127,8 +127,30 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
             l.Id, l.CreatedAt, l.AgenteCodigo, l.Proveedor, l.Modelo, l.Ok, l.Error,
             l.Resultado, l.Confianza, l.TokensIn, l.TokensOut,
             l.Nota, DeserializarHallazgos(l.HallazgosJson),
-            l.SystemPrompt, l.ContextoEnviado, l.CamposLegiblesJson, l.ToolsJson, l.RespuestaCruda))
+            l.SystemPrompt, l.ContextoEnviado, l.CamposLegiblesJson, l.ToolsJson, l.RespuestaCruda,
+            DeserializarSugerencias(l.SugerenciasJson)))
             .ToList();
+    }
+
+    private static IReadOnlyList<Visal.Application.Revision.Ia.SugerenciaTexto> DeserializarSugerencias(string? json)
+    {
+        var res = new List<Visal.Application.Revision.Ia.SugerenciaTexto>();
+        if (string.IsNullOrWhiteSpace(json)) { return res; }
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            foreach (var it in doc.RootElement.EnumerateArray())
+            {
+                var campo = it.TryGetProperty("campo", out var c) ? c.GetString() : null;
+                var texto = it.TryGetProperty("texto_sugerido", out var t) ? t.GetString() : null;
+                if (!string.IsNullOrWhiteSpace(campo) && !string.IsNullOrWhiteSpace(texto))
+                {
+                    res.Add(new Visal.Application.Revision.Ia.SugerenciaTexto(campo!, texto!));
+                }
+            }
+        }
+        catch { /* JSON viejo o corrupto: sin sugerencias */ }
+        return res;
     }
 
     private static IReadOnlyList<string> DeserializarHallazgos(string? json)
@@ -246,7 +268,12 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
         using var db = _dbFactory.Create();
         var (revision, tenantId, now) = await LoadForMutationAsync(db, cmd.RevisionClinicaId, ct);
 
-        if (!EsTransicionValida(revision.EstadoAgregado, RevisionEstadoAgregado.Aprobada))
+        // La adopcion automatica ocurre justo despues del veredicto del agente, cuando la revision
+        // esta en PreRevision (o SinRevisar). Antes solo se aceptaba EnRevision (regla de la
+        // aprobacion HUMANA) y la adopcion fallaba siempre en silencio. Se permite desde esos
+        // estados solo para el sistema; la aprobacion humana sigue exigiendo EnRevision.
+        var desdeAgente = revision.EstadoAgregado is RevisionEstadoAgregado.PreRevision or RevisionEstadoAgregado.SinRevisar;
+        if (!desdeAgente && !EsTransicionValida(revision.EstadoAgregado, RevisionEstadoAgregado.Aprobada))
         {
             throw new InvalidOperationException(
                 $"Transicion invalida: no se puede aprobar por sistema desde {revision.EstadoAgregado}.");

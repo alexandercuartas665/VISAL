@@ -1169,6 +1169,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Confianza).HasColumnType("numeric(4,3)");
             b.Property(x => x.Nota).HasColumnType("text");
             b.Property(x => x.HallazgosJson).HasColumnType("text");
+            b.Property(x => x.SugerenciasJson).HasColumnType("text");
             b.Property(x => x.Error).HasColumnType("text");
             b.Property(x => x.SystemPrompt).HasColumnType("text");
             b.Property(x => x.ContextoEnviado).HasColumnType("text");

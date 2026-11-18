@@ -202,6 +202,12 @@ public interface IHistoriaClinicaService
     /// limite del tipo de servicio y la HC no tiene autorizacion (token) para esa fecha.</summary>
     Task<bool> CerrarAsync(Guid id, string valoresJson, Guid actor, CancellationToken ct = default);
 
+    /// <summary>Igual que <see cref="CerrarAsync(Guid,string,Guid,CancellationToken)"/> pero decide
+    /// la pre-revision IA en segundo plano: <see cref="PreRevisionAlCerrar.Omitir"/> cuando el cierre
+    /// ya trae la auditoria hecha (auditoria al cerrar), <see cref="PreRevisionAlCerrar.Forzar"/>
+    /// cuando la auditoria al cerrar no alcanzo a terminar y debe seguir en segundo plano.</summary>
+    Task<bool> CerrarAsync(Guid id, string valoresJson, Guid actor, PreRevisionAlCerrar preRevision, CancellationToken ct = default);
+
     /// <summary>Evalua el control de fecha de atencion de la HC (lee su FechaAtencion persistida).
     /// Lo llama la UI tras cada autoguardado para pedir el token cuando la fecha se sale del limite.
     /// <paramref name="actor"/> (opcional): si tiene el permiso historias.sin-control-cierre (o es
@@ -288,3 +294,14 @@ public sealed record CopiarHistoriaRequest(
     Guid? SesionId = null,
     Guid? AsignacionTurnoId = null,
     int? SessionNo = null);
+
+/// <summary>Que hacer con la pre-revision IA en segundo plano al cerrar una HC.</summary>
+public enum PreRevisionAlCerrar
+{
+    /// <summary>Lo que diga la politica (AutoTriggerCierre / PreRevisionIAAutoTrigger).</summary>
+    SegunPolitica = 0,
+    /// <summary>No abrir ciclo ni encolar: la auditoria al cerrar ya se hizo y se registra aparte.</summary>
+    Omitir = 1,
+    /// <summary>Abrir ciclo y encolar la pre-revision IA aunque la politica no lo pida.</summary>
+    Forzar = 2,
+}

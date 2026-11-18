@@ -9653,6 +9653,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("revision_clinica_id");
 
+                    b.Property<string>("SugerenciasJson")
+                        .HasColumnType("text")
+                        .HasColumnName("sugerencias_json");
+
                     b.Property<string>("SystemPrompt")
                         .HasColumnType("text")
                         .HasColumnName("system_prompt");
@@ -9866,6 +9870,18 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<bool>("AdopcionAutomaticaAgente")
                         .HasColumnType("boolean")
                         .HasColumnName("adopcion_automatica_agente");
+
+                    b.Property<bool>("AuditoriaIaAlCerrar")
+                        .HasColumnType("boolean")
+                        .HasColumnName("auditoria_ia_al_cerrar");
+
+                    b.Property<string>("AuditoriaIaFormatosJson")
+                        .HasColumnType("text")
+                        .HasColumnName("auditoria_ia_formatos_json");
+
+                    b.Property<int>("AuditoriaIaTimeoutSeg")
+                        .HasColumnType("integer")
+                        .HasColumnName("auditoria_ia_timeout_seg");
 
                     b.Property<bool>("AutoTriggerCierre")
                         .HasColumnType("boolean")

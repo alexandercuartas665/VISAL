@@ -6,6 +6,7 @@
 @using Visal.Application.Tenancy
 @inject IRevisionPolicyService Svc
 @inject IAiUsageService UsageSvc
+@inject Visal.Application.Tenancy.IFormDefinitionService FormsSvc
 
 <PageTitle>Politica de Revision Clinica - Visal</PageTitle>
 
@@ -224,6 +225,57 @@ else if (_policy is not null)
         </div>
     </div>
 
+    <div class="ase-card">
+        <div class="ase-card-h">Auditoría IA al cerrar la historia</div>
+        <div class="ase-card-body">
+            <div class="rp-row rp-row-hero">
+                <label class="rp-switch">
+                    <input type="checkbox" @bind="_policy.AuditoriaIaAlCerrar" />
+                    <span class="rp-switch-l">Auditar con IA al pulsar "Guardar definitivamente"</span>
+                </label>
+                <p class="rp-help">
+                    Antes de cerrar, el agente de revisión audita la historia y le muestra el resultado al profesional.
+                    Si la <strong>aprueba</strong>, la historia se cierra sola; si la <strong>rechaza</strong>, muestra los hallazgos y
+                    el texto sugerido, y el profesional elige <em>volver a corregir</em> o <em>cerrar de todas formas</em>.
+                    Es informativo: nunca bloquea el cierre. El resultado queda en Órdenes Clínicas sin volver a procesarlo.
+                </p>
+                <p class="rp-help">
+                    Costo aproximado: ~US$0,025 por historia auditada (cada intento de cierre se audita). La aprobación
+                    automática de la revisión usa <b>Adopción automática del veredicto</b> y el <b>umbral de confianza</b>
+                    configurados arriba.
+                </p>
+            </div>
+            <div class="rp-grid" style="margin-top:12px;">
+                <div class="rp-field">
+                    <label>Tiempo máximo de espera (segundos)</label>
+                    <input type="number" class="form-control form-control-sm" min="30" max="180" step="5"
+                           disabled="@(!_policy.AuditoriaIaAlCerrar)"
+                           @bind="_policy.AuditoriaIaTimeoutSeg" />
+                    <small class="rp-help-sm">Si la auditoría tarda más, la historia se cierra normal y la auditoría sigue en segundo plano. Default 90.</small>
+                </div>
+                <div class="rp-field">
+                    <label>Formatos que se auditan al cerrar (@(_formatosSel.Count == 0 ? "todos" : _formatosSel.Count.ToString()))</label>
+                    <input type="text" class="form-control form-control-sm" placeholder="Buscar formato..."
+                           disabled="@(!_policy.AuditoriaIaAlCerrar)"
+                           @bind="_formatoFiltro" @bind:event="oninput" />
+                    <div class="rp-fmt-list">
+                        @foreach (var f in _formatos.Where(f => string.IsNullOrWhiteSpace(_formatoFiltro)
+                                                              || (f.Codigo + " " + f.Nombre).Contains(_formatoFiltro, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            var marcado = _formatosSel.Contains(f.Codigo);
+                            <label class="rp-fmt">
+                                <input type="checkbox" checked="@marcado" disabled="@(!_policy.AuditoriaIaAlCerrar)"
+                                       @onchange="e => ToggleFormato(f.Codigo, e.Value is bool b && b)" />
+                                <span>@f.Nombre</span>
+                            </label>
+                        }
+                    </div>
+                    <small class="rp-help-sm">Ninguno marcado = se auditan todos los formatos. Marca algunos para un piloto.</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
     @if (_msg is not null) { <div class="ase-ok" style="margin-top:12px;">@_msg</div> }
     @if (_error is not null) { <div class="ase-alert" style="margin-top:12px;">@_error</div> }
 
@@ -247,6 +299,8 @@ else if (_policy is not null)
     .rp-field > label { display:block; font-size:12px; font-weight:600; color:#334155; margin-bottom:6px; }
     .rp-field input[type=checkbox] { margin-right:6px; }
     .rp-actions { display:flex; justify-content:flex-end; padding:14px 0; }
+    .rp-fmt-list { max-height:220px; overflow-y:auto; border:1px solid #e5e7eb; border-radius:6px; padding:6px 8px; margin-top:6px; }
+    .rp-fmt { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:400 !important; color:#334155; padding:2px 0; margin:0; }
 </style>
 
 @code {
@@ -266,6 +320,8 @@ else if (_policy is not null)
         public int HistorialMeses { get; set; } = 8;
         public int HistorialMaxCompletas { get; set; } = 30;
         public int HistorialMaxTokens { get; set; } = 60000;
+        public bool AuditoriaIaAlCerrar { get; set; }
+        public int AuditoriaIaTimeoutSeg { get; set; } = 90;
     }
 
     private PolicyModel? _policy;
@@ -324,9 +380,32 @@ else if (_policy is not null)
                 HistorialMeses = dto.HistorialMeses,
                 HistorialMaxCompletas = dto.HistorialMaxCompletas,
                 HistorialMaxTokens = dto.HistorialMaxTokens,
+                AuditoriaIaAlCerrar = dto.AuditoriaIaAlCerrar,
+                AuditoriaIaTimeoutSeg = dto.AuditoriaIaTimeoutSeg,
             };
+            _formatosSel = new HashSet<string>(dto.AuditoriaIaFormatos ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                // Formatos clinicos activos (sin las ordenes ni escalas/consentimientos).
+                var excluir = new[] { "FORMATO", "ESCALAS", "CONSENTIMIENTO" };
+                _formatos = (await FormsSvc.ListAsync())
+                    .Where(f => f.Activo && !string.IsNullOrWhiteSpace(f.Codigo)
+                                && !excluir.Contains((f.Tipo ?? "").Trim().ToUpperInvariant()))
+                    .OrderBy(f => f.Nombre, StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+            }
+            catch { _formatos = new(); }
         }
         catch (Exception ex) { _error = "No se pudo cargar la politica: " + ex.Message; }
+    }
+
+    private List<Visal.Application.Tenancy.FormDefinitionDto> _formatos = new();
+    private HashSet<string> _formatosSel = new(StringComparer.OrdinalIgnoreCase);
+    private string _formatoFiltro = "";
+
+    private void ToggleFormato(string codigo, bool marcado)
+    {
+        if (marcado) { _formatosSel.Add(codigo); } else { _formatosSel.Remove(codigo); }
     }
 
     private async Task GuardarAsync()
@@ -348,7 +427,10 @@ else if (_policy is not null)
                 _policy.EnviarHistorialPaciente,
                 _policy.HistorialMeses,
                 _policy.HistorialMaxCompletas,
-                _policy.HistorialMaxTokens);
+                _policy.HistorialMaxTokens,
+                _policy.AuditoriaIaAlCerrar,
+                _formatosSel.ToList(),
+                _policy.AuditoriaIaTimeoutSeg);
             await Svc.SaveAsync(dto, _actorId);
             _msg = "Politica guardada. Aplica en el proximo cierre de HC.";
         }

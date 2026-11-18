@@ -689,7 +689,10 @@ public sealed class HistoriaClinicaService(
             .AnyAsync(ct);
     }
 
-    public async Task<bool> CerrarAsync(Guid id, string valoresJson, Guid actor, CancellationToken ct = default)
+    public Task<bool> CerrarAsync(Guid id, string valoresJson, Guid actor, CancellationToken ct = default)
+        => CerrarAsync(id, valoresJson, actor, PreRevisionAlCerrar.SegunPolitica, ct);
+
+    public async Task<bool> CerrarAsync(Guid id, string valoresJson, Guid actor, PreRevisionAlCerrar preRevision, CancellationToken ct = default)
     {
         using var db = dbFactory.Create();
         var e = await db.HistoriasClinicas.FirstOrDefaultAsync(h => h.Id == id, ct);
@@ -755,7 +758,13 @@ public sealed class HistoriaClinicaService(
         try
         {
             var policy = await revPolicy.GetAsync(ct);
-            if (policy.AutoTriggerCierre)
+            // Auditoria al cerrar (Atencion): Omitir = ya se audito y se registra aparte (sin doble
+            // costo); Forzar = la auditoria no alcanzo a terminar -> sigue en segundo plano.
+            var abrirCiclo = preRevision == PreRevisionAlCerrar.Forzar
+                             || (preRevision == PreRevisionAlCerrar.SegunPolitica && policy.AutoTriggerCierre);
+            var encolarIa = preRevision == PreRevisionAlCerrar.Forzar
+                            || (preRevision == PreRevisionAlCerrar.SegunPolitica && policy.PreRevisionIAAutoTrigger);
+            if (abrirCiclo)
             {
                 var rev = await kanban.SolicitarSiFaltaAsync(e.Id, actor, ct);
 
@@ -769,7 +778,7 @@ public sealed class HistoriaClinicaService(
                 // El worker maneja sus propios errores; si el channel falla al
                 // encolar (imposible en unbounded, pero por robustez) el cierre
                 // sigue OK y solo pierde la pre-revision automatica.
-                if (policy.PreRevisionIAAutoTrigger)
+                if (encolarIa)
                 {
                     try
                     {

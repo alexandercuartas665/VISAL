@@ -91,6 +91,10 @@ public sealed class RevisionPolicyService : IRevisionPolicyService
         {
             throw new ArgumentException("El tope de tokens del historial debe estar entre 5.000 y 120.000.", nameof(policy));
         }
+        if (policy.AuditoriaIaTimeoutSeg < 30 || policy.AuditoriaIaTimeoutSeg > 180)
+        {
+            throw new ArgumentException("El tiempo maximo de la auditoria al cerrar debe estar entre 30 y 180 segundos.", nameof(policy));
+        }
 
         using var db = _dbFactory.Create();
         var row = await db.RevisionPolicies.FirstOrDefaultAsync(ct);
@@ -111,6 +115,12 @@ public sealed class RevisionPolicyService : IRevisionPolicyService
         row.HistorialMeses = policy.HistorialMeses;
         row.HistorialMaxCompletas = policy.HistorialMaxCompletas;
         row.HistorialMaxTokens = policy.HistorialMaxTokens;
+        row.AuditoriaIaAlCerrar = policy.AuditoriaIaAlCerrar;
+        var formatos = (policy.AuditoriaIaFormatos ?? Array.Empty<string>())
+            .Where(f => !string.IsNullOrWhiteSpace(f)).Select(f => f.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        row.AuditoriaIaFormatosJson = formatos.Count == 0 ? null : System.Text.Json.JsonSerializer.Serialize(formatos);
+        row.AuditoriaIaTimeoutSeg = policy.AuditoriaIaTimeoutSeg;
         row.UpdatedAt = DateTimeOffset.UtcNow;
         row.UpdatedBy = actor;
         await db.SaveChangesAsync(ct);
@@ -132,5 +142,15 @@ public sealed class RevisionPolicyService : IRevisionPolicyService
         r.EnviarHistorialPaciente,
         r.HistorialMeses,
         r.HistorialMaxCompletas,
-        r.HistorialMaxTokens);
+        r.HistorialMaxTokens,
+        r.AuditoriaIaAlCerrar,
+        LeerFormatos(r.AuditoriaIaFormatosJson),
+        r.AuditoriaIaTimeoutSeg);
+
+    private static IReadOnlyList<string> LeerFormatos(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) { return Array.Empty<string>(); }
+        try { return System.Text.Json.JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>(); }
+        catch (System.Text.Json.JsonException) { return Array.Empty<string>(); }
+    }
 }

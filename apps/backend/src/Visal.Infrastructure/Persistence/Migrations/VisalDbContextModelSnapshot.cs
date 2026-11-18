@@ -1148,6 +1148,11 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("nombre_servicio");
 
+                    b.Property<string>("NumeroSiniestro")
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)")
+                        .HasColumnName("numero_siniestro");
+
                     b.Property<string>("Observaciones")
                         .HasColumnType("text")
                         .HasColumnName("observaciones");

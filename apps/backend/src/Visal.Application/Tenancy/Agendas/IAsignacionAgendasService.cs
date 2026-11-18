@@ -131,4 +131,5 @@ public sealed record AgendarDesdeAgendaRequest(
     decimal? ValorPagoSugerido = null,
     decimal? ValorPagoReal = null,
     bool AutorizacionPendiente = false,
-    string? PdfAutorizacionUrl = null);
+    string? PdfAutorizacionUrl = null,
+    string? NumeroSiniestro = null);

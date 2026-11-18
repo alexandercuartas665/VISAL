@@ -1674,6 +1674,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             // (Postgres 22001 value too long for character varying(60)).
             b.Property(x => x.ContratoCodigo).HasMaxLength(250).IsRequired();
             b.Property(x => x.CodigoAutorizacion).HasMaxLength(60);
+            b.Property(x => x.NumeroSiniestro).HasMaxLength(60);
             b.Property(x => x.FormatoHistoria).HasMaxLength(60);
             b.Property(x => x.PdfAutorizacionUrl).HasMaxLength(500);
             b.Property(x => x.PdfAutorizacionHash).HasMaxLength(64);

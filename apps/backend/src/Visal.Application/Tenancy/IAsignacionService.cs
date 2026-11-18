@@ -381,7 +381,8 @@ public sealed record AsignacionItemRequest(
     // aqui una sola vez por asignacion y viaja como snapshot inmutable al crear
     // la HC. Requerido en servicio nuevo — el UI /asignacion valida bloqueante.
     string? RipsViaIngresoCodigo = null,
-    string? RipsViaIngresoNombre = null);
+    string? RipsViaIngresoNombre = null,
+    string? NumeroSiniestro = null);
 
 public sealed record CrearLoteRequest(
     Guid PacienteId, string ContratoCodigo, string Sucursal,

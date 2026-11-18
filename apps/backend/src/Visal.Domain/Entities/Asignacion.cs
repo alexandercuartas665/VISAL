@@ -65,6 +65,10 @@ public class Asignacion : TenantEntity
     /// <summary>Numero de orden / autorizacion de la aseguradora.</summary>
     public string? CodigoAutorizacion { get; set; }
 
+    /// <summary>Numero de siniestro (p.ej. SOAT / ARL) reportado por la aseguradora. Opcional;
+    /// hoy se captura en la Asignacion por agendas.</summary>
+    public string? NumeroSiniestro { get; set; }
+
     public short? AnioServicio { get; set; }
     public short MesVigencia { get; set; }
     public short? MesFinal { get; set; }

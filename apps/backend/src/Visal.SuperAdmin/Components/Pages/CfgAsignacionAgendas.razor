@@ -292,9 +292,15 @@
                     <div class="ase-f"><label>Cantidad autorizada</label><input type="number" min="1" class="form-control form-control-sm" @bind="_agCantidad" /></div>
                     <div class="ase-f"><label>Turnos a coordinar</label><input type="number" min="1" class="form-control form-control-sm" @bind="_agTurnos" /></div>
                 </div>
-                <div class="ase-f">
-                    <label>N&deg; Autorizacion</label>
-                    <input class="form-control form-control-sm" @bind="_agAutoriz" placeholder="Numero de autorizacion" />
+                <div class="asg-2col">
+                    <div class="ase-f">
+                        <label>N&deg; Autorizacion</label>
+                        <input class="form-control form-control-sm" @bind="_agAutoriz" placeholder="Numero de autorizacion" />
+                    </div>
+                    <div class="ase-f">
+                        <label>N&deg; de siniestro</label>
+                        <input class="form-control form-control-sm" @bind="_agSiniestro" maxlength="60" placeholder="Numero de siniestro" />
+                    </div>
                 </div>
                 <div class="asg-3col">
                     <div class="ase-f"><label>Ano</label><input type="number" class="form-control form-control-sm" @bind="_agAnio" /></div>
@@ -676,6 +682,7 @@
     private int _agCantidad = 1;
     private int _agTurnos = 1;
     private string _agAutoriz = "";
+    private string _agSiniestro = "";
     private int _agAnio = DateTime.Today.Year;
     private int _agMesVig = DateTime.Today.Month;
     private int? _agMesFinal;
@@ -869,7 +876,7 @@
         _agFecha = dia.Fecha; _agError = null; _agSlot = ""; _agNota = "";
         _agViaCod = _vias.FirstOrDefault(v => v.Codigo == "01")?.Codigo ?? _vias.FirstOrDefault()?.Codigo ?? "";
         // Defaults de las piezas de asignacion.
-        _agCantidad = 1; _agTurnos = 1; _agAutoriz = "";
+        _agCantidad = 1; _agTurnos = 1; _agAutoriz = ""; _agSiniestro = "";
         _agAnio = dia.Fecha.Year; _agMesVig = dia.Fecha.Month; _agMesFinal = null; _agFechaFinal = null;
         _agTipoPago = ""; _agCatCopago = null; _agValorSug = null; _agValorReal = null; _agAutPend = false;
         _agPdfUrl = null; _agPdfNombre = null;
@@ -1017,7 +1024,8 @@
                 CategoriaCopago: _agCatCopago,
                 ValorPagoSugerido: _agValorSug, ValorPagoReal: _agValorReal,
                 AutorizacionPendiente: _agAutPend,
-                PdfAutorizacionUrl: _agPdfUrl);
+                PdfAutorizacionUrl: _agPdfUrl,
+                NumeroSiniestro: string.IsNullOrWhiteSpace(_agSiniestro) ? null : _agSiniestro.Trim());
             var actorA = await ActorAsync();
             await Gate(() => Svc.AgendarAsync(req, actorA));
             _ok = $"Cita agendada: {_agFecha:dd/MM/yyyy} {_agSlot}.";

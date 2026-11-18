@@ -1645,15 +1645,33 @@ else
                 }
             </div>
             <div class="oc-rv-nav">
+                @if (_revisionModalRow is not null)
+                {
+                    var _rvCerrada = string.Equals(_revisionModalRow.Estado, "Cerrada", StringComparison.OrdinalIgnoreCase);
+                    var _rvTitle = !_rvCerrada
+                        ? "Solo se pueden revisar con el agente historias Cerradas"
+                        : _procesandoRevisionMasiva
+                            ? "Hay una revision masiva en curso; espera a que termine"
+                            : "Corre el agente de revision IA sobre ESTA historia (mismas reglas que la revision masiva). Consume tokens de IA.";
+                    <button class="oc-rv-ia-btn" @onclick="RevisarConAgenteEnModalAsync"
+                            disabled="@(_rvAgenteCorriendo || !_rvCerrada || _procesandoRevisionMasiva)"
+                            title="@_rvTitle">
+                        @(_rvAgenteCorriendo ? "⏳ Revisando..." : "🤖 Revisar con agente")
+                    </button>
+                }
                 @if (idxActual >= 0)
                 {
                     <span class="oc-rv-nav-idx" title="Posicion dentro del listado filtrado">@(idxActual + 1) / @totalFiltradas</span>
                 }
-                <button class="oc-rv-nav-btn" @onclick="NavegarRevisionPrev" disabled="@(!tienePrev)" title="HC anterior en el listado">&#8592;</button>
-                <button class="oc-rv-nav-btn" @onclick="NavegarRevisionNext" disabled="@(!tieneNext)" title="HC siguiente en el listado">&#8594;</button>
+                <button class="oc-rv-nav-btn" @onclick="NavegarRevisionPrev" disabled="@(!tienePrev || _rvAgenteCorriendo)" title="HC anterior en el listado">&#8592;</button>
+                <button class="oc-rv-nav-btn" @onclick="NavegarRevisionNext" disabled="@(!tieneNext || _rvAgenteCorriendo)" title="HC siguiente en el listado">&#8594;</button>
                 <button class="oc-rv-close" @onclick="CerrarRevisionModalAsync" title="Cerrar">&times;</button>
             </div>
         </div>
+        @if (_rvAgenteMsg is not null)
+        {
+            <div class="oc-rv-ia-msg @(_rvAgenteOk ? "ok" : "err")">@_rvAgenteMsg</div>
+        }
         <div class="oc-rv-body">
             <div class="oc-rv-left">
                 <iframe class="oc-rv-iframe"
@@ -1662,7 +1680,10 @@ else
                 </iframe>
             </div>
             <div class="oc-rv-right">
+                @* @key cambia tras correr el agente -> el panel se monta de nuevo y recarga la
+                   bitacora con el veredicto recien registrado. *@
                 <Visal.SuperAdmin.Components.Forms.HcRevisionPanel
+                    @key="@($"{rmHcId}-{_rvPanelKey}")"
                     HistoriaClinicaId="@rmHcId"
                     HcCerrada="true" />
             </div>
@@ -1791,6 +1812,15 @@ else
     }
     .oc-rv-nav-btn:hover:not(:disabled) { background:#e2e8f0; border-color:#cbd5e1; }
     .oc-rv-nav-btn:disabled { opacity:.4; cursor:not-allowed; }
+    .oc-rv-ia-btn {
+        background:#eef2ff; border:1px solid #c7d2fe; color:#3730a3; font-weight:600;
+        height:32px; border-radius:6px; padding:0 12px; font-size:13px; cursor:pointer; white-space:nowrap;
+    }
+    .oc-rv-ia-btn:hover:not(:disabled) { background:#e0e7ff; border-color:#a5b4fc; }
+    .oc-rv-ia-btn:disabled { opacity:.55; cursor:not-allowed; }
+    .oc-rv-ia-msg { padding:8px 20px; font-size:13px; border-bottom:1px solid #e2e8f0; }
+    .oc-rv-ia-msg.ok { background:#f0fdf4; color:#166534; }
+    .oc-rv-ia-msg.err { background:#fef2f2; color:#991b1b; }
     .oc-rv-close { background:transparent; border:0; font-size:26px; color:#64748b; cursor:pointer; line-height:1; padding:0 6px; }
     .oc-rv-close:hover { color:#0f172a; }
     .oc-rv-body { flex:1 1 auto; display:grid; grid-template-columns: 1.6fr 1fr; min-height:0; }
@@ -2276,6 +2306,11 @@ else
     // Modal grande "Ver revision": iframe con la impresion de la HC a la izquierda
     // y HcRevisionPanel a la derecha (bitacora + aprobar/rechazar).
     private bool _showRevisionModal;
+    // "Revisar con agente" dentro del modal (una HC a la vez).
+    private bool _rvAgenteCorriendo;
+    private string? _rvAgenteMsg;
+    private bool _rvAgenteOk;
+    private int _rvPanelKey;
     private Guid? _revisionModalHcId;
     private string _revisionModalDocs = "";
     /// <summary>REV-17 — DTO completo del row abierto en el modal. Se usa para
@@ -3133,6 +3168,7 @@ else
     /// que ya vive en el modal HC.</summary>
     private void AbrirRevision(OrdenClinicaItemDto r)
     {
+        _rvAgenteMsg = null;
         _revisionModalHcId = r.HistoriaClinicaId;
         _revisionModalRow = r;
         _revisionModalDocs = BuildAllDocsQuery(r);
@@ -3153,13 +3189,42 @@ else
         var siguiente = idx + delta;
         if (siguiente < 0 || siguiente >= filtradas.Count) { return; }
         var target = filtradas[siguiente];
+        _rvAgenteMsg = null;
         _revisionModalRow = target;
         _revisionModalHcId = target.HistoriaClinicaId;
         _revisionModalDocs = BuildAllDocsQuery(target);
     }
 
+    /// <summary>Corre el agente de revision IA sobre la HC abierta en el modal (una a la vez),
+    /// con el MISMO nucleo que la revision masiva y el Kanban (abre el ciclo si falta, usa el
+    /// agente del toolbar y las mismas reglas/politica). Al terminar recarga el panel de la
+    /// derecha para que la bitacora muestre el veredicto. La tabla se refresca al cerrar.</summary>
+    private async Task RevisarConAgenteEnModalAsync()
+    {
+        if (_rvAgenteCorriendo || _revisionModalRow is not { } row) { return; }
+        var hcId = row.HistoriaClinicaId;
+        _rvAgenteCorriendo = true;
+        _rvAgenteMsg = null;
+        StateHasChanged();
+        try
+        {
+            var (ok, err) = await EjecutarPreRevisionIaCoreAsync(hcId, row.RevisionId);
+            if (_revisionModalRow?.HistoriaClinicaId == hcId)
+            {
+                _rvAgenteOk = ok;
+                _rvAgenteMsg = ok
+                    ? "El agente termino la revision de esta historia. El veredicto quedo en la bitacora (panel derecho)."
+                    : "El agente no pudo revisar esta historia: " + (err ?? "error desconocido");
+                _rvPanelKey++;
+            }
+        }
+        finally { _rvAgenteCorriendo = false; }
+    }
+
     private async Task CerrarRevisionModalAsync()
     {
+        if (_rvAgenteCorriendo) { return; } // no cerrar a mitad de la revision
+        _rvAgenteMsg = null;
         _showRevisionModal = false;
         _revisionModalHcId = null;
         _revisionModalRow = null;

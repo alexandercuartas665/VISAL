@@ -110,6 +110,7 @@ public interface IApplicationDbContext : System.IDisposable, System.IAsyncDispos
     DbSet<CatalogoTipoServicio> CatalogosTipoServicio { get; }
     DbSet<AutorizacionToken> AutorizacionTokens { get; }
     DbSet<AutorizacionConcepto> AutorizacionConceptos { get; }
+    DbSet<AutorizacionSolicitud> AutorizacionSolicitudes { get; }
     DbSet<RevisionAgenteLog> RevisionAgenteLogs { get; }
     DbSet<TenantUserTipoCoordinado> TenantUserTiposCoordinados { get; }
     DbSet<FirmaPacienteRequest> FirmaPacienteRequests { get; }

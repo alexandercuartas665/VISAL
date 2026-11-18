@@ -131,6 +131,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<CatalogoTipoServicio> CatalogosTipoServicio => Set<CatalogoTipoServicio>();
     public DbSet<AutorizacionToken> AutorizacionTokens => Set<AutorizacionToken>();
     public DbSet<AutorizacionConcepto> AutorizacionConceptos => Set<AutorizacionConcepto>();
+    public DbSet<AutorizacionSolicitud> AutorizacionSolicitudes => Set<AutorizacionSolicitud>();
     public DbSet<RevisionAgenteLog> RevisionAgenteLogs => Set<RevisionAgenteLog>();
     public DbSet<TenantUserTipoCoordinado> TenantUserTiposCoordinados => Set<TenantUserTipoCoordinado>();
     public DbSet<FirmaPacienteRequest> FirmaPacienteRequests => Set<FirmaPacienteRequest>();
@@ -1119,6 +1120,9 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             // Limites de tiempo (opcionales): primera sesion en dias, siguientes en horas.
             b.Property(x => x.LimiteDiasPrimeraSesion);
             b.Property(x => x.LimiteHorasSesionesSiguientes);
+            // Patron de cierre de HC por tipo (LIBRE/MISMO_DIA/HORAS_ATENCION/OPORTUNIDAD).
+            b.Property(x => x.PatronCierre).HasMaxLength(30);
+            b.Property(x => x.HorasLimiteCierre);
             b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
             b.HasIndex(x => new { x.TenantId, x.Activo, x.Orden });
         });
@@ -1134,6 +1138,19 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Estado).HasConversion<int>();
             b.HasIndex(x => new { x.TenantId, x.Codigo }).IsUnique();
             b.HasIndex(x => new { x.TenantId, x.Estado });
+        });
+
+        modelBuilder.Entity<AutorizacionSolicitud>(b =>
+        {
+            b.Property(x => x.Detalle).HasColumnType("text");
+            b.Property(x => x.ConceptoNombre).HasMaxLength(200);
+            b.Property(x => x.Motivo).HasColumnType("text").IsRequired();
+            b.Property(x => x.SolicitadoPorNombre).HasMaxLength(200);
+            b.Property(x => x.ResueltoPorNombre).HasMaxLength(200);
+            b.Property(x => x.Respuesta).HasColumnType("text");
+            b.Property(x => x.Estado).HasConversion<int>();
+            b.HasIndex(x => new { x.TenantId, x.Estado, x.CreatedAt });
+            b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId });
         });
 
         modelBuilder.Entity<AutorizacionConcepto>(b =>

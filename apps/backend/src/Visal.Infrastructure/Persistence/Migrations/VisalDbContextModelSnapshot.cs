@@ -1952,6 +1952,105 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.ToTable("autorizacion_conceptos", (string)null);
                 });
 
+            modelBuilder.Entity("Visal.Domain.Entities.AutorizacionSolicitud", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid?>("AsignacionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("asignacion_id");
+
+                    b.Property<string>("ConceptoNombre")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("concepto_nombre");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<string>("Detalle")
+                        .HasColumnType("text")
+                        .HasColumnName("detalle");
+
+                    b.Property<int>("Estado")
+                        .HasColumnType("integer")
+                        .HasColumnName("estado");
+
+                    b.Property<DateTimeOffset>("FechaAtencion")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("fecha_atencion");
+
+                    b.Property<Guid>("HistoriaClinicaId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("historia_clinica_id");
+
+                    b.Property<string>("Motivo")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("motivo");
+
+                    b.Property<string>("Respuesta")
+                        .HasColumnType("text")
+                        .HasColumnName("respuesta");
+
+                    b.Property<DateTimeOffset?>("ResueltoEn")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("resuelto_en");
+
+                    b.Property<string>("ResueltoPorNombre")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("resuelto_por_nombre");
+
+                    b.Property<Guid?>("ResueltoPorUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("resuelto_por_user_id");
+
+                    b.Property<string>("SolicitadoPorNombre")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("solicitado_por_nombre");
+
+                    b.Property<Guid>("SolicitadoPorUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("solicitado_por_user_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid?>("TokenId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("token_id");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_autorizacion_solicitudes");
+
+                    b.HasIndex("TenantId", "HistoriaClinicaId")
+                        .HasDatabaseName("ix_autorizacion_solicitudes_tenant_id_historia_clinica_id");
+
+                    b.HasIndex("TenantId", "Estado", "CreatedAt")
+                        .HasDatabaseName("ix_autorizacion_solicitudes_tenant_id_estado_created_at");
+
+                    b.ToTable("autorizacion_solicitudes", (string)null);
+                });
+
             modelBuilder.Entity("Visal.Domain.Entities.AutorizacionToken", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2193,6 +2292,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("created_by");
 
+                    b.Property<int?>("HorasLimiteCierre")
+                        .HasColumnType("integer")
+                        .HasColumnName("horas_limite_cierre");
+
                     b.Property<int?>("LimiteDiasPrimeraSesion")
                         .HasColumnType("integer")
                         .HasColumnName("limite_dias_primera_sesion");
@@ -2210,6 +2313,11 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<int>("Orden")
                         .HasColumnType("integer")
                         .HasColumnName("orden");
+
+                    b.Property<string>("PatronCierre")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
+                        .HasColumnName("patron_cierre");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")

@@ -10,6 +10,7 @@
 @inject IFormDefinitionService FormsSvc
 @inject IAsignacionService AsigSvc
 @inject IHistoriaClinicaService HcSvc
+@inject IAutorizacionTokenService AutTokenSvc
 @inject IOrdenMedicamentoService OrdMedSvc
 @inject IOrdenServicioService OrdSrvSvc
 @inject IIncapacidadService IncSvc
@@ -300,6 +301,10 @@
                             case "error":      <span>&#9888; Error al guardar - reintento automatico</span> break;
                         }
                     </div>
+                    @if (_solAviso is not null)
+                    {
+                        <button type="button" class="hc-sol-aviso hc-sol-@_solAvisoTipo" title="Ver la solicitud de autorizacion" @onclick="AbrirModalSolicitudAsync">@_solAviso</button>
+                    }
                 }
                 @* Identificador corto de la HC (N interno). Ayuda al usuario a saber
                    que historia esta viendo/creando; coincide con el "N" que sale en
@@ -1128,6 +1133,13 @@
     .tk-f label { display: block; font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 3px; }
     .tk-code { font-family: ui-monospace, Menlo, Consolas, monospace; letter-spacing: 4px; text-transform: uppercase; font-weight: 700; }
     .tk-foot { padding: 12px 18px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 8px; }
+    .tk-sol-pend { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a; border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px; }
+    .tk-sol-rech { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; border-radius: 8px; padding: 10px 12px; font-size: 13px; margin-bottom: 12px; }
+    .tk-alt { margin-top: 12px; border-top: 1px dashed #e2e8f0; padding-top: 8px; font-size: 13px; }
+    .tk-alt summary { cursor: pointer; color: #64748b; font-size: 12px; }
+    .hc-sol-aviso { border: 1px solid; border-radius: 999px; padding: 2px 10px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+    .hc-sol-pend { background: #eff6ff; border-color: #bfdbfe; color: #1e3a8a; }
+    .hc-sol-rech { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
 </style>
 
 @if (_tokenModalOpen)
@@ -1143,22 +1155,62 @@
             {
                 <div class="tk-det">@_tokenControlDetalle</div>
             }
-            <div class="tk-f">
-                <label>Token de autorizacion (6 caracteres)</label>
-                <input class="form-control form-control-sm tk-code" maxlength="6" @bind="_tokenCodigo"
-                       placeholder="______" />
-            </div>
-            <div class="tk-f">
-                <label>Motivo de uso *</label>
-                <textarea class="form-control form-control-sm" rows="2" @bind="_tokenMotivo"
-                          placeholder="Por que se registra con esta fecha."></textarea>
-            </div>
+
+            @if (_solEstado == "Pendiente")
+            {
+                <div class="tk-sol-pend">
+                    &#9203; Tu solicitud se envio @(_solEn?.ToOffset(TimeSpan.FromHours(-5)).ToString("dd/MM HH:mm")) y esta esperando aprobacion del coordinador.
+                    Puedes seguir diligenciando la historia; cuando la aprueben podras cerrarla.
+                </div>
+            }
+            else
+            {
+                @if (_solEstado == "Rechazada")
+                {
+                    <div class="tk-sol-rech">&#10060; Tu solicitud anterior fue rechazada: @(_solRespuesta ?? "sin observacion"). Puedes enviar una nueva.</div>
+                }
+                <div class="tk-f">
+                    <label>Pedir autorizacion al coordinador</label>
+                    <select class="form-select form-select-sm" @bind="_solConcepto">
+                        <option value="">-- Concepto (opcional) --</option>
+                        @foreach (var c in _solConceptos)
+                        {
+                            <option value="@c.Nombre">@c.Nombre</option>
+                        }
+                    </select>
+                </div>
+                <div class="tk-f">
+                    <textarea class="form-control form-control-sm" rows="2" @bind="_solMotivo"
+                              placeholder="Motivo: por que se cierra fuera del tiempo."></textarea>
+                </div>
+            }
             @if (_tokenError is not null) { <div class="text-danger small">@_tokenError</div> }
-            <small class="text-muted">El token lo genera un usuario de autorizacion en el modulo Autorizaciones. Es de un solo uso y vence a los 30 minutos.</small>
+
+            <details class="tk-alt" open="@_tokenAltOpen">
+                <summary>Ya tengo un token de autorizacion</summary>
+                <div class="tk-f" style="margin-top:8px;">
+                    <label>Token (6 caracteres)</label>
+                    <input class="form-control form-control-sm tk-code" maxlength="6" @bind="_tokenCodigo"
+                           placeholder="______" />
+                </div>
+                <div class="tk-f">
+                    <label>Motivo de uso *</label>
+                    <textarea class="form-control form-control-sm" rows="2" @bind="_tokenMotivo"
+                              placeholder="Por que se registra con esta fecha."></textarea>
+                </div>
+                <button class="btn btn-outline-warning btn-sm" @onclick="AutorizarTokenAsync" disabled="@_tokenBusy">Usar token</button>
+            </details>
         </div>
         <div class="tk-foot">
-            <button class="btn btn-outline-secondary btn-sm" @onclick="CancelarTokenModal" disabled="@_tokenBusy">Cancelar</button>
-            <button class="btn btn-warning btn-sm" @onclick="AutorizarTokenAsync" disabled="@_tokenBusy">Autorizar</button>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CancelarTokenModal" disabled="@_tokenBusy">Cerrar</button>
+            @if (_solEstado == "Pendiente")
+            {
+                <button class="btn btn-primary btn-sm" @onclick="VerificarSolicitudAsync" disabled="@_tokenBusy">Verificar si ya la aprobaron</button>
+            }
+            else
+            {
+                <button class="btn btn-primary btn-sm" @onclick="EnviarSolicitudAsync" disabled="@_tokenBusy">Enviar solicitud</button>
+            }
         </div>
     </div>
 }
@@ -1174,6 +1226,17 @@
     private string? _tokenError;
     private bool _tokenBusy;
     private bool _cerrarTrasAutorizar;
+    // Solicitud de autorizacion al coordinador (sin token).
+    private string? _solEstado;          // null / "Pendiente" / "Rechazada"
+    private string? _solRespuesta;
+    private DateTimeOffset? _solEn;
+    private string _solConcepto = "";
+    private string _solMotivo = "";
+    private bool _tokenAltOpen;
+    private IReadOnlyList<AutorizacionConceptoDto> _solConceptos = Array.Empty<AutorizacionConceptoDto>();
+    // Aviso compacto junto al autoguardado (no re-abre el modal en cada guardado si ya pidio).
+    private string? _solAviso;
+    private string _solAvisoTipo = "pend";
 
     /// <summary>Paciente para el que se abre el modulo. Si esta seteado, NO se permite cambiar.</summary>
     [Parameter] public PacienteAsignacionDto? PacienteContexto { get; set; }
@@ -1620,8 +1683,11 @@
     {
         try
         {
-            var ctrl = await HcSvc.EvaluarControlFechaAsync(hcId);
-            if (ctrl.RequiereToken && !_tokenModalOpen)
+            var ctrl = await HcSvc.EvaluarControlFechaAsync(hcId, await ResolverActorAsync());
+            AplicarEstadoSolicitud(ctrl);
+            // Con una solicitud ya enviada (pendiente) no se re-abre el modal en cada guardado:
+            // basta el aviso junto al autoguardado.
+            if (ctrl.RequiereToken && !_tokenModalOpen && ctrl.SolicitudEstado != "Pendiente")
             {
                 AbrirTokenModal(ctrl.Detalle, cerrarTrasAutorizar: false);
             }
@@ -1634,8 +1700,107 @@
         _tokenControlDetalle = detalle;
         _tokenCodigo = ""; _tokenMotivo = ""; _tokenError = null;
         _cerrarTrasAutorizar = cerrarTrasAutorizar;
+        _tokenAltOpen = false;
         _tokenModalOpen = true;
+        _ = CargarConceptosSolicitudAsync();
         StateHasChanged();
+    }
+
+    /// <summary>Refleja en la UI el estado de la solicitud de autorizacion de la HC.</summary>
+    private void AplicarEstadoSolicitud(ControlFechaAtencionDto ctrl)
+    {
+        if (!ctrl.RequiereToken)
+        {
+            _solEstado = null; _solRespuesta = null; _solEn = null; _solAviso = null;
+            return;
+        }
+        _solEstado = ctrl.SolicitudEstado;
+        _solRespuesta = ctrl.SolicitudRespuesta;
+        _solEn = ctrl.SolicitudEn;
+        (_solAviso, _solAvisoTipo) = ctrl.SolicitudEstado switch
+        {
+            "Pendiente" => ("\u23F3 Autorizacion de cierre pendiente", "pend"),
+            "Rechazada" => ("\u274C Autorizacion de cierre rechazada", "rech"),
+            _ => ((string?)null, "pend"),
+        };
+    }
+
+    private async Task CargarConceptosSolicitudAsync()
+    {
+        if (_solConceptos.Count > 0) { return; }
+        try
+        {
+            _solConceptos = await AutTokenSvc.ListarConceptosAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+        catch { /* sin conceptos: el select queda solo con la opcion vacia */ }
+    }
+
+    private async Task AbrirModalSolicitudAsync()
+    {
+        if (_historiaSel is not HistoriaRow h) { return; }
+        try
+        {
+            var ctrl = await HcSvc.EvaluarControlFechaAsync(h.Id, await ResolverActorAsync());
+            AplicarEstadoSolicitud(ctrl);
+            if (ctrl.RequiereToken) { AbrirTokenModal(ctrl.Detalle, cerrarTrasAutorizar: false); }
+        }
+        catch (Exception ex) { _tokenError = ex.Message; }
+    }
+
+    /// <summary>El profesional envia la solicitud al coordinador (sin token).</summary>
+    private async Task EnviarSolicitudAsync()
+    {
+        _tokenError = null;
+        if (_historiaSel is not HistoriaRow h) { _tokenModalOpen = false; return; }
+        if (string.IsNullOrWhiteSpace(_solMotivo)) { _tokenError = "Escribe el motivo de la solicitud."; return; }
+        _tokenBusy = true;
+        _autosaveCts?.Cancel();
+        try
+        {
+            var actor = await ResolverActorAsync();
+            var nombre = await ResolverActorNombreAsync();
+            AutorizarFechaResult res;
+            await _dbLock.WaitAsync();
+            try
+            {
+                res = await HcSvc.SolicitarAutorizacionFechaAsync(h.Id, _solMotivo, _solConcepto, nombre, actor);
+                var ctrl = await HcSvc.EvaluarControlFechaAsync(h.Id, actor);
+                AplicarEstadoSolicitud(ctrl);
+                if (!ctrl.RequiereToken) { _tokenModalOpen = false; }
+            }
+            finally { _dbLock.Release(); }
+            if (!res.Ok) { _tokenError = res.Mensaje ?? "No se pudo enviar la solicitud."; return; }
+            _solMotivo = ""; _solConcepto = "";
+        }
+        catch (Exception ex) { _tokenError = ex.Message; }
+        finally { _tokenBusy = false; }
+    }
+
+    /// <summary>Consulta si el coordinador ya aprobo; si si, cierra el modal (y reintenta cerrar
+    /// la HC si el modal se abrio desde el boton Cerrar).</summary>
+    private async Task VerificarSolicitudAsync()
+    {
+        _tokenError = null;
+        if (_historiaSel is not HistoriaRow h) { _tokenModalOpen = false; return; }
+        _tokenBusy = true;
+        try
+        {
+            ControlFechaAtencionDto ctrl;
+            await _dbLock.WaitAsync();
+            try { ctrl = await HcSvc.EvaluarControlFechaAsync(h.Id, await ResolverActorAsync()); }
+            finally { _dbLock.Release(); }
+            AplicarEstadoSolicitud(ctrl);
+            if (ctrl.RequiereToken)
+            {
+                if (ctrl.SolicitudEstado == "Pendiente") { _tokenError = "Aun no la han aprobado."; }
+                return;
+            }
+            _tokenModalOpen = false;
+            if (_cerrarTrasAutorizar) { _cerrarTrasAutorizar = false; await Cerrar(); }
+        }
+        catch (Exception ex) { _tokenError = ex.Message; }
+        finally { _tokenBusy = false; }
     }
 
     private void CancelarTokenModal()
@@ -1666,6 +1831,7 @@
             finally { _dbLock.Release(); }
             if (!res.Ok) { _tokenError = res.Mensaje ?? "Token invalido."; return; }
             _tokenModalOpen = false;
+            _solEstado = null; _solAviso = null;
             // Reintentar el cierre FUERA del lock (Cerrar gestiona su propio flujo).
             if (_cerrarTrasAutorizar) { _cerrarTrasAutorizar = false; await Cerrar(); }
         }
@@ -1976,6 +2142,7 @@
         // Si habia un autosave pendiente para otra HC, cancelarlo y resetear el estado visual.
         _autosaveCts?.Cancel();
         _saveStatus = "limpio";
+        _solAviso = null; _solEstado = null;
         _ultimoGuardado = null;
         _saveTitle = null;
         // Envolver TODO el Seleccionar en el lock del DbContext: hace ~15 queries
@@ -2052,6 +2219,7 @@
         // Reset autoguardado para la nueva HC.
         _autosaveCts?.Cancel();
         _saveStatus = "limpio";
+        _solAviso = null; _solEstado = null;
         _ultimoGuardado = null;
         _saveTitle = "Los cambios se guardan automaticamente cada 2 segundos.";
         // Refrescar los badges de todas las pestanas para la nueva HC. Cada conteo
@@ -2848,6 +3016,8 @@
             {
                 // La fecha de atencion excede el limite y no hay autorizacion: pedir token
                 // y reintentar el cierre tras autorizar.
+                try { AplicarEstadoSolicitud(await HcSvc.EvaluarControlFechaAsync(h.Id, await ResolverActorAsync())); }
+                catch { /* el modal abre igual */ }
                 AbrirTokenModal(ex.Message, cerrarTrasAutorizar: true);
                 return;
             }
@@ -2856,6 +3026,7 @@
         _schemaActual = null; _valores = new();
         _imprimirMsg = null;
         _saveStatus = "limpio";
+        _solAviso = null; _solEstado = null;
         _ultimoGuardado = null;
     }
 

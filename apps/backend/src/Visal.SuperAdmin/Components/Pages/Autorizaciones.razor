@@ -6,6 +6,7 @@
 @using Visal.Domain.Entities
 @inject IAutorizacionTokenService Svc
 @inject IJSRuntime JS
+@implements IDisposable
 
 <PageTitle>Autorizaciones - Visal</PageTitle>
 
@@ -14,9 +15,9 @@
         <div class="ase-eyebrow">Operacion Clinica</div>
         <h1 class="ase-title">Autorizaciones</h1>
         <small class="text-muted">
-            Genera tokens de 6 caracteres para autorizar fechas de atencion fuera del limite de
-            oportunidad del tipo de servicio. Cada token vence en 30 minutos, es de un solo uso,
-            y queda trazado (quien lo uso, en que HC/asignacion y con que motivo).
+            Aprueba las solicitudes de los profesionales para cerrar historias fuera del patron de
+            cierre del tipo de servicio, o genera tokens de 6 caracteres (vencen en 30 minutos, un
+            solo uso). Todo queda trazado (quien autorizo, quien lo uso, HC/asignacion y motivo).
         </small>
     </div>
     @if (_puede)
@@ -44,6 +45,90 @@ else
         </div>
     }
 
+    <div class="az-tabs">
+        <button class="az-tab @(_tab == "sol" ? "az-tab-on" : "")" @onclick="@(() => CambiarTabAsync("sol"))">
+            Solicitudes @if (_pendientes > 0) { <span class="az-badge">@_pendientes</span> }
+        </button>
+        <button class="az-tab @(_tab == "tok" ? "az-tab-on" : "")" @onclick="@(() => CambiarTabAsync("tok"))">Tokens</button>
+    </div>
+
+    @if (_tab == "sol")
+    {
+        <div class="ase-card">
+            <div class="az-sol-bar">
+                <label class="az-chk"><input type="checkbox" @bind="_soloPendientes" @bind:after="CargarSolicitudesAsync" /> Solo pendientes</label>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="CargarSolicitudesAsync" disabled="@_busy">&#8635; Actualizar</button>
+                <small class="text-muted">Se actualiza solo cada 30 segundos.</small>
+            </div>
+            @if (_solError is not null) { <div class="ase-alert">@_solError</div> }
+            @if (_sols.Count == 0)
+            {
+                <div class="ase-empty" style="padding:30px;">@(_soloPendientes ? "No hay solicitudes pendientes." : "Aun no hay solicitudes.")</div>
+            }
+            else
+            {
+                <div class="med-tbl-wrap">
+                    <table class="table table-sm med-tbl">
+                        <thead>
+                            <tr>
+                                <th style="width:130px">Solicitada</th>
+                                <th>Profesional</th>
+                                <th>Paciente</th>
+                                <th>Servicio</th>
+                                <th style="width:110px">F. atencion</th>
+                                <th>Motivo</th>
+                                <th style="width:180px" class="text-center">Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var r in _sols)
+                            {
+                                <tr class="@(r.Estado == AutorizacionSolicitudEstado.Pendiente ? "" : "tok-usado")">
+                                    <td>@r.SolicitadoEn.ToOffset(TimeSpan.FromHours(-5)).ToString("dd/MM/yyyy HH:mm")</td>
+                                    <td>@(r.SolicitadoPorNombre ?? "—")</td>
+                                    <td>
+                                        <div>@(r.PacienteNombre ?? "—")</div>
+                                        <small class="text-muted">@r.PacienteDocumento</small>
+                                        <div>
+                                            @if (r.HistoriaClinicaConsecutivo is long hc) { <span class="badge bg-light text-dark">HC-@hc.ToString("D6")</span> }
+                                            @if (r.AsignacionConsecutivo is long asg) { <span class="badge bg-light text-dark">AS-@asg.ToString("D6")</span> }
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div>@(r.ServicioNombre ?? "—")</div>
+                                        @if (!string.IsNullOrWhiteSpace(r.TipoServicio)) { <small class="text-muted">@r.TipoServicio</small> }
+                                    </td>
+                                    <td>@r.FechaAtencion.ToOffset(TimeSpan.FromHours(-5)).ToString("dd/MM/yyyy HH:mm")</td>
+                                    <td>
+                                        @if (!string.IsNullOrWhiteSpace(r.ConceptoNombre)) { <div><b>@r.ConceptoNombre</b></div> }
+                                        <div>@r.Motivo</div>
+                                        @if (!string.IsNullOrWhiteSpace(r.Detalle)) { <small class="text-muted">@r.Detalle</small> }
+                                    </td>
+                                    <td class="text-center">
+                                        @if (r.Estado == AutorizacionSolicitudEstado.Pendiente)
+                                        {
+                                            <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">
+                                                <button class="btn btn-success btn-sm" @onclick="() => AprobarAsync(r)" disabled="@_busy">&#10003; Aprobar</button>
+                                                <button class="btn btn-outline-danger btn-sm" @onclick="() => AbrirRechazo(r)" disabled="@_busy">Rechazar</button>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge @(r.Estado == AutorizacionSolicitudEstado.Aprobada ? "bg-success" : "bg-danger")">@(r.Estado == AutorizacionSolicitudEstado.Aprobada ? "Aprobada" : "Rechazada")</span>
+                                            <div><small class="text-muted">@r.ResueltoPorNombre @(r.ResueltoEn?.ToOffset(TimeSpan.FromHours(-5)).ToString("dd/MM HH:mm"))</small></div>
+                                            @if (!string.IsNullOrWhiteSpace(r.Respuesta)) { <small class="text-muted">@r.Respuesta</small> }
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+    else
+    {
     <div class="ase-card">
         @if (_loading)
         {
@@ -112,6 +197,30 @@ else
                 </table>
             </div>
         }
+    </div>
+    }
+}
+
+@* ============= MODAL RECHAZO ============= *@
+@if (_rechazo is not null)
+{
+    <div class="cie-backdrop" @onclick="() => _rechazo = null"></div>
+    <div class="cie-modal" style="width:480px; max-width:95vw;">
+        <div class="cie-modal-h">
+            <h3>Rechazar solicitud</h3>
+            <button class="cie-modal-close" @onclick="() => _rechazo = null">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <div class="az-field">
+                <label>Motivo del rechazo * <small class="text-muted">(lo vera el profesional)</small></label>
+                <textarea class="form-control form-control-sm" rows="3" @bind="_rechazoObs" style="width:100%;"></textarea>
+            </div>
+            @if (_solError is not null) { <div class="text-danger small">@_solError</div> }
+        </div>
+        <div class="cie-modal-foot" style="justify-content:flex-end;gap:8px;">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => _rechazo = null">Cancelar</button>
+            <button class="btn btn-danger btn-sm" @onclick="RechazarAsync" disabled="@_busy">Rechazar</button>
+        </div>
     </div>
 }
 
@@ -205,6 +314,12 @@ else
     .mono { font-family: ui-monospace, Menlo, Consolas, monospace; letter-spacing: 2px; font-weight: 700; }
     .tok-usado { opacity: 0.7; }
     .tok-venc { background: #fffbeb; }
+    .az-tabs { display: flex; gap: 4px; margin: 6px 0 10px; border-bottom: 1px solid #e2e8f0; }
+    .az-tab { background: none; border: none; border-bottom: 2px solid transparent; padding: 6px 14px; font-weight: 600; color: #64748b; }
+    .az-tab-on { color: #0f172a; border-bottom-color: #2563eb; }
+    .az-badge { background: #dc2626; color: #fff; border-radius: 999px; padding: 0 7px; font-size: 11px; margin-left: 4px; }
+    .az-sol-bar { display: flex; gap: 12px; align-items: center; padding: 8px 4px 10px; flex-wrap: wrap; }
+    .az-chk { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
 
     .cie-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 1050; }
     .cie-modal {
@@ -243,11 +358,28 @@ else
     private string _fNuevoConcepto = "";
     private string? _conceptosError;
 
+    // ── Solicitudes de autorizacion (de los profesionales) ──────────────────────
+    private string _tab = "sol";
+    private List<AutorizacionSolicitudDto> _sols = new();
+    private bool _soloPendientes = true;
+    private int _pendientes;
+    private string? _solError;
+    private AutorizacionSolicitudDto? _rechazo;
+    private string _rechazoObs = "";
+    private System.Threading.Timer? _refresco;
+
     protected override async Task OnInitializedAsync()
     {
         await ResolverPermisoAsync();
         if (_puede)
         {
+            await CargarSolicitudesAsync();
+            // Refresco automatico de la bandeja de solicitudes (cada 30 s).
+            _refresco = new System.Threading.Timer(async _ =>
+            {
+                try { await InvokeAsync(async () => { await CargarSolicitudesAsync(); StateHasChanged(); }); }
+                catch { /* circuito cerrado */ }
+            }, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
             await CargarAsync();
             try { _conceptos = (await Svc.ListarConceptosAsync()).ToList(); } catch { }
         }
@@ -270,6 +402,61 @@ else
             && perms.Split(',', StringSplitOptions.RemoveEmptyEntries)
                     .Any(p => string.Equals(p.Trim(), "autorizaciones", StringComparison.OrdinalIgnoreCase));
         _puede = esAdmin || tienePermiso;
+    }
+
+    public void Dispose() => _refresco?.Dispose();
+
+    private async Task CambiarTabAsync(string tab)
+    {
+        _tab = tab;
+        if (tab == "sol") { await CargarSolicitudesAsync(); } else { await CargarAsync(); }
+    }
+
+    private async Task CargarSolicitudesAsync()
+    {
+        try
+        {
+            _sols = (await Svc.ListarSolicitudesAsync(_soloPendientes)).ToList();
+            _pendientes = await Svc.ContarSolicitudesPendientesAsync();
+        }
+        catch (Exception ex) { _solError = ex.Message; }
+    }
+
+    private async Task AprobarAsync(AutorizacionSolicitudDto r)
+    {
+        _solError = null; _busy = true;
+        try
+        {
+            var (actor, nombre) = await ActorAsync();
+            var res = await Svc.AprobarSolicitudAsync(r.Id, null, nombre, actor);
+            if (!res.Ok) { _solError = res.Mensaje; }
+            await CargarSolicitudesAsync();
+        }
+        catch (Exception ex) { _solError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private void AbrirRechazo(AutorizacionSolicitudDto r)
+    {
+        _solError = null; _rechazoObs = ""; _rechazo = r;
+    }
+
+    private async Task RechazarAsync()
+    {
+        if (_rechazo is null) { return; }
+        _solError = null;
+        if (string.IsNullOrWhiteSpace(_rechazoObs)) { _solError = "Escribe el motivo del rechazo."; return; }
+        _busy = true;
+        try
+        {
+            var (actor, nombre) = await ActorAsync();
+            var res = await Svc.RechazarSolicitudAsync(_rechazo.Id, _rechazoObs, nombre, actor);
+            if (!res.Ok) { _solError = res.Mensaje; return; }
+            _rechazo = null;
+            await CargarSolicitudesAsync();
+        }
+        catch (Exception ex) { _solError = ex.Message; }
+        finally { _busy = false; }
     }
 
     private async Task CargarAsync()

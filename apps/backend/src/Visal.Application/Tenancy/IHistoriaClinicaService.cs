@@ -4,8 +4,13 @@ namespace Visal.Application.Tenancy;
 /// <param name="RequiereToken">True si la fecha excede el limite y la HC no esta autorizada para esa fecha.</param>
 /// <param name="Unidad">"dias" (1a sesion) u "horas" (siguientes); null si no aplica.</param>
 /// <param name="Detalle">Texto legible del motivo (para el modal de token).</param>
+/// <param name="SolicitudEstado">Estado de la ultima solicitud de autorizacion del profesional
+/// para ESTA fecha: null (ninguna), "Pendiente" o "Rechazada" (las aprobadas ya autorizan la HC).</param>
+/// <param name="SolicitudRespuesta">Observacion del autorizador cuando la rechazo.</param>
+/// <param name="SolicitudEn">Momento en que se envio la solicitud.</param>
 public sealed record ControlFechaAtencionDto(
-    bool RequiereToken, string? Unidad, string? Detalle, Guid? AsignacionId, DateTimeOffset? FechaAtencion);
+    bool RequiereToken, string? Unidad, string? Detalle, Guid? AsignacionId, DateTimeOffset? FechaAtencion,
+    string? SolicitudEstado = null, string? SolicitudRespuesta = null, DateTimeOffset? SolicitudEn = null);
 
 /// <summary>Resultado de intentar autorizar una fecha con un token.</summary>
 public sealed record AutorizarFechaResult(bool Ok, string? Mensaje);
@@ -198,8 +203,16 @@ public interface IHistoriaClinicaService
     Task<bool> CerrarAsync(Guid id, string valoresJson, Guid actor, CancellationToken ct = default);
 
     /// <summary>Evalua el control de fecha de atencion de la HC (lee su FechaAtencion persistida).
-    /// Lo llama la UI tras cada autoguardado para pedir el token cuando la fecha se sale del limite.</summary>
-    Task<ControlFechaAtencionDto> EvaluarControlFechaAsync(Guid hcId, CancellationToken ct = default);
+    /// Lo llama la UI tras cada autoguardado para pedir el token cuando la fecha se sale del limite.
+    /// <paramref name="actor"/> (opcional): si tiene el permiso historias.sin-control-cierre (o es
+    /// Owner/Admin) el control no aplica.</summary>
+    Task<ControlFechaAtencionDto> EvaluarControlFechaAsync(Guid hcId, Guid? actor = null, CancellationToken ct = default);
+
+    /// <summary>El profesional pide autorizacion (sin token) para cerrar su HC fuera del patron de
+    /// cierre. Crea una solicitud Pendiente que aparece en /autorizaciones para que un autorizador la
+    /// apruebe o rechace. Si ya hay una pendiente para esta HC y fecha, no duplica.</summary>
+    Task<AutorizarFechaResult> SolicitarAutorizacionFechaAsync(
+        Guid hcId, string motivo, string? conceptoNombre, string? actorNombre, Guid actor, CancellationToken ct = default);
 
     /// <summary>Valida/consume un token de autorizacion y marca la HC como autorizada para su
     /// fecha de atencion actual (habilita el cierre). Atomico (token + HC en una transaccion).</summary>

@@ -65,6 +65,138 @@ public sealed class AutorizacionTokenService(
         return token.Codigo;
     }
 
+    // ── Solicitudes de autorizacion (sin token) ─────────────────────────────────
+
+    public async Task<IReadOnlyList<AutorizacionSolicitudDto>> ListarSolicitudesAsync(bool soloPendientes, int max = 200, CancellationToken ct = default)
+    {
+        using var db = dbFactory.Create();
+        var q = db.AutorizacionSolicitudes.AsNoTracking();
+        if (soloPendientes) { q = q.Where(s => s.Estado == AutorizacionSolicitudEstado.Pendiente); }
+        var rows = await q
+            .OrderBy(s => s.Estado == AutorizacionSolicitudEstado.Pendiente ? 0 : 1)
+            .ThenByDescending(s => s.CreatedAt)
+            .Take(max)
+            .ToListAsync(ct);
+        if (rows.Count == 0) { return Array.Empty<AutorizacionSolicitudDto>(); }
+
+        var hcIds = rows.Select(r => r.HistoriaClinicaId).Distinct().ToList();
+        var hcs = await db.HistoriasClinicas.AsNoTracking().Where(h => hcIds.Contains(h.Id))
+            .Select(h => new { h.Id, h.Consecutivo, h.PacienteId })
+            .ToDictionaryAsync(x => x.Id, ct);
+        var pacIds = hcs.Values.Select(h => h.PacienteId).Distinct().ToList();
+        var pacs = await db.Pacientes.AsNoTracking().Where(p => pacIds.Contains(p.Id))
+            .Select(p => new { p.Id, p.NombreCompleto, p.TipoDocumento, p.NumeroDocumento })
+            .ToDictionaryAsync(x => x.Id, ct);
+        var asigIds = rows.Where(r => r.AsignacionId != null).Select(r => r.AsignacionId!.Value).Distinct().ToList();
+        var asigs = asigIds.Count == 0
+            ? new()
+            : await db.Asignaciones.AsNoTracking().Where(a => asigIds.Contains(a.Id))
+                .Select(a => new { a.Id, a.Consecutivo, a.NombreServicio, a.TipoServicio })
+                .ToDictionaryAsync(x => x.Id, ct);
+
+        return rows.Select(r =>
+        {
+            hcs.TryGetValue(r.HistoriaClinicaId, out var hc);
+            var pac = hc is not null && pacs.TryGetValue(hc.PacienteId, out var p) ? p : null;
+            var asg = r.AsignacionId is Guid aid && asigs.TryGetValue(aid, out var a) ? a : null;
+            return new AutorizacionSolicitudDto(
+                r.Id, r.Estado, r.CreatedAt, r.SolicitadoPorNombre,
+                r.HistoriaClinicaId, hc?.Consecutivo, r.AsignacionId, asg?.Consecutivo,
+                pac?.NombreCompleto, pac is null ? null : $"{pac.TipoDocumento} {pac.NumeroDocumento}",
+                asg?.NombreServicio, asg?.TipoServicio,
+                r.FechaAtencion, r.Detalle, r.ConceptoNombre, r.Motivo,
+                r.ResueltoEn, r.ResueltoPorNombre, r.Respuesta);
+        }).ToList();
+    }
+
+    public async Task<int> ContarSolicitudesPendientesAsync(CancellationToken ct = default)
+    {
+        using var db = dbFactory.Create();
+        return await db.AutorizacionSolicitudes.AsNoTracking()
+            .CountAsync(s => s.Estado == AutorizacionSolicitudEstado.Pendiente, ct);
+    }
+
+    public async Task<UsarTokenResult> AprobarSolicitudAsync(Guid solicitudId, string? observacion, string? actorNombre, Guid actor, CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { return new UsarTokenResult(false, "Sin tenant activo."); }
+        using var db = dbFactory.Create();
+        if (!await PermisosUsuario.TieneAsync(db, actor, PermisosUsuario.Autorizaciones, ct))
+        {
+            return new UsarTokenResult(false, "No tienes permiso para aprobar autorizaciones.");
+        }
+        var sol = await db.AutorizacionSolicitudes.FirstOrDefaultAsync(s => s.Id == solicitudId, ct);
+        if (sol is null) { return new UsarTokenResult(false, "Solicitud no encontrada."); }
+        if (sol.Estado != AutorizacionSolicitudEstado.Pendiente) { return new UsarTokenResult(false, "La solicitud ya fue resuelta."); }
+        var hc = await db.HistoriasClinicas.FirstOrDefaultAsync(h => h.Id == sol.HistoriaClinicaId, ct);
+        if (hc is null) { return new UsarTokenResult(false, "La historia clinica ya no existe."); }
+
+        var now = clock.GetUtcNow();
+        var obs = string.IsNullOrWhiteSpace(observacion) ? "Aprobada desde solicitud del profesional." : observacion.Trim();
+        var nombre = string.IsNullOrWhiteSpace(actorNombre) ? null : actorNombre.Trim();
+        // Token "usado" al instante: deja la aprobacion en el MISMO historial que los tokens
+        // (quien autorizo, quien lo uso, HC/asignacion, motivo).
+        var token = new AutorizacionToken
+        {
+            TenantId = tid,
+            Codigo = await GenerarCodigoUnicoAsync(db, ct),
+            ConceptoNombre = sol.ConceptoNombre,
+            Observacion = obs,
+            GeneradoPorNombre = nombre,
+            ExpiresAt = now,
+            Estado = AutorizacionTokenEstado.Usado,
+            UsadoEn = now,
+            UsadoPorUserId = sol.SolicitadoPorUserId,
+            UsadoPorNombre = sol.SolicitadoPorNombre,
+            HistoriaClinicaId = sol.HistoriaClinicaId,
+            AsignacionId = sol.AsignacionId,
+            MotivoUso = sol.Motivo,
+        };
+        db.AutorizacionTokens.Add(token);
+
+        // La HC queda autorizada para la fecha SOLICITADA (si luego cambia la fecha, se re-pide).
+        hc.AutorizacionFechaTokenId = token.Id;
+        hc.AutorizacionFechaAutorizada = sol.FechaAtencion;
+
+        sol.Estado = AutorizacionSolicitudEstado.Aprobada;
+        sol.ResueltoEn = now;
+        sol.ResueltoPorUserId = actor;
+        sol.ResueltoPorNombre = nombre;
+        sol.Respuesta = string.IsNullOrWhiteSpace(observacion) ? null : observacion.Trim();
+        sol.TokenId = token.Id;
+        audit.Write(db, actor, "autorizacion-solicitud.aprobar", nameof(AutorizacionSolicitud), sol.Id,
+            previousValue: new { estado = "Pendiente" },
+            newValue: new { estado = "Aprobada", hcId = sol.HistoriaClinicaId, sol.FechaAtencion, tokenId = token.Id, observacion = sol.Respuesta },
+            tenantId: tid);
+        await db.SaveChangesAsync(ct); // solicitud + token + HC atomico
+        return new UsarTokenResult(true, null, token.Id);
+    }
+
+    public async Task<UsarTokenResult> RechazarSolicitudAsync(Guid solicitudId, string observacion, string? actorNombre, Guid actor, CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { return new UsarTokenResult(false, "Sin tenant activo."); }
+        var obs = (observacion ?? "").Trim();
+        if (obs.Length == 0) { return new UsarTokenResult(false, "Escribe el motivo del rechazo."); }
+        using var db = dbFactory.Create();
+        if (!await PermisosUsuario.TieneAsync(db, actor, PermisosUsuario.Autorizaciones, ct))
+        {
+            return new UsarTokenResult(false, "No tienes permiso para rechazar autorizaciones.");
+        }
+        var sol = await db.AutorizacionSolicitudes.FirstOrDefaultAsync(s => s.Id == solicitudId, ct);
+        if (sol is null) { return new UsarTokenResult(false, "Solicitud no encontrada."); }
+        if (sol.Estado != AutorizacionSolicitudEstado.Pendiente) { return new UsarTokenResult(false, "La solicitud ya fue resuelta."); }
+        sol.Estado = AutorizacionSolicitudEstado.Rechazada;
+        sol.ResueltoEn = clock.GetUtcNow();
+        sol.ResueltoPorUserId = actor;
+        sol.ResueltoPorNombre = string.IsNullOrWhiteSpace(actorNombre) ? null : actorNombre.Trim();
+        sol.Respuesta = obs;
+        audit.Write(db, actor, "autorizacion-solicitud.rechazar", nameof(AutorizacionSolicitud), sol.Id,
+            previousValue: new { estado = "Pendiente" },
+            newValue: new { estado = "Rechazada", hcId = sol.HistoriaClinicaId, observacion = obs },
+            tenantId: tid);
+        await db.SaveChangesAsync(ct);
+        return new UsarTokenResult(true, null);
+    }
+
     // ── Conceptos configurables ──────────────────────────────────────────────────
 
     private static readonly string[] ConceptosDefault =

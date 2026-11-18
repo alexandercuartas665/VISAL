@@ -25,6 +25,29 @@ public sealed record AutorizacionTokenDto(
     long? AsignacionConsecutivo,
     string? MotivoUso);
 
+/// <summary>Fila del tab "Solicitudes" de /autorizaciones (solicitudes de cierre fuera del
+/// patron que hacen los profesionales).</summary>
+public sealed record AutorizacionSolicitudDto(
+    Guid Id,
+    AutorizacionSolicitudEstado Estado,
+    DateTimeOffset SolicitadoEn,
+    string? SolicitadoPorNombre,
+    Guid HistoriaClinicaId,
+    long? HistoriaClinicaConsecutivo,
+    Guid? AsignacionId,
+    long? AsignacionConsecutivo,
+    string? PacienteNombre,
+    string? PacienteDocumento,
+    string? ServicioNombre,
+    string? TipoServicio,
+    DateTimeOffset FechaAtencion,
+    string? Detalle,
+    string? ConceptoNombre,
+    string Motivo,
+    DateTimeOffset? ResueltoEn,
+    string? ResueltoPorNombre,
+    string? Respuesta);
+
 /// <summary>Resultado de validar/consumir un token.</summary>
 public sealed record UsarTokenResult(bool Ok, string? Mensaje, Guid? TokenId = null);
 
@@ -42,6 +65,20 @@ public interface IAutorizacionTokenService
     /// <summary>Genera un token nuevo con un concepto (opcional) y una observacion obligatoria.
     /// Devuelve el codigo de 6 chars.</summary>
     Task<string> GenerarAsync(string? conceptoNombre, string observacion, string? generadoPorNombre, Guid actor, CancellationToken ct = default);
+
+    // ── Solicitudes de autorizacion (sin token) ─────────────────────────────────
+    /// <summary>Lista solicitudes (pendientes primero, luego recientes).</summary>
+    Task<IReadOnlyList<AutorizacionSolicitudDto>> ListarSolicitudesAsync(bool soloPendientes, int max = 200, CancellationToken ct = default);
+
+    /// <summary>Cantidad de solicitudes pendientes del tenant (badge).</summary>
+    Task<int> ContarSolicitudesPendientesAsync(CancellationToken ct = default);
+
+    /// <summary>Aprueba una solicitud pendiente: la HC queda autorizada para la fecha solicitada y
+    /// se registra un token "usado" (historial unico). Requiere permiso de autorizaciones.</summary>
+    Task<UsarTokenResult> AprobarSolicitudAsync(Guid solicitudId, string? observacion, string? actorNombre, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Rechaza una solicitud pendiente con observacion obligatoria.</summary>
+    Task<UsarTokenResult> RechazarSolicitudAsync(Guid solicitudId, string observacion, string? actorNombre, Guid actor, CancellationToken ct = default);
 
     // ── Conceptos configurables ──────────────────────────────────────────────────
     /// <summary>Lista los conceptos del tenant (ordenados). Siembra ejemplos la primera vez.</summary>

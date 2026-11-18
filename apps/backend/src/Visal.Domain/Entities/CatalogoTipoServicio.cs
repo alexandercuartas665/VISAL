@@ -55,4 +55,41 @@ public class CatalogoTipoServicio : TenantEntity
     /// Null = sin limite configurado (no se controla).
     /// </summary>
     public int? LimiteHorasSesionesSiguientes { get; set; }
+
+    /// <summary>
+    /// Patron de cierre de la historia clinica para asignaciones de este tipo (ver
+    /// <see cref="PatronCierreHc"/>): LIBRE, MISMO_DIA, HORAS_ATENCION u OPORTUNIDAD.
+    /// Cada agencia (tenant) define el suyo por tipo. Null = comportamiento historico:
+    /// OPORTUNIDAD si hay limites configurados, si no LIBRE.
+    /// </summary>
+    public string? PatronCierre { get; set; }
+
+    /// <summary>Horas maximas entre la fecha de atencion y el registro/cierre de la HC, para
+    /// el patron HORAS_ATENCION. Null/0 = sin control.</summary>
+    public int? HorasLimiteCierre { get; set; }
 }
+
+/// <summary>Patrones de cierre de HC configurables por tipo de servicio (por agencia).</summary>
+public static class PatronCierreHc
+{
+    /// <summary>Sin control: la HC se cierra cuando sea.</summary>
+    public const string Libre = "LIBRE";
+    /// <summary>La HC debe cerrarse el mismo dia (hora Colombia) de la fecha de atencion.</summary>
+    public const string MismoDia = "MISMO_DIA";
+    /// <summary>La HC debe registrarse/cerrarse a mas tardar N horas despues de la fecha de atencion.</summary>
+    public const string HorasAtencion = "HORAS_ATENCION";
+    /// <summary>Limites de oportunidad: 1a sesion N dias desde la coordinacion; siguientes N horas.</summary>
+    public const string Oportunidad = "OPORTUNIDAD";
+
+    public static readonly IReadOnlyList<string> Todos = new[] { Libre, MismoDia, HorasAtencion, Oportunidad };
+
+    /// <summary>Patron efectivo: el configurado si es valido; si no (null/legado), OPORTUNIDAD
+    /// cuando hay limites de oportunidad y LIBRE en otro caso.</summary>
+    public static string Efectivo(string? patron, int? limiteDias, int? limiteHoras)
+    {
+        var p = (patron ?? "").Trim().ToUpperInvariant();
+        if (Todos.Contains(p)) { return p; }
+        return (limiteDias is not null || limiteHoras is not null) ? Oportunidad : Libre;
+    }
+}
+

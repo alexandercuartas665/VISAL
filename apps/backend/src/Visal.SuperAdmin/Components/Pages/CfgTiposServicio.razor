@@ -3,6 +3,7 @@
 @rendermode @(new InteractiveServerRenderMode(prerender: false))
 @using System.Security.Claims
 @using Visal.Application.Tenancy
+@using Visal.Domain.Entities
 @inject ICatalogoTipoServicioService Svc
 @inject IJSRuntime JS
 
@@ -43,7 +44,7 @@
                         <th style="width:180px">Codigo</th>
                         <th>Nombre</th>
                         <th style="width:130px" class="text-center" title="Tipo de archivo RIPS: AC (Consultas), AP (Procedimientos), AT (Otros servicios), AM (Medicamentos)">Tipo archivo RIPS</th>
-                        <th style="width:160px" class="text-center" title="Tiempo maximo: primera sesion en dias (desde coordinacion), siguientes en horas (entre sesiones)">Limites de oportunidad</th>
+                        <th style="width:190px" class="text-center" title="Como se controla el cierre de la historia clinica para este tipo de servicio">Patron de cierre</th>
                         <th style="width:90px" class="text-center">Activo</th>
                         <th style="width:110px"></th>
                     </tr>
@@ -62,12 +63,22 @@
                                 { <span class="text-muted">—</span> }
                             </td>
                             <td class="text-center">
-                                @if (r.LimiteDiasPrimeraSesion is null && r.LimiteHorasSesionesSiguientes is null)
-                                { <span class="text-muted">—</span> }
-                                else
+                                @{ var pat = PatronCierreHc.Efectivo(r.PatronCierre, r.LimiteDiasPrimeraSesion, r.LimiteHorasSesionesSiguientes); }
+                                @switch (pat)
                                 {
-                                    <span class="ts-lim-chip" title="Primera sesion (dias desde coordinacion)">1ª: @(r.LimiteDiasPrimeraSesion is int d ? $"{d} d" : "—")</span>
-                                    <span class="ts-lim-chip" title="Siguientes sesiones (horas entre sesiones)">2ª+: @(r.LimiteHorasSesionesSiguientes is int h ? $"{h} h" : "—")</span>
+                                    case PatronCierreHc.MismoDia:
+                                        <span class="ts-lim-chip">Mismo día</span>
+                                        break;
+                                    case PatronCierreHc.HorasAtencion:
+                                        <span class="ts-lim-chip">Máx. @(r.HorasLimiteCierre ?? 0) h desde la atención</span>
+                                        break;
+                                    case PatronCierreHc.Oportunidad:
+                                        <span class="ts-lim-chip" title="Primera sesión (días desde la coordinación)">1ª: @(r.LimiteDiasPrimeraSesion is int d ? $"{d} d" : "—")</span>
+                                        <span class="ts-lim-chip" title="Siguientes sesiones (horas de atraso del registro)">2ª+: @(r.LimiteHorasSesionesSiguientes is int h ? $"{h} h" : "—")</span>
+                                        break;
+                                    default:
+                                        <span class="text-muted">Libre</span>
+                                        break;
                                 }
                             </td>
                             <td class="text-center">
@@ -123,7 +134,27 @@
                 </div>
 
                 <div class="ts-limites">
-                    <div class="ts-limites-h">Limites de oportunidad <small class="text-muted">(opcional, dejar vacio = sin control)</small></div>
+                    <div class="ts-limites-h">Patrón de cierre de la historia clínica</div>
+                    <div class="ase-f">
+                        <select class="form-select form-select-sm" @bind="_fPatron">
+                            <option value="LIBRE">Libre (sin control)</option>
+                            <option value="MISMO_DIA">Mismo día de la atención</option>
+                            <option value="HORAS_ATENCION">Horas máximas desde la atención</option>
+                            <option value="OPORTUNIDAD">Oportunidad (días desde coordinación / horas siguientes)</option>
+                        </select>
+                        <small class="text-muted">Si la historia se sale del patrón, el profesional debe pedir autorización (los coordinadores quedan exentos).</small>
+                    </div>
+                    @if (_fPatron == PatronCierreHc.HorasAtencion)
+                    {
+                        <div class="ase-f" style="margin-top:8px;">
+                            <label>Horas máximas <small class="text-muted">(desde la fecha de atención)</small></label>
+                            <input type="number" class="form-control form-control-sm" @bind="_fHorasCierre" min="1" placeholder="Ej: 24" />
+                        </div>
+                    }
+                </div>
+
+                <div class="ts-limites" style="@(_fPatron == PatronCierreHc.Oportunidad ? "" : "opacity:.75")">
+                    <div class="ts-limites-h">Limites de oportunidad <small class="text-muted">(opcional, dejar vacio = sin control@(_fPatron == PatronCierreHc.Oportunidad ? "" : "; solo bloquean con el patrón Oportunidad, la columna de Atención los sigue mostrando"))</small></div>
                     <div class="ts-limites-grid">
                         <div class="ase-f">
                             <label>Primera sesion <small class="text-muted">(dias)</small></label>
@@ -135,7 +166,7 @@
                             <label>Siguientes sesiones <small class="text-muted">(horas)</small></label>
                             <input type="number" class="form-control form-control-sm" @bind="_fLimiteHoras" min="1"
                                    placeholder="Ej: 48" />
-                            <small class="text-muted">Horas maximas entre una sesion y la siguiente.</small>
+                            <small class="text-muted">Horas maximas de atraso al registrar las sesiones siguientes.</small>
                         </div>
                     </div>
                 </div>
@@ -201,6 +232,8 @@
     private string _fTipoArchivoRips = "";
     private int? _fLimiteDias;
     private int? _fLimiteHoras;
+    private string _fPatron = PatronCierreHc.Libre;
+    private int? _fHorasCierre;
     private string? _modalError;
 
     protected override async Task OnInitializedAsync()
@@ -223,6 +256,7 @@
         _fActivo = true;
         _fTipoArchivoRips = "";
         _fLimiteDias = null; _fLimiteHoras = null;
+        _fPatron = PatronCierreHc.Libre; _fHorasCierre = null;
         _modalOpen = true;
     }
 
@@ -233,6 +267,8 @@
         _fTipoArchivoRips = r.TipoArchivoRips ?? "";
         _fLimiteDias = r.LimiteDiasPrimeraSesion;
         _fLimiteHoras = r.LimiteHorasSesionesSiguientes;
+        _fPatron = PatronCierreHc.Efectivo(r.PatronCierre, r.LimiteDiasPrimeraSesion, r.LimiteHorasSesionesSiguientes);
+        _fHorasCierre = r.HorasLimiteCierre;
         _modalOpen = true;
     }
 
@@ -248,7 +284,7 @@
         {
             var actor = await ActorAsync();
             var req = new GuardarTipoServicioRequest(_editId, _fCodigo, _fNombre, _fOrden, _fActivo, _fTipoArchivoRips,
-                _fLimiteDias, _fLimiteHoras);
+                _fLimiteDias, _fLimiteHoras, _fPatron, _fHorasCierre);
             await Svc.GuardarAsync(req, actor);
             _ok = _editId is null ? "Tipo creado." : "Tipo actualizado.";
             _modalOpen = false;

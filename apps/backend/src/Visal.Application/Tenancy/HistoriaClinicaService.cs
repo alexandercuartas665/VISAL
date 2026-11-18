@@ -719,7 +719,7 @@ public sealed class HistoriaClinicaService(
         // limite del tipo de servicio y la HC no tiene una autorizacion (token) que la
         // cubra, abortamos el cierre ANTES de mutar estado/persistir. La UI lo captura y
         // abre el modal de token. (El enganche principal esta en el autoguardado.)
-        var controlCierre = await EvaluarControlFechaAsync(db, e, ct);
+        var controlCierre = await EvaluarControlFechaAsync(db, e, actor, ct);
         if (controlCierre.RequiereToken)
         {
             throw new CierreRequiereAutorizacionException(controlCierre.Detalle
@@ -1333,10 +1333,16 @@ public sealed class HistoriaClinicaService(
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    //  Control de fecha de atencion (limite de oportunidad por tipo de servicio)
-    //  1a sesion: max N DIAS desde la coordinacion (turno.CreatedAt).
-    //  Siguientes: la fecha no puede estar mas de N HORAS antes de ahora (backdating).
-    //  Si se viola y la HC no tiene autorizacion (token) para esa fecha -> RequiereToken.
+    //  Control de cierre de HC por PATRON del tipo de servicio (configurable por agencia en
+    //  /config/tipos-servicio, ver PatronCierreHc):
+    //   - LIBRE: sin control.
+    //   - MISMO_DIA: la HC se registra/cierra el mismo dia (Colombia) de la fecha de atencion.
+    //   - HORAS_ATENCION: a mas tardar N horas despues de la fecha de atencion.
+    //   - OPORTUNIDAD (historico): 1a sesion max N DIAS desde la coordinacion (turno.CreatedAt);
+    //     siguientes, la fecha no puede estar mas de N HORAS antes de ahora (backdating).
+    //  Si se viola y la HC no esta autorizada para esa fecha (token o solicitud aprobada) ->
+    //  RequiereToken. Usuarios con historias.sin-control-cierre (coordinadores) u Owner/Admin
+    //  quedan exentos.
     // ─────────────────────────────────────────────────────────────────────────────
 
     private static readonly TimeSpan ControlBogotaOffset = TimeSpan.FromHours(-5);
@@ -1360,11 +1366,17 @@ public sealed class HistoriaClinicaService(
         return (fila.Num ?? 1, fila.CreatedAt, fila.AsigId, fila.TipoServicio, fila.Modulo);
     }
 
-    private async Task<ControlFechaAtencionDto> EvaluarControlFechaAsync(IApplicationDbContext db, HistoriaClinica e, CancellationToken ct)
+    private async Task<ControlFechaAtencionDto> EvaluarControlFechaAsync(IApplicationDbContext db, HistoriaClinica e, Guid? actor, CancellationToken ct)
     {
         if (e.FechaAtencion is not DateTimeOffset fecha)
         {
             return new ControlFechaAtencionDto(false, null, null, null, null);
+        }
+        // Exentos (coordinadores, Owner/Admin): el control no aplica.
+        if (actor is Guid act && act != Guid.Empty
+            && await PermisosUsuario.TieneAsync(db, act, PermisosUsuario.SinControlCierre, ct))
+        {
+            return new ControlFechaAtencionDto(false, null, null, null, fecha);
         }
         var info = await ResolverTurnoAsigDeHcAsync(db, e.Id, ct);
         if (info is null)
@@ -1376,14 +1388,45 @@ public sealed class HistoriaClinicaService(
 
         var cod = (tipo ?? modulo ?? "").Trim().ToUpperInvariant();
         if (cod.Length == 0) { return new ControlFechaAtencionDto(false, null, null, asignacionId, fecha); }
-        var lim = await db.CatalogosTipoServicio.AsNoTracking()
-            .Where(c => c.Codigo.ToUpper() == cod)
-            .Select(c => new { c.LimiteDiasPrimeraSesion, c.LimiteHorasSesionesSiguientes })
-            .FirstOrDefaultAsync(ct);
+        // Tolerante al plural del tipo en la asignacion (TERAPIAS -> TERAPIA, CONSULTAS ->
+        // CONSULTA): el exacto gana; si no existe, se usa el singular.
+        var candidatos = CandidatosCodigoTipo(cod);
+        var lims = await db.CatalogosTipoServicio.AsNoTracking()
+            .Where(c => candidatos.Contains(c.Codigo.ToUpper()))
+            .Select(c => new { Codigo = c.Codigo.ToUpper(), c.LimiteDiasPrimeraSesion, c.LimiteHorasSesionesSiguientes, c.PatronCierre, c.HorasLimiteCierre })
+            .ToListAsync(ct);
+        var lim = lims.OrderBy(c => c.Codigo == cod ? 0 : 1).FirstOrDefault();
         if (lim is null) { return new ControlFechaAtencionDto(false, null, null, asignacionId, fecha); }
+        var patron = PatronCierreHc.Efectivo(lim.PatronCierre, lim.LimiteDiasPrimeraSesion, lim.LimiteHorasSesionesSiguientes);
 
         bool viola = false; string? unidad = null; string? detalle = null;
-        if (numeroSesion <= 1)
+        if (patron == PatronCierreHc.Libre)
+        {
+            return new ControlFechaAtencionDto(false, null, null, asignacionId, fecha);
+        }
+        if (patron == PatronCierreHc.MismoDia)
+        {
+            var fBog = fecha.ToOffset(ControlBogotaOffset).Date;
+            var hoyBog = clock.GetUtcNow().ToOffset(ControlBogotaOffset).Date;
+            if (hoyBog > fBog)
+            {
+                viola = true; unidad = "dias";
+                detalle = $"Para este tipo de servicio la historia se debe cerrar el mismo dia de la atencion ({fBog:dd/MM/yyyy}); hoy es {hoyBog:dd/MM/yyyy}.";
+            }
+        }
+        else if (patron == PatronCierreHc.HorasAtencion)
+        {
+            if (lim.HorasLimiteCierre is int hl)
+            {
+                var horas = (clock.GetUtcNow() - fecha).TotalHours;
+                if (horas > hl)
+                {
+                    viola = true; unidad = "horas";
+                    detalle = $"Para este tipo de servicio la historia se debe cerrar a mas tardar {hl} hora(s) despues de la atencion; han pasado {Math.Floor(horas)} hora(s).";
+                }
+            }
+        }
+        else if (numeroSesion <= 1)
         {
             if (lim.LimiteDiasPrimeraSesion is int dd)
             {
@@ -1409,17 +1452,81 @@ public sealed class HistoriaClinicaService(
 
         if (!viola) { return new ControlFechaAtencionDto(false, unidad, null, asignacionId, fecha); }
 
-        // Autorizada para esta MISMA fecha?
+        // Autorizada para esta MISMA fecha (token o solicitud aprobada)?
         var autorizada = e.AutorizacionFechaTokenId != null && e.AutorizacionFechaAutorizada == fecha;
-        return new ControlFechaAtencionDto(!autorizada, unidad, detalle, asignacionId, fecha);
+        if (autorizada) { return new ControlFechaAtencionDto(false, unidad, detalle, asignacionId, fecha); }
+
+        // Ultima solicitud del profesional para ESTA fecha (pendiente / rechazada).
+        var sol = await db.AutorizacionSolicitudes.AsNoTracking()
+            .Where(s => s.HistoriaClinicaId == e.Id && s.FechaAtencion == fecha)
+            .OrderByDescending(s => s.CreatedAt)
+            .Select(s => new { s.Estado, s.Respuesta, s.CreatedAt })
+            .FirstOrDefaultAsync(ct);
+        string? solEstado = sol?.Estado switch
+        {
+            AutorizacionSolicitudEstado.Pendiente => "Pendiente",
+            AutorizacionSolicitudEstado.Rechazada => "Rechazada",
+            _ => null,
+        };
+        return new ControlFechaAtencionDto(true, unidad, detalle, asignacionId, fecha,
+            solEstado, solEstado == "Rechazada" ? sol!.Respuesta : null, solEstado is null ? null : sol!.CreatedAt);
     }
 
-    public async Task<ControlFechaAtencionDto> EvaluarControlFechaAsync(Guid hcId, CancellationToken ct = default)
+    /// <summary>Codigos de catalogo candidatos para el tipo de una asignacion: el exacto y, si
+    /// termina en S, su singular (TERAPIAS -> TERAPIA).</summary>
+    internal static List<string> CandidatosCodigoTipo(string cod)
+    {
+        var l = new List<string> { cod };
+        if (cod.Length > 1 && cod.EndsWith('S')) { l.Add(cod[..^1]); }
+        return l;
+    }
+
+    public async Task<ControlFechaAtencionDto> EvaluarControlFechaAsync(Guid hcId, Guid? actor = null, CancellationToken ct = default)
     {
         using var db = dbFactory.Create();
         var e = await db.HistoriasClinicas.AsNoTracking().FirstOrDefaultAsync(h => h.Id == hcId, ct);
         if (e is null) { return new ControlFechaAtencionDto(false, null, null, null, null); }
-        return await EvaluarControlFechaAsync(db, e, ct);
+        return await EvaluarControlFechaAsync(db, e, actor, ct);
+    }
+
+    public async Task<AutorizarFechaResult> SolicitarAutorizacionFechaAsync(
+        Guid hcId, string motivo, string? conceptoNombre, string? actorNombre, Guid actor, CancellationToken ct = default)
+    {
+        if (tenant.TenantId is not Guid tid) { return new AutorizarFechaResult(false, "Sin tenant activo."); }
+        var mot = (motivo ?? "").Trim();
+        if (mot.Length == 0) { return new AutorizarFechaResult(false, "Escribe el motivo de la solicitud."); }
+        using var db = dbFactory.Create();
+        var e = await db.HistoriasClinicas.AsNoTracking().FirstOrDefaultAsync(h => h.Id == hcId, ct);
+        if (e is null) { return new AutorizarFechaResult(false, "Historia clinica no encontrada."); }
+        var ctrl = await EvaluarControlFechaAsync(db, e, actor, ct);
+        if (!ctrl.RequiereToken || ctrl.FechaAtencion is not DateTimeOffset fecha)
+        {
+            return new AutorizarFechaResult(true, "La historia ya no requiere autorizacion.");
+        }
+        if (ctrl.SolicitudEstado == "Pendiente")
+        {
+            return new AutorizarFechaResult(true, "Ya hay una solicitud pendiente para esta historia.");
+        }
+        var sol = new AutorizacionSolicitud
+        {
+            TenantId = tid,
+            HistoriaClinicaId = e.Id,
+            AsignacionId = ctrl.AsignacionId,
+            FechaAtencion = fecha,
+            Detalle = ctrl.Detalle,
+            ConceptoNombre = string.IsNullOrWhiteSpace(conceptoNombre) ? null : conceptoNombre.Trim(),
+            Motivo = mot,
+            SolicitadoPorUserId = actor,
+            SolicitadoPorNombre = string.IsNullOrWhiteSpace(actorNombre) ? null : actorNombre.Trim(),
+            Estado = AutorizacionSolicitudEstado.Pendiente,
+        };
+        db.AutorizacionSolicitudes.Add(sol);
+        audit.Write(db, actor, "autorizacion-solicitud.crear", nameof(AutorizacionSolicitud), sol.Id,
+            previousValue: null,
+            newValue: new { hcId = e.Id, fecha, sol.ConceptoNombre, motivo = mot },
+            tenantId: tid);
+        await db.SaveChangesAsync(ct);
+        return new AutorizarFechaResult(true, null);
     }
 
     public async Task<AutorizarFechaResult> AutorizarFechaConTokenAsync(

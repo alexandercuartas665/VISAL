@@ -23,7 +23,7 @@ public sealed class CatalogoTipoServicioService(IApplicationDbContextFactory dbF
         return rows
             .OrderBy(r => r.Orden).ThenBy(r => r.Codigo, StringComparer.OrdinalIgnoreCase)
             .Select(r => new CatalogoTipoServicioDto(r.Id, r.Codigo, r.Nombre, r.Orden, r.Activo, r.TipoArchivoRips,
-                r.LimiteDiasPrimeraSesion, r.LimiteHorasSesionesSiguientes))
+                r.LimiteDiasPrimeraSesion, r.LimiteHorasSesionesSiguientes, r.PatronCierre, r.HorasLimiteCierre))
             .ToList();
     }
 
@@ -32,7 +32,7 @@ public sealed class CatalogoTipoServicioService(IApplicationDbContextFactory dbF
         using var db = dbFactory.Create();
         var r = await db.CatalogosTipoServicio.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         return r is null ? null : new CatalogoTipoServicioDto(r.Id, r.Codigo, r.Nombre, r.Orden, r.Activo, r.TipoArchivoRips,
-            r.LimiteDiasPrimeraSesion, r.LimiteHorasSesionesSiguientes);
+            r.LimiteDiasPrimeraSesion, r.LimiteHorasSesionesSiguientes, r.PatronCierre, r.HorasLimiteCierre);
     }
 
     public async Task<CatalogoTipoServicioDto> GuardarAsync(GuardarTipoServicioRequest req, Guid actor, CancellationToken ct = default)
@@ -66,9 +66,17 @@ public sealed class CatalogoTipoServicioService(IApplicationDbContextFactory dbF
         // "0 dias" con control estricto accidental.
         entity.LimiteDiasPrimeraSesion = req.LimiteDiasPrimeraSesion is int d && d > 0 ? d : null;
         entity.LimiteHorasSesionesSiguientes = req.LimiteHorasSesionesSiguientes is int h && h > 0 ? h : null;
+        // Patron de cierre: solo valores conocidos (null = comportamiento historico).
+        var patron = (req.PatronCierre ?? "").Trim().ToUpperInvariant();
+        entity.PatronCierre = PatronCierreHc.Todos.Contains(patron) ? patron : null;
+        entity.HorasLimiteCierre = req.HorasLimiteCierre is int hc && hc > 0 ? hc : null;
+        if (entity.PatronCierre == PatronCierreHc.HorasAtencion && entity.HorasLimiteCierre is null)
+        {
+            throw new InvalidOperationException("El patron 'Horas desde la atencion' requiere las horas maximas.");
+        }
         await db.SaveChangesAsync(ct);
         return new CatalogoTipoServicioDto(entity.Id, entity.Codigo, entity.Nombre, entity.Orden, entity.Activo, entity.TipoArchivoRips,
-            entity.LimiteDiasPrimeraSesion, entity.LimiteHorasSesionesSiguientes);
+            entity.LimiteDiasPrimeraSesion, entity.LimiteHorasSesionesSiguientes, entity.PatronCierre, entity.HorasLimiteCierre);
     }
 
     public async Task<bool> EliminarAsync(Guid id, Guid actor, CancellationToken ct = default)

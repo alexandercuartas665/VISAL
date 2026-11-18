@@ -43,7 +43,10 @@ public static class ModuloCatalogo
         // Autorizaciones: genera tokens de 6 chars (30 min, un solo uso) para saltar el
         // control de fecha de atencion. Solo los "usuarios de autorizacion" (y Owner/Admin
         // por bypass) ven el modulo /autorizaciones y pueden generar tokens.
-        new("autorizaciones", "Autorizaciones (tokens de fecha)", "Operacion Clinica"),
+        new("autorizaciones", "Autorizaciones (tokens y solicitudes de cierre)", "Operacion Clinica"),
+        // Exento del patron de cierre de HC del tipo de servicio (p. ej. coordinadores): cierra
+        // sin que se le pida autorizacion. Owner/Admin del tenant lo tienen implicito.
+        new(PermisosUsuario.SinControlCierre, "Historias Clinicas - Cerrar sin control de tiempo (patron de cierre)", "Operacion Clinica"),
         // Capacitaciones (LMS interno de personal): gestor de cursos + evaluaciones.
         new("capacitaciones", "Capacitaciones", "Operacion Clinica"),
         new("reportes-constructor", "Constructor de Reportes", "Operacion Clinica"),

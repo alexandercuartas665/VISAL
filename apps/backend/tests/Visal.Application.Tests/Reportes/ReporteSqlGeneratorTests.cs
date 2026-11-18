@@ -170,6 +170,105 @@ public sealed class ReporteSqlGeneratorTests
         Assert.Equal("80", Assert.Single(q.Parametros).Value);
     }
 
+    // ================= AJUSTE 1: pregunta 5 como texto NPS =================
+
+    [Fact]
+    public void Pregunta5_texto_emite_case_nps_con_las_etiquetas_de_la_plataforma_y_else_null()
+    {
+        var q = Crear().Generar(ReporteHojaDef.Detalle("SIAU", "encuesta_satisfaccion",
+            [new ReporteColumnaDef("pregunta5_texto", "P5")]));
+
+        // El ordinal 1..5 se traduce a su etiqueta de lista; las etiquetas son EXACTAMENTE las de
+        // NpsRecomendacion (fuente unica compartida con el flujo de voz y el Consolidado). Si alguna
+        // etiqueta diverge, este test lo detecta (amarra las dos representaciones de la pregunta 5).
+        Assert.Contains("CASE", q.Sql);
+        foreach (var (valor, etiqueta) in Visal.Application.Voz.NpsRecomendacion.Opciones)
+        {
+            Assert.Contains($"WHEN {valor} THEN '{etiqueta}'", q.Sql);
+        }
+        Assert.Contains("ELSE NULL END", q.Sql);
+        Assert.Contains("AS \"P5\"", q.Sql);
+        // El aislamiento por tenant nunca se pierde.
+        Assert.Contains("t0.\"tenant_id\" = @_tenantId", q.Sql);
+    }
+
+    // ================= AJUSTE 2: rango de fechas en campos DateTime (hora local) =================
+
+    [Fact]
+    public void Rango_de_fecha_sin_hora_sobre_datetime_usa_hora_local_y_tope_superior_exclusivo()
+    {
+        // Rango 1..31 de octubre sobre un campo DateTime (timestamptz, almacenado en UTC). La fecha
+        // llega SIN hora, asi que se interpreta en hora local Colombia (-05:00) y el tope superior es
+        // el inicio del dia SIGUIENTE (EXCLUSIVO), para que el 31 de octubre quede COMPLETO.
+        var q = Crear().Generar(ReporteHojaDef.Detalle("SIAU", "encuesta_satisfaccion",
+            [new ReporteColumnaDef("mes")],
+            filtros: [new ReporteFiltroDef("fecha_llamada", ReporteFiltroOp.Between, ["2026-10-01", "2026-10-31"])]));
+
+        // Rango semiabierto (>= desde AND < hasta), nunca BETWEEN (que perderia el ultimo dia).
+        Assert.Contains(">= @p0 AND", q.Sql);
+        Assert.Contains("< @p1", q.Sql);
+        Assert.DoesNotContain("BETWEEN", q.Sql);
+
+        Assert.Equal(2, q.Parametros.Count);
+        // 2026-10-01 00:00 -05:00 => 2026-10-01T05:00Z ; 2026-11-01 00:00 -05:00 => 2026-11-01T05:00Z.
+        Assert.Equal(new DateTime(2026, 10, 1, 5, 0, 0, DateTimeKind.Utc), (DateTime)q.Parametros[0].Value!);
+        Assert.Equal(new DateTime(2026, 11, 1, 5, 0, 0, DateTimeKind.Utc), (DateTime)q.Parametros[1].Value!);
+        Assert.Equal(System.Data.DbType.DateTime, q.Parametros[0].Type);
+    }
+
+    [Fact]
+    public void Gte_sobre_datetime_con_fecha_sin_hora_ancla_el_inicio_del_dia_local()
+    {
+        var q = Crear().Generar(ReporteHojaDef.Detalle("SIAU", "encuesta_satisfaccion",
+            [new ReporteColumnaDef("mes")],
+            filtros: [new ReporteFiltroDef("fecha_llamada", ReporteFiltroOp.Gte, ["2026-10-01"])]));
+
+        Assert.Contains(">= @p0", q.Sql);
+        Assert.Equal(new DateTime(2026, 10, 1, 5, 0, 0, DateTimeKind.Utc), (DateTime)Assert.Single(q.Parametros).Value!);
+    }
+
+    [Fact]
+    public void Lte_sobre_datetime_con_fecha_sin_hora_usa_tope_exclusivo_del_dia_siguiente()
+    {
+        var q = Crear().Generar(ReporteHojaDef.Detalle("SIAU", "encuesta_satisfaccion",
+            [new ReporteColumnaDef("mes")],
+            filtros: [new ReporteFiltroDef("fecha_llamada", ReporteFiltroOp.Lte, ["2026-10-31"])]));
+
+        // "Hasta el 31" incluye TODO el 31: expr < inicio del 1-nov local (nunca <=).
+        Assert.Contains("< @p0", q.Sql);
+        Assert.DoesNotContain("<= @p0", q.Sql);
+        Assert.Equal(new DateTime(2026, 11, 1, 5, 0, 0, DateTimeKind.Utc), (DateTime)Assert.Single(q.Parametros).Value!);
+    }
+
+    [Fact]
+    public void Between_sobre_campo_Date_se_mantiene_inclusivo_sin_corrimiento_de_zona()
+    {
+        // fecha_ingreso es Date (no DateTime): no hay hora ni zona; el BETWEEN inclusivo es correcto
+        // y NO debe cambiar. La correccion de hora local aplica solo a campos DateTime.
+        var q = Crear().Generar(ReporteHojaDef.Detalle("Base", "paciente",
+            [new ReporteColumnaDef("numero_documento")],
+            filtros: [new ReporteFiltroDef("fecha_ingreso", ReporteFiltroOp.Between, ["2026-10-01", "2026-10-31"])]));
+
+        Assert.Contains("BETWEEN @p0 AND @p1", q.Sql);
+        Assert.Equal(new DateOnly(2026, 10, 1), (DateOnly)q.Parametros[0].Value!);
+        Assert.Equal(new DateOnly(2026, 10, 31), (DateOnly)q.Parametros[1].Value!);
+        Assert.Equal(System.Data.DbType.Date, q.Parametros[0].Type);
+    }
+
+    [Fact]
+    public void Rango_sobre_datetime_con_hora_explicita_conserva_el_comportamiento_previo()
+    {
+        // Si el usuario escribe una hora explicita, se respeta tal cual (BETWEEN inclusivo, se asume
+        // UTC) igual que antes: la correccion de hora local solo aplica a fechas SIN hora.
+        var q = Crear().Generar(ReporteHojaDef.Detalle("SIAU", "encuesta_satisfaccion",
+            [new ReporteColumnaDef("mes")],
+            filtros: [new ReporteFiltroDef("fecha_llamada", ReporteFiltroOp.Between, ["2026-10-01T08:00:00", "2026-10-31T17:00:00"])]));
+
+        Assert.Contains("BETWEEN @p0 AND @p1", q.Sql);
+        Assert.Equal(new DateTime(2026, 10, 1, 8, 0, 0, DateTimeKind.Utc), (DateTime)q.Parametros[0].Value!);
+        Assert.Equal(new DateTime(2026, 10, 31, 17, 0, 0, DateTimeKind.Utc), (DateTime)q.Parametros[1].Value!);
+    }
+
     private sealed class FakeTenantContext : ITenantContext
     {
         public Guid? TenantId { get; set; }

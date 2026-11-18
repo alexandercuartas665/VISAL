@@ -250,6 +250,12 @@ public sealed class ReporteSqlGenerator(
             ReportDerivacion.AnioMes => $"to_char({baseExpr} AT TIME ZONE '{ZonaLocal}', 'YYYYMM')",
             ReportDerivacion.Hora24 => $"EXTRACT(HOUR FROM {baseExpr} AT TIME ZONE '{ZonaLocal}')::int",
             ReportDerivacion.Minuto => $"EXTRACT(MINUTE FROM {baseExpr} AT TIME ZONE '{ZonaLocal}')::int",
+            // Pregunta 5 (recomendacion NPS): ordinal int 1..5 -> etiqueta de lista. Las etiquetas
+            // son constantes de la plataforma (no texto del usuario); el ordinal sale del metamodelo.
+            ReportDerivacion.RecomendacionNps =>
+                $"CASE {baseExpr} WHEN 5 THEN 'Definitivamente Si' WHEN 4 THEN 'Probablemente Si' " +
+                "WHEN 3 THEN 'Ni Probable Ni Improbable' WHEN 2 THEN 'Probablemente No' " +
+                "WHEN 1 THEN 'Definitivamente NO' ELSE NULL END",
             _ => baseExpr,
         };
     }
@@ -371,9 +377,9 @@ public sealed class ReporteSqlGenerator(
             var field = FindFieldAug(target, fechaRef)
                 ?? throw new InvalidOperationException($"Campo de fecha desconocido '{fechaRef}' en la existencia '{ex.TargetEntityKey}'.");
             var expr = Expr(alias, target.ClrType, field);
-            var p0 = AddParam(vals, 0, field.Kind, ref pIdx, parametros);
-            var p1 = AddParam(vals, 1, field.Kind, ref pIdx, parametros);
-            sb.Append($" AND {expr} BETWEEN {p0} AND {p1}");
+            // Mismo criterio que los filtros: DateTime con fechas sin hora -> hora local Colombia
+            // y tope exclusivo del dia siguiente (el ultimo dia queda completo).
+            sb.Append($" AND {CondicionRango(expr, field.Kind, vals, 0, 1, ref pIdx, parametros)}");
         }
         // Restriccion por FORMATO relacionado (opcional): el destino (p.ej. la HC) debe haberse
         // diligenciado con un formato que, en Relaciones de formularios, apunte como ORIGEN a un
@@ -424,9 +430,15 @@ public sealed class ReporteSqlGenerator(
             case ReporteFiltroOp.Neq:
                 return $"{r.Expr} <> {AddParam(valores, 0, r.Field.Kind, ref pIdx, parametros)}";
             case ReporteFiltroOp.Gte:
-                return $"{r.Expr} >= {AddParam(valores, 0, r.Field.Kind, ref pIdx, parametros)}";
+                // DateTime con fecha sin hora: limite inferior en hora local (00:00 del dia).
+                return r.Field.Kind == ReportFieldKind.DateTime && FechaSola(valores, 0)
+                    ? $"{r.Expr} >= {AddParam(valores, 0, r.Field.Kind, ref pIdx, parametros, RangoLimite.InicioDia)}"
+                    : $"{r.Expr} >= {AddParam(valores, 0, r.Field.Kind, ref pIdx, parametros)}";
             case ReporteFiltroOp.Lte:
-                return $"{r.Expr} <= {AddParam(valores, 0, r.Field.Kind, ref pIdx, parametros)}";
+                // DateTime con fecha sin hora: tope EXCLUSIVO del dia siguiente (incluye el dia completo).
+                return r.Field.Kind == ReportFieldKind.DateTime && FechaSola(valores, 0)
+                    ? $"{r.Expr} < {AddParam(valores, 0, r.Field.Kind, ref pIdx, parametros, RangoLimite.FinDiaExclusivo)}"
+                    : $"{r.Expr} <= {AddParam(valores, 0, r.Field.Kind, ref pIdx, parametros)}";
             case ReporteFiltroOp.Contains:
                 {
                     var p = $"@p{pIdx++}";
@@ -440,9 +452,7 @@ public sealed class ReporteSqlGenerator(
                     {
                         throw new InvalidOperationException("El filtro BETWEEN requiere dos valores.");
                     }
-                    var p0 = AddParam(valores, 0, r.Field.Kind, ref pIdx, parametros);
-                    var p1 = AddParam(valores, 1, r.Field.Kind, ref pIdx, parametros);
-                    return $"{r.Expr} BETWEEN {p0} AND {p1}";
+                    return CondicionRango(r.Expr, r.Field.Kind, valores, 0, 1, ref pIdx, parametros);
                 }
             case ReporteFiltroOp.In:
                 {
@@ -462,20 +472,56 @@ public sealed class ReporteSqlGenerator(
         }
     }
 
+    // Emite la condicion de rango sobre expr. Para un campo DateTime con AMBOS limites en fecha SIN
+    // hora, usa hora local Colombia y tope superior EXCLUSIVO (dia siguiente), de modo que el ultimo
+    // dia quede COMPLETO: expr >= @desde AND expr < @hasta. En cualquier otro caso (campos Date, o
+    // fechas con hora explicita), conserva el BETWEEN inclusivo de siempre.
+    private static string CondicionRango(
+        string expr, ReportFieldKind kind, IReadOnlyList<string> valores, int idxDesde, int idxHasta,
+        ref int pIdx, List<ReporteSqlParam> parametros)
+    {
+        if (kind == ReportFieldKind.DateTime && FechaSola(valores, idxDesde) && FechaSola(valores, idxHasta))
+        {
+            var desde = AddParam(valores, idxDesde, kind, ref pIdx, parametros, RangoLimite.InicioDia);
+            var hasta = AddParam(valores, idxHasta, kind, ref pIdx, parametros, RangoLimite.FinDiaExclusivo);
+            return $"{expr} >= {desde} AND {expr} < {hasta}";
+        }
+        var p0 = AddParam(valores, idxDesde, kind, ref pIdx, parametros);
+        var p1 = AddParam(valores, idxHasta, kind, ref pIdx, parametros);
+        return $"{expr} BETWEEN {p0} AND {p1}";
+    }
+
+    // Un valor de filtro es "fecha sin hora" si no trae componente horaria (sin ':'), p.ej.
+    // "2026-10-01". Esos valores, sobre un campo DateTime, se anclan a la hora local (ver CondicionRango).
+    private static bool FechaSola(IReadOnlyList<string> valores, int idx) =>
+        idx < valores.Count && !string.IsNullOrWhiteSpace(valores[idx]) && !valores[idx].Contains(':');
+
     private static string AddParam(
-        IReadOnlyList<string> valores, int idx, ReportFieldKind kind, ref int pIdx, List<ReporteSqlParam> parametros)
+        IReadOnlyList<string> valores, int idx, ReportFieldKind kind, ref int pIdx, List<ReporteSqlParam> parametros,
+        RangoLimite limite = RangoLimite.Exacto)
     {
         if (idx >= valores.Count)
         {
             throw new InvalidOperationException("Faltan valores para el filtro.");
         }
         var name = $"p{pIdx++}";
-        var (value, type) = Coerce(kind, valores[idx]);
+        var (value, type) = Coerce(kind, valores[idx], limite);
         parametros.Add(new ReporteSqlParam(name, value, type));
         return "@" + name;
     }
 
-    private static (object? Value, DbType Type) Coerce(ReportFieldKind kind, string raw)
+    // Limite de un valor de filtro de fecha/hora. Para un campo DateTime con fecha SIN hora, decide
+    // como se ancla a la hora local: inicio del dia (00:00 local) o inicio del dia SIGUIENTE (tope
+    // superior EXCLUSIVO), de modo que un rango incluya el ultimo dia COMPLETO. Exacto = comparacion
+    // puntual (se conserva el comportamiento previo).
+    private enum RangoLimite { Exacto, InicioDia, FinDiaExclusivo }
+
+    // Offset fijo de Colombia (America/Bogota, sin horario de verano). Coincide con ZonaLocal usado
+    // en las derivaciones SQL. Se usa para interpretar en hora LOCAL las fechas de filtro (que llegan
+    // SIN zona, p.ej. "2026-10-01") antes de compararlas contra columnas timestamptz (en UTC).
+    private static readonly TimeSpan OffsetLocal = TimeSpan.FromHours(-5);
+
+    private static (object? Value, DbType Type) Coerce(ReportFieldKind kind, string raw, RangoLimite limite = RangoLimite.Exacto)
     {
         raw = raw?.Trim() ?? "";
         return kind switch
@@ -485,9 +531,27 @@ public sealed class ReporteSqlGenerator(
             ReportFieldKind.Bool => (ParseBool(raw), DbType.Boolean),
             ReportFieldKind.Guid => (Guid.Parse(raw), DbType.Guid),
             ReportFieldKind.Date => (DateOnly.Parse(raw, CultureInfo.InvariantCulture), DbType.Date),
-            ReportFieldKind.DateTime => (DateTime.Parse(raw, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal), DbType.DateTime),
+            ReportFieldKind.DateTime => (CoerceDateTime(raw, limite), DbType.DateTime),
             _ => (raw, DbType.String),
         };
+    }
+
+    // Convierte un valor de filtro a un instante UTC para comparar contra una columna DateTime
+    // (timestamptz, almacenada en UTC). Si el valor trae fecha SIN hora, se interpreta en hora LOCAL
+    // Colombia (-05:00): inicio = 00:00 local del dia; fin exclusivo = 00:00 local del dia SIGUIENTE
+    // (para que el ultimo dia quede completo). Si trae hora explicita, o la comparacion es puntual
+    // (Exacto), se conserva el comportamiento previo (se asume UTC).
+    private static DateTime CoerceDateTime(string raw, RangoLimite limite)
+    {
+        var tieneHora = raw.Contains(':');
+        if (!tieneHora && limite != RangoLimite.Exacto)
+        {
+            var d = DateOnly.Parse(raw, CultureInfo.InvariantCulture);
+            if (limite == RangoLimite.FinDiaExclusivo) { d = d.AddDays(1); }
+            return new DateTimeOffset(d.Year, d.Month, d.Day, 0, 0, 0, OffsetLocal).UtcDateTime;
+        }
+        return DateTime.Parse(raw, CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal);
     }
 
     private static bool ParseBool(string raw) => raw.ToLowerInvariant() switch

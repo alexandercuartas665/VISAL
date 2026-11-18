@@ -217,7 +217,7 @@ public static class CensoBlueprint
                 new("pregunta2", "2. Los profesionales se presentan de forma adecuada"), // M
                 new("pregunta3", "3. Los profesionales dan indicaciones"), // N
                 new("pregunta4", "4. Como calificaria su experiencia global"), // O
-                new("pregunta5", "5. Recomendaria a VISAL RT S.A.S a un familiar"), // P
+                new("pregunta5_texto", "5. Recomendaria a VISAL RT S.A.S a un familiar"), // P (texto de lista)
                 new("persona_atiende", "PERSONA QUIEN ATIENDE LA LLAMADA"), // Q
                 new("observaciones", "OBSERVACIONES LLAMADA"),       // R
             ],

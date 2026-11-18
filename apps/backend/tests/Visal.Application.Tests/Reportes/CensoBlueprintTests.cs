@@ -58,7 +58,8 @@ public sealed class CensoBlueprintTests
         var baseSinParams = req.Hojas.Single(h => h.Nombre == "Base de Pacientes");
         Assert.DoesNotContain("BETWEEN", gen.Generar(baseSinParams).Sql);
 
-        // Al resolver con valores: aparece el rango (BETWEEN) y la condicion de sede.
+        // Al resolver con valores: aparece el rango y la condicion de sede. El rango de atendidos
+        // es sobre historia.fecha_atencion (DateTime): hora local y tope exclusivo, sin BETWEEN.
         var valores = new Dictionary<string, IReadOnlyList<string>>
         {
             ["sede"] = [Guid.NewGuid().ToString()],
@@ -67,7 +68,9 @@ public sealed class CensoBlueprintTests
         var resuelto = ReporteParametros.Resolver(new ReportePackDef(req.Nombre, req.Hojas), valores);
         var baseConParams = resuelto.Hojas.Single(h => h.Nombre == "Base de Pacientes");
         var sql = gen.Generar(baseConParams).Sql;
-        Assert.Contains("BETWEEN", sql);
+        Assert.Contains("\"fecha_atencion\" >= @", sql);
+        Assert.Contains("\"fecha_atencion\" < @", sql);
+        Assert.DoesNotContain("BETWEEN", sql);
         Assert.Contains("sede_atencion_id", sql);
     }
 
@@ -92,7 +95,9 @@ public sealed class CensoBlueprintTests
         Assert.Contains("historias_clinicas", sqlSinRango);
         Assert.DoesNotContain("BETWEEN", sqlSinRango);
 
-        // Con rango resuelto: el BETWEEN aparece DENTRO del EXISTS (acota por fecha de atencion).
+        // Con rango resuelto: el rango aparece DENTRO del EXISTS (acota por fecha de atencion).
+        // fecha_atencion es DateTime -> hora local Colombia y tope EXCLUSIVO del dia siguiente,
+        // para que el ultimo dia del rango quede completo (mismo criterio que los filtros).
         var valores = new Dictionary<string, IReadOnlyList<string>>
         {
             ["rango_fecha"] = ["2026-01-01", "2026-01-31"],
@@ -101,7 +106,12 @@ public sealed class CensoBlueprintTests
         var baseConRango = resuelto.Hojas.Single(h => h.Nombre == "Base de Pacientes");
         var sqlConRango = Generador().Generar(baseConRango).Sql;
         Assert.Contains("EXISTS", sqlConRango);
-        Assert.Contains("BETWEEN", sqlConRango);
+        Assert.Contains("\"fecha_atencion\" >= @", sqlConRango);
+        Assert.Contains("\"fecha_atencion\" < @", sqlConRango);
+        Assert.DoesNotContain("BETWEEN", sqlConRango);
+        var q = Generador().Generar(baseConRango);
+        Assert.Contains(q.Parametros, p => p.Value is DateTime d && d == new DateTime(2026, 1, 1, 5, 0, 0, DateTimeKind.Utc));
+        Assert.Contains(q.Parametros, p => p.Value is DateTime d && d == new DateTime(2026, 2, 1, 5, 0, 0, DateTimeKind.Utc));
     }
 
     [Fact]
@@ -225,6 +235,24 @@ public sealed class CensoBlueprintTests
             Assert.Contains("LIMIT 1", sql);              // un solo contrato por fila (no multiplica)
             // Ya no lee el escalar en desuso Paciente.ContratoPrincipal.
             Assert.DoesNotContain("contrato_principal", sql);
+        }
+    }
+
+    [Fact]
+    public void El_bloque_p5_del_consolidado_usa_exactamente_las_opciones_nps()
+    {
+        var consolidado = CensoBlueprint.Crear().Hojas.Single(h => h.Nombre == "Consolidado Encuesta");
+        var cubos = consolidado.Matriz!.BloqueP5.Cubos;
+
+        // El bloque P5 del Consolidado (ordinal crudo -> etiqueta) debe coincidir EXACTO con la fuente
+        // unica NpsRecomendacion.Opciones, la misma que alimenta el CASE de pregunta5_texto en la hoja
+        // de Satisfaccion. Asi las tres representaciones de la pregunta 5 no pueden divergir.
+        var esperado = Visal.Application.Voz.NpsRecomendacion.Opciones;
+        Assert.Equal(esperado.Length, cubos.Count);
+        for (var i = 0; i < esperado.Length; i++)
+        {
+            Assert.Equal(esperado[i].Valor, cubos[i].Valor);
+            Assert.Equal(esperado[i].Etiqueta, cubos[i].Etiqueta);
         }
     }
 

@@ -35,6 +35,13 @@ public enum ReportDerivacion
     Hora24,
     /// <summary>Minuto (0..59) de una fecha/hora (hora local).</summary>
     Minuto,
+    /// <summary>
+    /// Recomendacion NPS de la encuesta SIAU: traduce el ordinal int 1..5 de la pregunta 5 a su
+    /// etiqueta de lista (5=Definitivamente Si ... 1=Definitivamente NO). La pregunta 5 NO es una
+    /// escala numerica sino una seleccion de lista; se almacena como ordinal y aqui se muestra
+    /// como texto en la hoja de detalle. El bloque P5 del Consolidado usa el ordinal crudo.
+    /// </summary>
+    RecomendacionNps,
 }
 
 /// <summary>
@@ -241,6 +248,9 @@ public sealed class ReportSemanticModel : IReportSemanticModel
                 new("pregunta3", "P3 Indicaciones", nameof(SeguimientoEncuesta.Pregunta3), ReportFieldKind.Integer),
                 new("pregunta4", "P4 Experiencia global", nameof(SeguimientoEncuesta.Pregunta4), ReportFieldKind.Integer),
                 new("pregunta5", "P5 Recomendaria", nameof(SeguimientoEncuesta.Pregunta5), ReportFieldKind.Integer),
+                // Pregunta 5 como TEXTO de lista (recomendacion NPS): el valor fisico es el ordinal
+                // 1..5 de Pregunta5, traducido en SQL a su etiqueta. Para la hoja de detalle.
+                new("pregunta5_texto", "P5 Recomendaria (texto)", nameof(SeguimientoEncuesta.Pregunta5), ReportFieldKind.Text, Derivacion: ReportDerivacion.RecomendacionNps),
                 new("persona_atiende", "Persona quien atiende", nameof(SeguimientoEncuesta.PersonaAtiende), ReportFieldKind.Text),
                 new("observaciones", "Observaciones llamada", nameof(SeguimientoEncuesta.Observaciones), ReportFieldKind.Text),
             ],

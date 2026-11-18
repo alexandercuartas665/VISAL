@@ -939,10 +939,14 @@ else
             const long max = 50L * 1024 * 1024;
             using var ms = new MemoryStream();
             await e.File.OpenReadStream(max).CopyToAsync(ms);
-            var xlsxBytes = ms.ToArray();
-            ms.Position = 0;
+            // Firmas JPEG con cabecera no estandar (p.ej. APP0 "JFXX") hacen que ClosedXML
+            // reviente al abrir el libro ("Unable to determine the format of the image").
+            // Se normalizan sin perdida antes de abrirlo.
+            var xlsxBytes = Visal.Application.Common.XlsxImagenesSaneador.Sanear(ms.ToArray(), out var imgsArregladas);
+            foreach (var img in imgsArregladas)
+            { _importLog.Add($"Aviso: se normalizo la cabecera de la imagen {img} para poder leerla."); }
 
-            using var wb = new ClosedXML.Excel.XLWorkbook(ms);
+            using var wb = new ClosedXML.Excel.XLWorkbook(new MemoryStream(xlsxBytes, writable: false));
             var ws = wb.Worksheets.First();
             var lastRow = ws.LastRowUsed()?.RowNumber() ?? 1;
 

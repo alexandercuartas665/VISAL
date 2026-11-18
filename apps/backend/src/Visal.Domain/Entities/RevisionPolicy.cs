@@ -67,4 +67,21 @@ public class RevisionPolicy : TenantEntity
     /// para este proceso.
     /// </summary>
     public bool NotificarRechazoWhatsApp { get; set; }
+
+    /// <summary>
+    /// Si es true, la pre-revision IA recibe ademas el HISTORIAL del paciente: las historias
+    /// ANTERIORES (por fecha de atencion) dentro de la ventana <see cref="HistorialMeses"/>, como
+    /// contexto separado del documento a revisar. Default true (la migracion lo enciende).
+    /// </summary>
+    public bool EnviarHistorialPaciente { get; set; } = true;
+
+    /// <summary>Meses hacia atras (desde la fecha de atencion de la HC revisada) que cubre el historial. Default 8.</summary>
+    public int HistorialMeses { get; set; } = 8;
+
+    /// <summary>Maximo de historias anteriores que van COMPLETAS (las mas recientes, priorizando el mismo
+    /// tipo de servicio); el resto de la ventana va solo como indice. Default 30.</summary>
+    public int HistorialMaxCompletas { get; set; } = 30;
+
+    /// <summary>Presupuesto aproximado de tokens del bloque de historial (chars/4). Default 60000.</summary>
+    public int HistorialMaxTokens { get; set; } = 60000;
 }

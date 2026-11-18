@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Admin;
 using Visal.Application.Common;
@@ -105,14 +106,18 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             RevisionMcpToolNames.Todas,
             allowed,
             policy.VentanaAsignacionesRelacionadasDias,
-            ct);
+            ct,
+            new OpcionesHistorial(policy.EnviarHistorialPaciente, policy.HistorialMeses,
+                policy.HistorialMaxCompletas, policy.HistorialMaxTokens));
 
         var contextoJson = SerializarContexto(contexto);
 
         var systemPrompt = ArmarSystemPrompt(agent.SystemPrompt);
         var turns = new List<AiChatTurn>
         {
-            new("user", "Analiza la siguiente Historia Clinica y emite tu veredicto. Responde SOLO con el JSON pedido en el system prompt.\n\n" + contextoJson),
+            new("user", "Revisa el 'documento_a_revisar' del siguiente JSON y emite tu veredicto SOLO sobre ese documento. "
+                      + "El 'historial_del_paciente' son historias ANTERIORES (solo contexto, no se califican). "
+                      + "Responde SOLO con el JSON pedido en el system prompt.\n\n" + contextoJson),
         };
 
         var result = await CompleteWithRetryAsync(agent, apiKey, providerCfg.BaseUrl, model, systemPrompt, turns, ct);
@@ -312,30 +317,135 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         sb.AppendLine("  atencion). Las tienes YA SEPARADAS en get_form_definition -> 'fechas_atencion' ('header' vs");
         sb.AppendLine("  'cuerpo'). DEBEN COINCIDIR; si difieren es un HALLAZGO de congruencia temporal. Si coinciden (o");
         sb.AppendLine("  el cuerpo no tiene campo de fecha de atencion), NO es hallazgo.");
+        sb.AppendLine("- ESTRUCTURA DEL CONTEXTO (regla dura): recibes UN JSON con tres bloques. 'documento_a_revisar' es");
+        sb.AppendLine("  la UNICA historia que evaluas: el veredicto, la nota y TODOS los hallazgos son sobre ella.");
+        sb.AppendLine("  'datos_del_paciente' es contexto administrativo. 'historial_del_paciente' contiene historias");
+        sb.AppendLine("  ANTERIORES del paciente (orden cronologico por fecha de atencion, n=1 la mas antigua): son SOLO");
+        sb.AppendLine("  CONTEXTO, NUNCA generes hallazgos sobre ellas ni las califiques. Cuando las uses como evidencia,");
+        sb.AppendLine("  citalas por consecutivo y fecha de atencion (ej. 'segun HC-000123 del 2026-09-14').");
+        sb.AppendLine("- USOS DEL HISTORIAL (contrasta el documento_a_revisar contra las historias anteriores):");
+        sb.AppendLine("  1) CONTINUIDAD: diagnostico, plan de tratamiento y numero de sesion coherentes con lo previo.");
+        sb.AppendLine("  2) EVOLUCION: que se evidencie progreso, cambio o respuesta al tratamiento frente a lo anterior.");
+        sb.AppendLine("  3) TEXTO COPIADO: si un campo clinico es identico al de una historia anterior (apoyate en");
+        sb.AppendLine("     'campos_identicos_a_la_revisada' de cada historia del historial), reportalo como copia/pega.");
+        sb.AppendLine("     'campos_casi_identicos_a_la_revisada' marca campos con similitud >= 90% (con el porcentaje):");
+        sb.AppendLine("     es copia/pega con minimos cambios SOLO si el texto repite hechos propios de OTRO turno o fecha");
+        sb.AppendLine("     (horas, eventos, rotulos de fecha, valores); si el parecido es solo la plantilla o frases");
+        sb.AppendLine("     estandar del servicio (p.ej. la entrega de turno de enfermeria), NO es motivo de rechazo.");
+        sb.AppendLine("  4) CONTRADICCIONES: antecedentes, alergias, lateralidad, diagnostico u otros datos que contradigan");
+        sb.AppendLine("     el historial sin justificacion en el documento_a_revisar.");
+        sb.AppendLine("- PESO DEL HISTORIAL: copia/pega EVIDENTE de campos clinicos (evolucion, analisis, plan) o una");
+        sb.AppendLine("  contradiccion clinica RELEVANTE pueden llevar a 'Rechazado'. Diferencias menores o una evolucion");
+        sb.AppendLine("  poco detallada son hallazgos que NO cambian el veredicto por si solos. Que se repita un dato");
+        sb.AppendLine("  administrativo o estable (nombre, documento, diagnostico de base) NO es copia/pega.");
+        sb.AppendLine("- MEDICAMENTOS Y ORDENES: una nota de enfermeria o de terapia NO genera ordenes propias; administra");
+        sb.AppendLine("  lo que un medico ordeno en OTRA historia. Por eso 'list_ordenes_hc' vacio en esas notas es lo");
+        sb.AppendLine("  normal y NO es hallazgo. Valida lo administrado contra 'historial_del_paciente' ->");
+        sb.AppendLine("  'medicamentos_insumos_ordenados_en_ventana' (todo lo ordenado al paciente en la ventana). Un");
+        sb.AppendLine("  medicamento sin orden en la ventana es una OBSERVACION (puede venir de una orden externa o");
+        sb.AppendLine("  anterior a la ventana), nunca motivo de rechazo por si solo.");
+        sb.AppendLine("- NO GENERES RUIDO: no reportes como hallazgo que algo narrado en el texto (escalas, ordenes,");
+        sb.AppendLine("  procedimientos) no este registrado ademas en OTRO modulo del sistema si el formato no lo exige.");
+        sb.AppendLine("  Errores de digitacion solo son hallazgo si cambian el sentido clinico o hacen ilegible el dato.");
+        sb.AppendLine("- Las historias del historial con estado 'Abierta - en curso' son contexto PROVISIONAL: no bases un");
+        sb.AppendLine("  rechazo solo en ellas. 'documentos' trae las historias anteriores COMPLETAS (las mas recientes);");
+        sb.AppendLine("  'indice' lista el resto en una linea cada una: solo prueban que la atencion existio, no infieras");
+        sb.AppendLine("  su contenido. Si el historial viene vacio o 'SIN HISTORIAL', evalua sin ese contraste y no lo");
+        sb.AppendLine("  reportes como faltante.");
         sb.AppendLine("- Devuelve JSON puro. Nada de markdown, ni prefijos, ni sufijos, ni ```json```.");
         return sb.ToString();
     }
 
-    private static string SerializarContexto(HistoriaClinicaContextoIa contexto)
+    // Agrupacion de las tools en los bloques del mensaje al modelo.
+    private static readonly string[] ToolsDocumento =
     {
-        var sb = new StringBuilder();
-        sb.AppendLine("Contexto clinico cargado por tools MCP de solo lectura:");
-        sb.AppendLine();
-        foreach (var inv in contexto.InvocacionesExitosas)
+        RevisionMcpToolNames.GetHistoriaClinica, RevisionMcpToolNames.GetFormDefinition,
+        RevisionMcpToolNames.ListOrdenesHc, RevisionMcpToolNames.ListEscalasHc,
+        RevisionMcpToolNames.ListEvolucionesHc, RevisionMcpToolNames.ListConsentimientosHc,
+        RevisionMcpToolNames.ListDocumentosHc,
+    };
+    private static readonly string[] ToolsPaciente =
+    {
+        RevisionMcpToolNames.GetPaciente, RevisionMcpToolNames.ListAsignacionesRelacionadas,
+        RevisionMcpToolNames.ListNotasHc,
+    };
+
+    /// <summary>
+    /// Arma el mensaje al modelo como UN JSON con bloques separados e inequivocos:
+    /// <c>documento_a_revisar</c> (el objeto de la revision), <c>datos_del_paciente</c> (contexto
+    /// administrativo) e <c>historial_del_paciente</c> (historias ANTERIORES, solo contexto).
+    /// Cada payload de tool se inserta como JSON anidado (no como string escapado).
+    /// </summary>
+    public static string SerializarContexto(HistoriaClinicaContextoIa contexto)
+    {
+        var porTool = new Dictionary<string, ToolInvocationResult>(StringComparer.OrdinalIgnoreCase);
+        foreach (var inv in contexto.InvocacionesExitosas) { porTool.TryAdd(inv.ToolName, inv); }
+
+        JsonNode? Payload(string tool)
         {
-            sb.AppendLine("### tool " + inv.ToolName);
-            sb.AppendLine(inv.JsonPayload ?? "null");
-            sb.AppendLine();
+            if (!porTool.TryGetValue(tool, out var inv) || string.IsNullOrWhiteSpace(inv.JsonPayload)) { return null; }
+            try { return JsonNode.Parse(inv.JsonPayload); }
+            catch (JsonException) { return JsonValue.Create(inv.JsonPayload); }
         }
-        if (contexto.InvocacionesFallidas.Count > 0)
+
+        var doc = new JsonObject
         {
-            sb.AppendLine("### tools con error");
-            foreach (var f in contexto.InvocacionesFallidas)
+            ["rol"] = "OBJETO DE LA REVISION. El veredicto, la nota y los hallazgos son SOLO sobre este documento.",
+        };
+        foreach (var t in ToolsDocumento) { if (porTool.ContainsKey(t)) { doc[t] = Payload(t); } }
+
+        var pac = new JsonObject
+        {
+            ["rol"] = "Contexto administrativo del paciente (datos, asignaciones y notas). No se califica.",
+        };
+        foreach (var t in ToolsPaciente) { if (porTool.ContainsKey(t)) { pac[t] = Payload(t); } }
+
+        // Tools exitosas no clasificadas (si se agregan nuevas) van con el documento para no perderlas.
+        var conocidas = ToolsDocumento.Concat(ToolsPaciente).Append(RevisionMcpToolNames.HistorialPaciente)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (var inv in contexto.InvocacionesExitosas.Where(i => !conocidas.Contains(i.ToolName)))
+        {
+            doc[inv.ToolName] = Payload(inv.ToolName);
+        }
+
+        var histObj = new JsonObject();
+        if (Payload(RevisionMcpToolNames.HistorialPaciente) is JsonObject h)
+        {
+            histObj["rol"] = "SOLO CONTEXTO. Historias ANTERIORES del paciente (por fecha de atencion), en orden "
+                           + "cronologico. NO se revisan ni se califican; sirven para contrastar el documento_a_revisar.";
+            foreach (var kv in h.ToList())
             {
-                sb.AppendLine("- " + f.ToolName + ": " + (f.Error ?? "(sin detalle)"));
+                h.Remove(kv.Key);
+                histObj[kv.Key] = kv.Value;
             }
         }
-        return sb.ToString();
+        else
+        {
+            histObj["rol"] = "SIN HISTORIAL: no se envio historial del paciente para esta revision.";
+        }
+
+        var raiz = new JsonObject
+        {
+            ["documento_a_revisar"] = doc,
+            ["datos_del_paciente"] = pac,
+            ["historial_del_paciente"] = histObj,
+        };
+
+        if (contexto.InvocacionesFallidas.Count > 0)
+        {
+            var errs = new JsonArray();
+            foreach (var f in contexto.InvocacionesFallidas)
+            {
+                errs.Add(new JsonObject { ["tool"] = f.ToolName, ["error"] = f.Error ?? "(sin detalle)" });
+            }
+            raiz["tools_con_error"] = errs;
+        }
+
+        return raiz.ToJsonString(new JsonSerializerOptions
+        {
+            WriteIndented = false,
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        });
     }
 
     /// <summary>Persiste el log completo de una corrida del agente (best-effort). Nunca lanza.</summary>

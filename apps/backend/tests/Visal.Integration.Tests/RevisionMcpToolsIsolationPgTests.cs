@@ -158,6 +158,51 @@ public sealed class RevisionMcpToolsIsolationPgTests : IAsyncLifetime
         Assert.DoesNotContain("MED-ALPHA-1", payload);
     }
 
+    /// <summary>Historial del paciente contra Postgres real: (1) desde el tenant A trae la HC ANTERIOR
+    /// del paciente con sus campos y ordenes (valida la traduccion Npgsql: coalesce de fechas,
+    /// Contains en lote, navegacion pivote->asignacion); (2) desde el tenant B, apuntando a la HC del
+    /// tenant A, no trae nada (aislamiento).</summary>
+    [Fact]
+    public async Task Historial_paciente_trae_anteriores_y_no_fuga_entre_tenants()
+    {
+        await using (var a = CreateContext(_tenantA))
+        {
+            var objetivo = await a.HistoriasClinicas.AsNoTracking().FirstAsync(h => h.Id == _hcAId);
+            var previa = new HistoriaClinica
+            {
+                PacienteId = objetivo.PacienteId,
+                FormDefinitionId = objetivo.FormDefinitionId,
+                Estado = HistoriaClinicaEstado.Cerrada,
+                FechaApertura = DateTimeOffset.UtcNow.AddDays(-5),
+                FechaAtencion = DateTimeOffset.UtcNow.AddDays(-5),
+                ValoresJson = "{\"marca\":\"PREVIA-ALPHA\"}",
+            };
+            a.HistoriasClinicas.Add(previa);
+            await a.SaveChangesAsync();
+            a.HistoriaClinicaMedicamentos.Add(new HistoriaClinicaMedicamento
+            {
+                HistoriaClinicaId = previa.Id,
+                CodigoMedicamento = "MED-PREVIA",
+                NombreMedicamento = "ACETAMINOFEN-PREVIA-ALPHA",
+            });
+            await a.SaveChangesAsync();
+        }
+
+        var op = new OpcionesHistorial(true, 8, 30, 60000);
+
+        var svcA = new RevisionMcpToolsService(new TestFactory(this, _tenantA));
+        var ctxA = await svcA.ArmarContextoAsync(_hcAId, Array.Empty<string>(), RevisionMcpToolNames.Todas, 30, default, op);
+        var histA = Assert.Single(ctxA.InvocacionesExitosas, i => i.ToolName == RevisionMcpToolNames.HistorialPaciente);
+        Assert.Contains("ACETAMINOFEN-PREVIA-ALPHA", histA.JsonPayload);
+        Assert.Contains("\"total_en_ventana\":1", histA.JsonPayload);
+
+        var svcB = new RevisionMcpToolsService(new TestFactory(this, _tenantB));
+        var ctxB = await svcB.ArmarContextoAsync(_hcAId, Array.Empty<string>(), RevisionMcpToolNames.Todas, 30, default, op);
+        var payloadB = string.Concat(ctxB.InvocacionesExitosas.Select(i => i.JsonPayload));
+        Assert.DoesNotContain("ALPHA", payloadB);
+        Assert.Empty(ctxB.InvocacionesFallidas);
+    }
+
     private sealed class TestFactory(RevisionMcpToolsIsolationPgTests owner, Guid? tenantId)
         : IApplicationDbContextFactory
     {

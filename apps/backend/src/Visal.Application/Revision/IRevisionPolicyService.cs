@@ -11,7 +11,11 @@ public sealed record RevisionPolicyDto(
     int VentanaAsignacionesRelacionadasDias,
     bool ConfirmarAprobado,
     int MotivoInactivacionMinChars,
-    bool NotificarRechazoWhatsApp = false);
+    bool NotificarRechazoWhatsApp = false,
+    bool EnviarHistorialPaciente = true,
+    int HistorialMeses = 8,
+    int HistorialMaxCompletas = 30,
+    int HistorialMaxTokens = 60000);
 
 /// <summary>
 /// Acceso a la <see cref="RevisionPolicy"/> singleton por tenant. Cuando no hay

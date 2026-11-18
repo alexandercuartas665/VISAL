@@ -30,6 +30,11 @@ public static class RevisionMcpToolNames
     /// devuelve el binario; el agente solo necesita saber que se adjunto.</summary>
     public const string ListDocumentosHc = "list_documentos_hc";
 
+    /// <summary>Historial del paciente: historias ANTERIORES (por fecha de atencion) a la revisada,
+    /// solo contexto. NO esta en <see cref="Todas"/> ni pasa por la allow-list del agente: lo gobierna
+    /// el interruptor <c>EnviarHistorialPaciente</c> de la politica de revision.</summary>
+    public const string HistorialPaciente = "historial_paciente";
+
     /// <summary>Todas las tools del catalogo. Utilizada por defecto en el seeder del agente.</summary>
     public static readonly IReadOnlyList<string> Todas = new[]
     {
@@ -47,6 +52,9 @@ public sealed record ToolInvocationResult(
     string? JsonPayload,
     string? Error,
     int EstimatedTokens);
+
+/// <summary>Opciones del historial del paciente (vienen de la politica de revision del tenant).</summary>
+public sealed record OpcionesHistorial(bool Activo, int Meses, int MaxCompletas, int MaxTokens);
 
 /// <summary>Contexto compacto de la HC que se envia al LLM.</summary>
 public sealed record HistoriaClinicaContextoIa(
@@ -67,7 +75,8 @@ public interface IRevisionMcpToolsService
         IReadOnlyCollection<string> toolNames,
         IReadOnlyCollection<string> allowedTools,
         int? ventanaAsignacionesDias,
-        CancellationToken ct = default);
+        CancellationToken ct = default,
+        OpcionesHistorial? historial = null);
 
     /// <summary>Ejecuta una tool suelta (util para tests). Aplica el mismo allow-list.</summary>
     Task<ToolInvocationResult> EjecutarToolAsync(

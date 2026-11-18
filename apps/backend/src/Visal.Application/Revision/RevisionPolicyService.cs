@@ -79,6 +79,18 @@ public sealed class RevisionPolicyService : IRevisionPolicyService
         {
             throw new ArgumentException("MotivoInactivacionMinChars no puede ser negativo.", nameof(policy));
         }
+        if (policy.HistorialMeses < 1 || policy.HistorialMeses > 36)
+        {
+            throw new ArgumentException("Los meses de historial deben estar entre 1 y 36.", nameof(policy));
+        }
+        if (policy.HistorialMaxCompletas < 0 || policy.HistorialMaxCompletas > 100)
+        {
+            throw new ArgumentException("El maximo de historias completas debe estar entre 0 y 100.", nameof(policy));
+        }
+        if (policy.HistorialMaxTokens < 5000 || policy.HistorialMaxTokens > 120000)
+        {
+            throw new ArgumentException("El tope de tokens del historial debe estar entre 5.000 y 120.000.", nameof(policy));
+        }
 
         using var db = _dbFactory.Create();
         var row = await db.RevisionPolicies.FirstOrDefaultAsync(ct);
@@ -95,6 +107,10 @@ public sealed class RevisionPolicyService : IRevisionPolicyService
         row.ConfirmarAprobado = policy.ConfirmarAprobado;
         row.MotivoInactivacionMinChars = policy.MotivoInactivacionMinChars;
         row.NotificarRechazoWhatsApp = policy.NotificarRechazoWhatsApp;
+        row.EnviarHistorialPaciente = policy.EnviarHistorialPaciente;
+        row.HistorialMeses = policy.HistorialMeses;
+        row.HistorialMaxCompletas = policy.HistorialMaxCompletas;
+        row.HistorialMaxTokens = policy.HistorialMaxTokens;
         row.UpdatedAt = DateTimeOffset.UtcNow;
         row.UpdatedBy = actor;
         await db.SaveChangesAsync(ct);
@@ -112,5 +128,9 @@ public sealed class RevisionPolicyService : IRevisionPolicyService
         r.VentanaAsignacionesRelacionadasDias,
         r.ConfirmarAprobado,
         r.MotivoInactivacionMinChars,
-        r.NotificarRechazoWhatsApp);
+        r.NotificarRechazoWhatsApp,
+        r.EnviarHistorialPaciente,
+        r.HistorialMeses,
+        r.HistorialMaxCompletas,
+        r.HistorialMaxTokens);
 }

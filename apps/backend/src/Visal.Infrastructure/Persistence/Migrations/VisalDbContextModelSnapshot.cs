@@ -9878,6 +9878,22 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("created_by");
 
+                    b.Property<bool>("EnviarHistorialPaciente")
+                        .HasColumnType("boolean")
+                        .HasColumnName("enviar_historial_paciente");
+
+                    b.Property<int>("HistorialMaxCompletas")
+                        .HasColumnType("integer")
+                        .HasColumnName("historial_max_completas");
+
+                    b.Property<int>("HistorialMaxTokens")
+                        .HasColumnType("integer")
+                        .HasColumnName("historial_max_tokens");
+
+                    b.Property<int>("HistorialMeses")
+                        .HasColumnType("integer")
+                        .HasColumnName("historial_meses");
+
                     b.Property<int>("MotivoInactivacionMinChars")
                         .HasColumnType("integer")
                         .HasColumnName("motivo_inactivacion_min_chars");

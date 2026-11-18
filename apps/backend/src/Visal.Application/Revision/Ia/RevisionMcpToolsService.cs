@@ -17,7 +17,7 @@ namespace Visal.Application.Revision.Ia;
 /// el objetivo es alimentar el prompt del LLM sin ruido.
 /// </summary>
 // Ola 4c (P0): contexto corto por operacion (using var db = ...Create();) en vez del IApplicationDbContext scoped.
-public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
+public sealed partial class RevisionMcpToolsService : IRevisionMcpToolsService
 {
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -34,7 +34,8 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
         IReadOnlyCollection<string> toolNames,
         IReadOnlyCollection<string> allowedTools,
         int? ventanaAsignacionesDias,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        OpcionesHistorial? historial = null)
     {
         using var db = _dbFactory.Create();
         var okList = new List<ToolInvocationResult>();
@@ -43,6 +44,20 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
         {
             var r = await EjecutarToolCoreAsync(db, name, historiaClinicaId, allowedTools, ventanaAsignacionesDias, ct);
             (r.Ok ? okList : failList).Add(r);
+        }
+        // Historial del paciente: fuera de la allow-list, lo gobierna el interruptor de la politica.
+        if (historial is { Activo: true })
+        {
+            try
+            {
+                var payload = await ArmarHistorialPacienteAsync(db, historiaClinicaId, historial, ct);
+                okList.Add(new ToolInvocationResult(RevisionMcpToolNames.HistorialPaciente, true, payload, null,
+                    Math.Max(1, (int)(payload.Length / CharsPorToken))));
+            }
+            catch (Exception ex)
+            {
+                failList.Add(new ToolInvocationResult(RevisionMcpToolNames.HistorialPaciente, false, null, ex.Message, 0));
+            }
         }
         return new HistoriaClinicaContextoIa(historiaClinicaId, okList, failList);
     }
@@ -185,64 +200,10 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
 
     private static async Task<string> ListOrdenesHcAsync(IApplicationDbContext db, Guid hcId, CancellationToken ct)
     {
-        var medicamentos = await db.HistoriaClinicaMedicamentos.AsNoTracking()
-            .Where(x => x.HistoriaClinicaId == hcId)
-            .Select(x => new
-            {
-                Codigo = x.CodigoMedicamento,
-                Nombre = x.NombreMedicamento,
-                x.Cantidad,
-                x.Posologia,
-                x.Frecuencia,
-                x.Dias,
-                x.Observacion,
-            })
-            .ToListAsync(ct);
-        var servicios = await db.HistoriaClinicaOrdenesServicio.AsNoTracking()
-            .Where(x => x.HistoriaClinicaId == hcId)
-            .Select(x => new { x.CodigoServicio, x.Descripcion, x.Cantidad, x.Observaciones })
-            .ToListAsync(ct);
-        var incapacidades = await db.HistoriaClinicaIncapacidades.AsNoTracking()
-            .Where(x => x.HistoriaClinicaId == hcId)
-            .Select(x => new { x.Motivo, x.FechaDesde, x.FechaHasta, x.Dias, x.Tipo })
-            .ToListAsync(ct);
-        var certificaciones = await db.HistoriaClinicaCertificaciones.AsNoTracking()
-            .Where(x => x.HistoriaClinicaId == hcId)
-            .Select(x => new { x.Titulo, x.Contenido })
-            .ToListAsync(ct);
-        var remisiones = await db.HistoriaClinicaRemisiones.AsNoTracking()
-            .Where(x => x.HistoriaClinicaId == hcId)
-            .Select(x => new { x.Capitulo, x.EspecialidadCodigo, x.EspecialidadNombre, x.Cantidad, x.Motivo })
-            .ToListAsync(ct);
-        var insumos = await db.HistoriaClinicaInsumos.AsNoTracking()
-            .Where(x => x.HistoriaClinicaId == hcId)
-            .Select(x => new { x.Codigo, x.Descripcion, x.Cantidad, x.Observaciones })
-            .ToListAsync(ct);
-
-        // REV-9 — Ordenes EXTERNAS (a otra IPS): la misma tabla
-        // HistoriaClinicaOrdenesExternas discrimina por Tipo. Cargamos las 4
-        // en una sola query y particionamos en memoria para no repetir I/O.
-        // Sin esto, el agente REVISOR CLINICO IA no ve nada de lo que se pide
-        // por fuera de la propia IPS.
-        var externas = await db.HistoriaClinicaOrdenesExternas.AsNoTracking()
-            .Where(x => x.HistoriaClinicaId == hcId)
-            .Select(x => new { x.Tipo, x.Codigo, x.Descripcion, x.Cantidad, x.Observaciones })
-            .ToListAsync(ct);
-        var rxExternos = externas.Where(x => x.Tipo == TipoCatalogoServicio.RxImagenologia)
-            .Select(x => new { x.Codigo, x.Descripcion, x.Cantidad, x.Observaciones }).ToList();
-        var laboratoriosExternos = externas.Where(x => x.Tipo == TipoCatalogoServicio.Laboratorio)
-            .Select(x => new { x.Codigo, x.Descripcion, x.Cantidad, x.Observaciones }).ToList();
-        var serviciosExternos = externas.Where(x => x.Tipo == TipoCatalogoServicio.ServicioGeneral)
-            .Select(x => new { x.Codigo, x.Descripcion, x.Cantidad, x.Observaciones }).ToList();
-        var insumosExternos = externas.Where(x => x.Tipo == TipoCatalogoServicio.Insumo)
-            .Select(x => new { x.Codigo, x.Descripcion, x.Cantidad, x.Observaciones }).ToList();
-
-        var payload = new
-        {
-            medicamentos, servicios, incapacidades, certificaciones, remisiones, insumos,
-            rxExternos, laboratoriosExternos, serviciosExternos, insumosExternos,
-        };
-        return JsonSerializer.Serialize(payload, JsonOpts);
+        // Mismas 10 categorias de siempre (incluidas vacias), cargadas con el helper en lote que
+        // tambien usa el historial del paciente. REV-9: incluye las ordenes EXTERNAS (a otra IPS).
+        var porHc = await CargarOrdenesPorHcAsync(db, new[] { hcId }, ct);
+        return JsonSerializer.Serialize(porHc[hcId], JsonOpts);
     }
 
     private static async Task<string> ListNotasHcAsync(IApplicationDbContext db, Guid hcId, CancellationToken ct)
@@ -413,7 +374,7 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
     /// label contiene "fecha", mismo criterio que FechaAtencionHelper) y las del cuerpo (campos con
     /// IsFechaAtencion=true), para que el agente las contraste. Firmas base64 colapsadas, valores
     /// largos truncados.</summary>
-    private static CatalogoResult BuildCatalogo(string? schemaJson, string? valoresJson)
+    private static CatalogoResult BuildCatalogo(string? schemaJson, string? valoresJson, int maxChars = 300)
     {
         var campos = new List<CampoCatalogo>();
         var headerFechas = new List<FechaAtencionCampo>();
@@ -433,7 +394,7 @@ public sealed class RevisionMcpToolsService : IRevisionMcpToolsService
             if (!valores.TryGetValue(key, out var raw) || string.IsNullOrWhiteSpace(raw)) { return null; }
             if (key.Contains("firma", StringComparison.OrdinalIgnoreCase)) { return "(firma registrada)"; }
             var s = raw.Trim();
-            return s.Length > 300 ? s[..300] + "..." : s;
+            return s.Length > maxChars ? s[..maxChars] + "..." : s;
         }
 
         var schema = FormSchema.FromJson(schemaJson);

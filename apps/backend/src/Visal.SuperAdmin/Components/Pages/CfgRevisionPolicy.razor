@@ -184,6 +184,46 @@ else if (_policy is not null)
         </div>
     </div>
 
+    <div class="ase-card">
+        <div class="ase-card-h">Historial del paciente para el agente IA</div>
+        <div class="ase-card-body">
+            <div class="rp-row rp-row-hero">
+                <label class="rp-switch">
+                    <input type="checkbox" @bind="_policy.EnviarHistorialPaciente" />
+                    <span class="rp-switch-l">Enviar historial del paciente al agente de revisión</span>
+                </label>
+                <p class="rp-help">
+                    Además de la historia que revisa, el agente recibe las historias <strong>anteriores</strong> del paciente
+                    (por fecha de atención, en orden cronológico) como contexto separado. Las usa para validar continuidad,
+                    evolución, texto copiado y contradicciones. El veredicto y los hallazgos son solo sobre la historia revisada.
+                </p>
+            </div>
+            <div class="rp-grid" style="margin-top:12px;">
+                <div class="rp-field">
+                    <label>Meses hacia atrás</label>
+                    <input type="number" class="form-control form-control-sm" min="1" max="36" step="1"
+                           disabled="@(!_policy.EnviarHistorialPaciente)"
+                           @bind="_policy.HistorialMeses" />
+                    <small class="rp-help-sm">Ventana desde la fecha de atención de la historia revisada. Default 8.</small>
+                </div>
+                <div class="rp-field">
+                    <label>Máximo de historias completas</label>
+                    <input type="number" class="form-control form-control-sm" min="0" max="100" step="1"
+                           disabled="@(!_policy.EnviarHistorialPaciente)"
+                           @bind="_policy.HistorialMaxCompletas" />
+                    <small class="rp-help-sm">Las más recientes (priorizando el mismo tipo de servicio) van con todo su contenido; el resto de la ventana va solo como índice (fecha, formato, profesional). Default 30.</small>
+                </div>
+                <div class="rp-field">
+                    <label>Tope de tokens del historial</label>
+                    <input type="number" class="form-control form-control-sm" min="5000" max="120000" step="1000"
+                           disabled="@(!_policy.EnviarHistorialPaciente)"
+                           @bind="_policy.HistorialMaxTokens" />
+                    <small class="rp-help-sm">Salvavidas de costo: si el historial se pasa, las historias completas más antiguas pasan a índice. Default 60.000.</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
     @if (_msg is not null) { <div class="ase-ok" style="margin-top:12px;">@_msg</div> }
     @if (_error is not null) { <div class="ase-alert" style="margin-top:12px;">@_error</div> }
 
@@ -222,6 +262,10 @@ else if (_policy is not null)
         public bool ConfirmarAprobado { get; set; }
         public int MotivoInactivacionMinChars { get; set; }
         public bool NotificarRechazoWhatsApp { get; set; }
+        public bool EnviarHistorialPaciente { get; set; } = true;
+        public int HistorialMeses { get; set; } = 8;
+        public int HistorialMaxCompletas { get; set; } = 30;
+        public int HistorialMaxTokens { get; set; } = 60000;
     }
 
     private PolicyModel? _policy;
@@ -276,6 +320,10 @@ else if (_policy is not null)
                 ConfirmarAprobado = dto.ConfirmarAprobado,
                 MotivoInactivacionMinChars = dto.MotivoInactivacionMinChars,
                 NotificarRechazoWhatsApp = dto.NotificarRechazoWhatsApp,
+                EnviarHistorialPaciente = dto.EnviarHistorialPaciente,
+                HistorialMeses = dto.HistorialMeses,
+                HistorialMaxCompletas = dto.HistorialMaxCompletas,
+                HistorialMaxTokens = dto.HistorialMaxTokens,
             };
         }
         catch (Exception ex) { _error = "No se pudo cargar la politica: " + ex.Message; }
@@ -296,7 +344,11 @@ else if (_policy is not null)
                 _policy.VentanaAsignacionesRelacionadasDias,
                 _policy.ConfirmarAprobado,
                 _policy.MotivoInactivacionMinChars,
-                _policy.NotificarRechazoWhatsApp);
+                _policy.NotificarRechazoWhatsApp,
+                _policy.EnviarHistorialPaciente,
+                _policy.HistorialMeses,
+                _policy.HistorialMaxCompletas,
+                _policy.HistorialMaxTokens);
             await Svc.SaveAsync(dto, _actorId);
             _msg = "Politica guardada. Aplica en el proximo cierre de HC.";
         }

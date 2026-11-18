@@ -158,6 +158,11 @@ else
                         <span class="rev-log-meta">@(log.Modelo ?? "") @(string.IsNullOrWhiteSpace(log.Proveedor) ? "" : "· " + log.Proveedor)</span>
                         <span class="rev-log-meta">tokens: @log.TokensIn → @log.TokensOut</span>
                     </div>
+                    @{ var hist = HistorialDe(log.ToolsJson); }
+                    @if (hist is not null)
+                    {
+                        <div class="rev-log-hist">📚 @hist.Value.Resumen</div>
+                    }
                     @if (!string.IsNullOrWhiteSpace(log.Error))
                     {
                         <div class="rev-log-error">@log.Error</div>
@@ -187,6 +192,13 @@ else
                         <summary>📥 Historia clinica que recibio (campo → contenido)</summary>
                         <pre class="rev-log-pre">@(string.IsNullOrWhiteSpace(log.CamposLegiblesJson) ? "(no disponible)" : log.CamposLegiblesJson)</pre>
                     </details>
+                    @if (hist is not null)
+                    {
+                        <details class="rev-log-sec">
+                            <summary>📚 Historial del paciente enviado (historias anteriores, solo contexto)</summary>
+                            <pre class="rev-log-pre">@hist.Value.Json</pre>
+                        </details>
+                    }
                     <details class="rev-log-sec">
                         <summary>🧭 Instrucciones (system prompt)</summary>
                         <pre class="rev-log-pre">@(string.IsNullOrWhiteSpace(log.SystemPrompt) ? "(no disponible)" : log.SystemPrompt)</pre>
@@ -259,6 +271,7 @@ else
     .rev-log { border:1px solid #e2e8f0; border-radius:8px; padding:10px; margin-bottom:10px; background:#fff; }
     .rev-log-hdr { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:6px; }
     .rev-log-meta { font-size:11px; color:#64748b; }
+    .rev-log-hist { font-size:12px; color:#334155; background:#f1f5f9; border:1px solid #e2e8f0; border-radius:6px; padding:4px 8px; margin:6px 0; }
     .rev-log-error { font-size:12px; color:#b91c1c; background:#fef2f2; border:1px solid #fecaca; border-radius:6px; padding:6px 8px; margin-bottom:6px; }
     .rev-log-just { background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:8px 10px; margin-bottom:8px; }
     .rev-log-just-lbl { font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:#1d4ed8; margin-bottom:3px; }
@@ -283,6 +296,45 @@ else
     [Parameter] public EventCallback OnEstadoCambio { get; set; }
 
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    /// <summary>Extrae del ToolsJson del log la invocacion "historial_paciente": linea de resumen
+    /// (completas / indice / ventana) + el payload indentado. Null si la corrida no envio historial.</summary>
+    private static (string Resumen, string Json)? HistorialDe(string? toolsJson)
+    {
+        if (string.IsNullOrWhiteSpace(toolsJson)) { return null; }
+        try
+        {
+            using var tools = System.Text.Json.JsonDocument.Parse(toolsJson);
+            if (tools.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array) { return null; }
+            foreach (var t in tools.RootElement.EnumerateArray())
+            {
+                if (!t.TryGetProperty("tool", out var name) || name.GetString() != "historial_paciente") { continue; }
+                if (!t.TryGetProperty("ok", out var ok) || !ok.GetBoolean())
+                {
+                    var err = t.TryGetProperty("error", out var e) ? e.GetString() : null;
+                    return ("Historial del paciente: no se pudo armar (" + (err ?? "sin detalle") + ")", err ?? "");
+                }
+                var payload = t.TryGetProperty("payload", out var p) ? p.GetString() : null;
+                if (string.IsNullOrWhiteSpace(payload)) { return null; }
+                using var doc = System.Text.Json.JsonDocument.Parse(payload);
+                var r = doc.RootElement.GetProperty("resumen");
+                int Num(string k) => r.TryGetProperty(k, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Number ? v.GetInt32() : 0;
+                var meses = r.TryGetProperty("ventana", out var vent) && vent.TryGetProperty("meses", out var m) ? m.GetInt32() : 0;
+                var resumen = Num("total_en_ventana") == 0
+                    ? $"Historial del paciente: sin historias anteriores en la ventana de {meses} meses"
+                    : $"Historial del paciente: {Num("total_en_ventana")} historias anteriores en {meses} meses — "
+                      + $"{Num("incluidas_completas")} completas, {Num("incluidas_indice")} como índice (~{Num("tokens_estimados"):N0} tokens)";
+                var json = System.Text.Json.JsonSerializer.Serialize(doc.RootElement, new System.Text.Json.JsonSerializerOptions
+                {
+                    WriteIndented = true,
+                    Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+                });
+                return (resumen, json);
+            }
+        }
+        catch { /* log viejo o malformado: sin resumen */ }
+        return null;
+    }
 
     private RevisionClinicaDto? _revision;
     private List<RevisionEventoDto> _eventos = new();

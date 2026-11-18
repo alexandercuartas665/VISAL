@@ -16,7 +16,8 @@ public sealed record VozLlamadaAccionResult(bool Ok, string? Error, string? Call
 public sealed record LlamadaDetalleDto(
     Guid Id, string? CallId, string Estado, string? Error,
     string? ToNumber, int? DuracionSegundos, decimal? CostoUsd,
-    string? RecordingUrl, string? Transcripcion, DateTimeOffset CreadoEn, bool EsPrueba);
+    string? RecordingUrl, string? Transcripcion, DateTimeOffset CreadoEn, bool EsPrueba,
+    string? AudioArchivoUrl = null);
 
 public interface IVozLlamadaService
 {

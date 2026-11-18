@@ -14,16 +14,21 @@ public sealed class VozLlamadaService : IVozLlamadaService
     private readonly ITenantContext _tenant;
     private readonly IRetellClient _retell;
     private readonly IRetellConfig _config;
+    private readonly IUploadStorage _uploads;
+    private readonly ISeguimientoIaQueue _iaQueue;
     private readonly ILogger<VozLlamadaService> _log;
 
     public VozLlamadaService(
         IApplicationDbContextFactory dbFactory, ITenantContext tenant,
-        IRetellClient retell, IRetellConfig config, ILogger<VozLlamadaService> log)
+        IRetellClient retell, IRetellConfig config, IUploadStorage uploads,
+        ISeguimientoIaQueue iaQueue, ILogger<VozLlamadaService> log)
     {
         _dbFactory = dbFactory;
         _tenant = tenant;
         _retell = retell;
         _config = config;
+        _uploads = uploads;
+        _iaQueue = iaQueue;
         _log = log;
     }
 
@@ -156,36 +161,66 @@ public sealed class VozLlamadaService : IVozLlamadaService
                 break;
         }
 
+        // Descarga y guarda el audio de la grabacion (una sola vez) para conservarlo
+        // localmente aunque la URL firmada de Retell expire. Best-effort: si falla,
+        // seguimos con la RecordingUrl original.
+        if (string.IsNullOrWhiteSpace(llamada.AudioArchivoUrl)
+            && !string.IsNullOrWhiteSpace(llamada.RecordingUrl)
+            && (ev.Evento == "call_ended" || ev.Evento == "call_analyzed"))
+        {
+            await DescargarYGuardarAudioAsync(llamada, ct);
+        }
+
         // Reflejar en la tarjeta de Seguimiento (solo si sigue Pendiente: no pisar edicion manual).
+        Guid? encolarIaEncId = null;
         if (llamada.SeguimientoEncuestaId is Guid encId
             && (ev.Evento == "call_ended" || ev.Evento == "call_analyzed"))
         {
             var enc = await db.SeguimientoEncuestas.IgnoreQueryFilters()
                 .FirstOrDefaultAsync(x => x.Id == encId, ct);
-            if (enc is not null && enc.Estado == "Pendiente")
+            if (enc is not null)
             {
-                enc.FechaLlamada = DateTime.UtcNow;
-                if (llamada.Estado == LlamadaVozEstado.NoContactado)
+                if (enc.Estado == "Pendiente")
                 {
-                    enc.Estado = "NoContactado";
-                }
-                else
-                {
-                    enc.Estado = "Realizada";
-                    enc.PersonaAtiende ??= "Agente IA";
-                    // Recoge los datos estructurados del analisis post-llamada (custom_analysis_data)
-                    // en el formulario de encuesta: preguntas 1-5, resumen y persona que atiende.
-                    MapearAnalisisAEncuesta(llamada.AnalisisJson, enc);
-                    // Si no vino resumen estructurado, deja la transcripcion como observacion.
-                    if (string.IsNullOrWhiteSpace(enc.Observaciones) && !string.IsNullOrWhiteSpace(llamada.Transcripcion))
+                    enc.FechaLlamada = DateTime.UtcNow;
+                    if (llamada.Estado == LlamadaVozEstado.NoContactado)
                     {
-                        enc.Observaciones = Truncar(llamada.Transcripcion!, 3500);
+                        enc.Estado = "NoContactado";
                     }
+                    else
+                    {
+                        enc.Estado = "Realizada";
+                        enc.PersonaAtiende ??= "Agente IA";
+                        // Recoge los datos estructurados del analisis post-llamada (custom_analysis_data)
+                        // en el formulario de encuesta: preguntas 1-5, resumen y persona que atiende.
+                        MapearAnalisisAEncuesta(llamada.AnalisisJson, enc);
+                        // Si no vino resumen estructurado, deja la transcripcion como observacion.
+                        if (string.IsNullOrWhiteSpace(enc.Observaciones) && !string.IsNullOrWhiteSpace(llamada.Transcripcion))
+                        {
+                            enc.Observaciones = Truncar(llamada.Transcripcion!, 3500);
+                        }
+                    }
+                }
+
+                // Sin-manos: si hay transcripcion y el cuestionario sigue incompleto (el
+                // analisis de Retell no lo lleno todo), encolar resolucion con nuestra IA.
+                // El worker corre la inferencia en el scope de tenant (el webhook es anonimo).
+                var incompleto = enc.Pregunta1 is null || enc.Pregunta2 is null || enc.Pregunta3 is null
+                    || enc.Pregunta4 is null || enc.Pregunta5 is null;
+                if (enc.Estado != "NoContactado" && incompleto && !string.IsNullOrWhiteSpace(llamada.Transcripcion))
+                {
+                    encolarIaEncId = enc.Id;
                 }
             }
         }
 
         await db.SaveChangesAsync(ct);
+
+        if (encolarIaEncId is Guid eid)
+        {
+            try { await _iaQueue.EnqueueAsync(new SeguimientoIaJob(llamada.TenantId, eid), ct); }
+            catch (Exception ex) { _log.LogWarning(ex, "No se pudo encolar la resolucion IA de la encuesta {EncId}.", eid); }
+        }
     }
 
     public async Task<IReadOnlyList<LlamadaVozDto>> ListarPorMesAsync(int mes, CancellationToken ct = default)
@@ -253,7 +288,7 @@ public sealed class VozLlamadaService : IVozLlamadaService
             .FirstOrDefaultAsync(ct);
         if (l is null) { return null; }
         return new LlamadaDetalleDto(l.Id, l.CallId, l.Estado.ToString(), l.Error, l.ToNumber,
-            l.DuracionSegundos, l.CostoUsd, l.RecordingUrl, l.Transcripcion, l.CreatedAt, l.EsPrueba);
+            l.DuracionSegundos, l.CostoUsd, l.RecordingUrl, l.Transcripcion, l.CreatedAt, l.EsPrueba, l.AudioArchivoUrl);
     }
 
     /// <summary>Crea la llamada en Retell y registra la LlamadaVoz. Guarda de una vez.</summary>
@@ -297,6 +332,25 @@ public sealed class VozLlamadaService : IVozLlamadaService
         return new(r.Ok, r.Error, r.CallId);
     }
 
+    /// <summary>Baja el audio de la grabacion y lo guarda bajo wwwroot; escribe la ruta
+    /// web en <see cref="LlamadaVoz.AudioArchivoUrl"/>. No lanza (best-effort).</summary>
+    private async Task DescargarYGuardarAudioAsync(LlamadaVoz llamada, CancellationToken ct)
+    {
+        try
+        {
+            var bajada = await _retell.DescargarGrabacionAsync(llamada.RecordingUrl!, ct);
+            if (bajada is not ({ Length: > 0 } bytes, var ext)) { return; }
+            var nombre = $"{llamada.CallId ?? llamada.Id.ToString("N")}.{ext}";
+            var subcarpeta = $"llamadas-audio/{llamada.TenantId:N}";
+            llamada.AudioArchivoUrl = await _uploads.GuardarAsync(subcarpeta, nombre, bytes, ct);
+            _log.LogInformation("Audio de llamada {CallId} guardado ({Bytes} bytes).", llamada.CallId, bytes.Length);
+        }
+        catch (Exception ex)
+        {
+            _log.LogWarning(ex, "No se pudo descargar el audio de la llamada {CallId}.", llamada.CallId);
+        }
+    }
+
     /// <summary>Vuelca los datos estructurados del analisis post-llamada (call_analysis.
     /// custom_analysis_data + call_summary) al formulario de encuesta. Best-effort y
     /// no pisa valores ya capturados manualmente.</summary>
@@ -321,12 +375,22 @@ public sealed class VozLlamadaService : IVozLlamadaService
                 return;
             }
 
-            // Preguntas 1-5: acepta claves pregunta1/p1/pregunta_1 (case-insensitive).
-            for (int i = 1; i <= 5; i++)
+            // Preguntas 1-4: escala numerica 1-5. Acepta pregunta1/p1/pregunta_1 (case-insensitive).
+            for (int i = 1; i <= 4; i++)
             {
                 if (GetPreguntaActual(enc, i).HasValue) { continue; }
                 var val = BuscarNumero(cad, $"pregunta{i}", $"pregunta_{i}", $"p{i}");
                 if (val is int n && n is >= 1 and <= 5) { SetPreguntaEnc(enc, i, n); }
+            }
+
+            // Pregunta 5: lista NPS (texto de la opcion) -> ordinal 1-5. Tambien acepta un
+            // digito directo. Busca por claves de numeral y de recomendacion.
+            if (!enc.Pregunta5.HasValue)
+            {
+                var p5texto = BuscarTexto(cad, "pregunta5", "pregunta_5", "p5", "recomendacion", "recomendaria", "nps")
+                    ?? BuscarNumero(cad, "pregunta5", "pregunta_5", "p5")?.ToString();
+                var ord = NpsRecomendacion.TextoAOrdinal(p5texto);
+                if (ord is int p5) { enc.Pregunta5 = p5; }
             }
 
             // Persona que atiende.

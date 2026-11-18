@@ -9,4 +9,8 @@ public interface IRetellClient
 
     /// <summary>Consulta el estado de una llamada por su call_id. Null si no existe.</summary>
     Task<LlamadaSnapshot?> ConsultarLlamadaAsync(string callId, CancellationToken ct = default);
+
+    /// <summary>Descarga el audio de la grabacion desde su URL publica (recording_url de Retell).
+    /// Devuelve (bytes, extension sin punto p.ej. "mp3"/"wav") o null si no se pudo bajar.</summary>
+    Task<(byte[] Bytes, string Extension)?> DescargarGrabacionAsync(string recordingUrl, CancellationToken ct = default);
 }

@@ -37,6 +37,10 @@ public class LlamadaVoz : TenantEntity
     /// <summary>URL publica de la grabacion de la llamada (recording_url de Retell).</summary>
     public string? RecordingUrl { get; set; }
 
+    /// <summary>Ruta web local del audio descargado y guardado (ej. "/uploads/llamadas-audio/xxx.mp3").
+    /// Se baja desde <see cref="RecordingUrl"/> al cerrarse la llamada; null si aun no se descargo.</summary>
+    public string? AudioArchivoUrl { get; set; }
+
     /// <summary>Analisis post-llamada crudo (JSON) tal cual lo manda Retell.</summary>
     public string? AnalisisJson { get; set; }
 

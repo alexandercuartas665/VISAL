@@ -1740,6 +1740,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.AgentId).HasMaxLength(80);
             b.Property(x => x.CostoUsd).HasPrecision(12, 4);
             b.Property(x => x.Error).HasMaxLength(1000);
+            b.Property(x => x.AudioArchivoUrl).HasMaxLength(400);
             b.HasIndex(x => x.CallId);
             b.HasIndex(x => new { x.TenantId, x.SeguimientoEncuestaId });
         });

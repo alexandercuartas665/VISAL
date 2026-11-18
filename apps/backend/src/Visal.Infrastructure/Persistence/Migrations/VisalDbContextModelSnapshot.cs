@@ -6163,6 +6163,11 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("analisis_json");
 
+                    b.Property<string>("AudioArchivoUrl")
+                        .HasMaxLength(400)
+                        .HasColumnType("character varying(400)")
+                        .HasColumnName("audio_archivo_url");
+
                     b.Property<string>("CallId")
                         .HasMaxLength(80)
                         .HasColumnType("character varying(80)")

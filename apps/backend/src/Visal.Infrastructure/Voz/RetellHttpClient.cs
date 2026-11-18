@@ -106,6 +106,46 @@ public sealed class RetellHttpClient : IRetellClient
         return null;
     }
 
+    public async Task<(byte[] Bytes, string Extension)?> DescargarGrabacionAsync(string recordingUrl, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(recordingUrl)) { return null; }
+        // La recording_url de Retell es una URL firmada/publica: GET sin Authorization.
+        try
+        {
+            using var msg = new HttpRequestMessage(HttpMethod.Get, recordingUrl);
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(60));
+            using var resp = await _http.SendAsync(msg, HttpCompletionOption.ResponseHeadersRead, cts.Token);
+            if (!resp.IsSuccessStatusCode) { return null; }
+            var bytes = await resp.Content.ReadAsByteArrayAsync(cts.Token);
+            if (bytes.Length == 0) { return null; }
+            var ext = ExtensionDeGrabacion(resp.Content.Headers.ContentType?.MediaType, recordingUrl);
+            return (bytes, ext);
+        }
+        catch { return null; }
+    }
+
+    // Deduce la extension del audio: primero el content-type, si no la de la URL, si no "mp3".
+    private static string ExtensionDeGrabacion(string? mediaType, string url)
+    {
+        var mt = mediaType?.ToLowerInvariant();
+        if (mt is not null)
+        {
+            if (mt.Contains("wav")) { return "wav"; }
+            if (mt.Contains("mpeg") || mt.Contains("mp3")) { return "mp3"; }
+            if (mt.Contains("ogg")) { return "ogg"; }
+            if (mt.Contains("mp4") || mt.Contains("m4a")) { return "m4a"; }
+        }
+        var path = url.Split('?', '#')[0];
+        var dot = path.LastIndexOf('.');
+        if (dot >= 0 && dot < path.Length - 1)
+        {
+            var e = path[(dot + 1)..].ToLowerInvariant();
+            if (e.Length is >= 2 and <= 4 && e.All(char.IsLetterOrDigit)) { return e; }
+        }
+        return "mp3";
+    }
+
     private static async Task BackoffAsync(int intento, CancellationToken ct)
     {
         try { await Task.Delay(TimeSpan.FromMilliseconds(300 * Math.Pow(2, intento)), ct); } catch { }

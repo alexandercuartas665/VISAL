@@ -52,6 +52,7 @@ public static class DependencyInjection
         services.AddScoped<Tenancy.Email.INotificacionEmailSender, Tenancy.Email.NotificacionEmailSender>();
         services.AddScoped<Tenancy.Alertas.IAlertaInformeAutoResponder, Tenancy.Alertas.AlertaInformeAutoResponder>();
         services.AddScoped<Voz.IVozLlamadaService, Voz.VozLlamadaService>();
+        services.AddScoped<Voz.ISeguimientoIaResolver, Voz.SeguimientoIaResolver>();
         services.AddScoped<Voz.IRetellConfig, Voz.RetellConfig>();
         services.AddScoped<Voz.ITenantVozConfigService, Voz.TenantVozConfigService>();
         services.AddScoped<Tenancy.IPipelineService, Tenancy.PipelineService>();

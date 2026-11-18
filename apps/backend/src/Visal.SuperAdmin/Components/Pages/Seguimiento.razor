@@ -6,7 +6,9 @@
 @using Visal.Application.Tenancy
 @using Visal.Application.Voz
 @inject ISeguimientoService SegSvc
+@inject IPacienteService PacienteSvc
 @inject Visal.Application.Voz.IVozLlamadaService VozSvc
+@inject Visal.Application.Voz.ISeguimientoIaResolver IaResolver
 @inject ISucursalService SucSvc
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IJSRuntime JS
@@ -121,7 +123,7 @@
                                 <td class="txt-c">@(h.Pregunta2?.ToString() ?? "-")</td>
                                 <td class="txt-c">@(h.Pregunta3?.ToString() ?? "-")</td>
                                 <td class="txt-c">@(h.Pregunta4?.ToString() ?? "-")</td>
-                                <td class="txt-c">@(h.Pregunta5?.ToString() ?? "-")</td>
+                                <td class="txt-c">@NpsLabel(h.Pregunta5)</td>
                                 <td class="seg-hist-obs">@(h.Observaciones ?? "-")</td>
                                 <td><button class="btn-mini" @onclick="() => VerHistorialItem(h)">Ver</button></td>
                             </tr>
@@ -185,13 +187,20 @@
                             @(d.DuracionSegundos is int s ? $" · {s}s" : "")
                         </div>
                         @if (!string.IsNullOrWhiteSpace(d.Error)) { <div class="seg-msg">@d.Error</div> }
-                        @if (!string.IsNullOrWhiteSpace(d.RecordingUrl))
+                        @{ var audioSrc = !string.IsNullOrWhiteSpace(d.AudioArchivoUrl) ? d.AudioArchivoUrl : d.RecordingUrl; }
+                        @if (!string.IsNullOrWhiteSpace(audioSrc))
                         {
-                            <audio controls src="@d.RecordingUrl" style="width:100%;margin-top:.4rem"></audio>
+                            <audio controls src="@audioSrc" style="width:100%;margin-top:.4rem"></audio>
                         }
                         @if (!string.IsNullOrWhiteSpace(d.Transcripcion))
                         {
                             <details class="seg-transcript-wrap"><summary>Ver transcripcion</summary><pre class="seg-transcript">@d.Transcripcion</pre></details>
+                            <div class="seg-ia-row">
+                                <button class="btn-outline" @onclick="() => ResolverConIa(seleccionado.Id)" disabled="@_resolviendoIa">
+                                    @(_resolviendoIa ? "Resolviendo..." : "\U0001F916 Resolver con IA")
+                                </button>
+                                <small>La IA lee la transcripcion, llena el cuestionario y mueve la tarjeta.</small>
+                            </div>
                         }
                     </div>
                 }
@@ -210,28 +219,89 @@
             </div>
 
             <div class="seg-form-row">
-                <label>Persona que atiende</label>
-                <input type="text" @bind="_edit.PersonaAtiende" placeholder="Nombre de quien contesta" />
+                <label>Telefonos y contactos del paciente</label>
+                <div class="seg-contactos">
+                    <div class="seg-contacto">
+                        <span class="seg-ct-badge">Paciente</span>
+                        <span class="seg-ct-nom">@seleccionado.PacienteNombre</span>
+                        <span class="seg-ct-tel">@TelefonoFmt(_pacienteCodigoPais, _pacienteTelefono)</span>
+                    </div>
+                    @foreach (var c in _contactos)
+                    {
+                        <div class="seg-contacto">
+                            <span class="seg-ct-badge alt">@(string.IsNullOrWhiteSpace(c.Parentesco) ? "Contacto" : c.Parentesco)</span>
+                            <span class="seg-ct-nom">@c.Nombre</span>
+                            <span class="seg-ct-tel">@TelefonoFmt(c.CodigoPais, c.Telefono)</span>
+                        </div>
+                    }
+                    @if (_contactos.Count == 0 && string.IsNullOrWhiteSpace(_pacienteTelefono))
+                    {
+                        <div class="seg-ct-empty">Sin telefonos ni contactos registrados en la ficha.</div>
+                    }
+                </div>
             </div>
+
+            <div class="seg-form-row">
+                <label>Persona con quien se hablo</label>
+                <select class="seg-persona-sel" @bind="_personaSel" @bind:after="OnPersonaSelChanged">
+                    <option value="">— Selecciona —</option>
+                    <option value="__paciente__">Paciente: @seleccionado.PacienteNombre</option>
+                    @foreach (var c in _contactos.Where(x => x.Id is not null))
+                    {
+                        <option value="@c.Id">@c.Nombre@(string.IsNullOrWhiteSpace(c.Parentesco) ? "" : " (" + c.Parentesco + ")")</option>
+                    }
+                    <option value="__otra__">Otra persona (no esta en la lista)...</option>
+                </select>
+            </div>
+
+            @if (_personaSel == "__otra__")
+            {
+                <div class="seg-nc">
+                    <div class="seg-nc-note">Este contacto se agregara a la ficha del paciente al guardar.</div>
+                    <div class="seg-nc-grid">
+                        <input type="text" placeholder="Nombre de quien contesta" @bind="_ncNombre" />
+                        <input type="text" placeholder="Parentesco (opcional)" @bind="_ncParentesco" />
+                        <input type="text" placeholder="Telefono (opcional)" @bind="_ncTelefono" />
+                    </div>
+                </div>
+            }
 
             <div class="seg-preguntas">
                 @foreach (var (idx, texto) in Preguntas)
                 {
                     <div class="seg-pregunta">
                         <div class="seg-pregunta-label">@idx. @texto</div>
-                        <div class="seg-escala">
-                            @for (var n = 1; n <= 5; n++)
-                            {
-                                var val = n;
-                                var actual = GetPregunta(idx);
-                                var sel = actual == val ? "seg-esc-sel" : "";
-                                <button type="button" class="seg-esc-btn @sel" @onclick="() => SetPregunta(idx, val)">@val</button>
-                            }
-                            @if (GetPregunta(idx).HasValue)
-                            {
-                                <button type="button" class="seg-esc-clr" title="Limpiar" @onclick="() => SetPregunta(idx, null)">×</button>
-                            }
-                        </div>
+                        @if (idx == 5)
+                        {
+                            @* Pregunta 5 (recomendacion): NO es escala numerica, es seleccion de una lista. *@
+                            <div class="seg-escala seg-escala-nps">
+                                @foreach (var (val, label) in OpcionesRecomendacion)
+                                {
+                                    var sel = GetPregunta(5) == val ? "seg-esc-sel" : "";
+                                    <button type="button" class="seg-esc-btn seg-esc-nps @sel" @onclick="() => SetPregunta(5, val)">@label</button>
+                                }
+                                @if (GetPregunta(5).HasValue)
+                                {
+                                    <button type="button" class="seg-esc-clr" title="Limpiar" @onclick="() => SetPregunta(5, null)">×</button>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="seg-escala">
+                                @for (var n = 1; n <= 5; n++)
+                                {
+                                    var val = n;
+                                    var actual = GetPregunta(idx);
+                                    var sel = actual == val ? "seg-esc-sel" : "";
+                                    <button type="button" class="seg-esc-btn @sel" @onclick="() => SetPregunta(idx, val)">@val</button>
+                                }
+                                @if (GetPregunta(idx).HasValue)
+                                {
+                                    <button type="button" class="seg-esc-clr" title="Limpiar" @onclick="() => SetPregunta(idx, null)">×</button>
+                                }
+                            </div>
+                        }
                     </div>
                 }
             </div>
@@ -430,10 +500,27 @@
 .seg-pregunta { background:#f8fafc; border:1px solid #e5e7eb; border-radius:8px; padding:.55rem .75rem; }
 .seg-pregunta-label { color:#0f172a; font-size:.88rem; margin-bottom:.35rem; }
 .seg-escala { display:flex; gap:.35rem; align-items:center; }
+.seg-escala-nps { flex-wrap:wrap; }
+.seg-ia-row { display:flex; gap:.5rem; align-items:center; margin-top:.5rem; flex-wrap:wrap; }
+.seg-ia-row small { color:#64748b; font-size:.78rem; }
 .seg-esc-btn { width:2.1rem; height:2.1rem; border:1px solid #cbd5e1; background:#fff; border-radius:6px; cursor:pointer; font-weight:600; color:#334155; }
+.seg-esc-nps { width:auto; height:auto; padding:.35rem .7rem; font-size:.82rem; }
 .seg-esc-btn:hover { border-color:#2563eb; color:#2563eb; }
 .seg-esc-sel { background:#2563eb; border-color:#2563eb; color:#fff; }
 .seg-esc-clr { border:none; background:transparent; color:#94a3b8; cursor:pointer; font-size:1.1rem; margin-left:.35rem; }
+
+.seg-contactos { display:flex; flex-direction:column; gap:.3rem; }
+.seg-contacto { display:flex; align-items:center; gap:.5rem; background:#f8fafc; border:1px solid #e5e7eb; border-radius:6px; padding:.3rem .5rem; font-size:.85rem; }
+.seg-ct-badge { font-size:.68rem; font-weight:700; text-transform:uppercase; letter-spacing:.3px; color:#1565c0; background:#e3f2fd; border-radius:999px; padding:1px 8px; white-space:nowrap; }
+.seg-ct-badge.alt { color:#475569; background:#e2e8f0; }
+.seg-ct-nom { font-weight:600; color:#0f172a; }
+.seg-ct-tel { color:#64748b; margin-left:auto; }
+.seg-ct-empty { color:#94a3b8; font-size:.82rem; font-style:italic; }
+.seg-persona-sel { width:100%; padding:.4rem .5rem; border:1px solid #cbd5e1; border-radius:6px; background:#fff; }
+.seg-nc { margin-top:.4rem; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:.5rem .6rem; }
+.seg-nc-note { font-size:.78rem; color:#92400e; margin-bottom:.4rem; }
+.seg-nc-grid { display:grid; grid-template-columns:2fr 1fr 1fr; gap:.4rem; }
+.seg-nc-grid input { padding:.4rem .5rem; border:1px solid #cbd5e1; border-radius:6px; }
 
 .seg-msg { padding:.5rem .75rem; background:#eff6ff; border-radius:6px; color:#1e3a8a; margin-top:.5rem; font-size:.85rem; }
 
@@ -466,6 +553,21 @@
         (4, "Como calificaria su experiencia global con VISAL RT S.A.S"),
         (5, "Recomendaria a VISAL RT S.A.S a un familiar o amigo")
     };
+
+    // Pregunta 5 (recomendacion) NO es escala numerica: es seleccion de una lista. Se almacena
+    // con el MISMO ordinal int 1-5 que ya consume el CENSO (hoja Consolidado y la columna texto
+    // de la hoja Satisfaccion): Definitivamente Si=5 ... Definitivamente NO=1.
+    internal static readonly (int val, string label)[] OpcionesRecomendacion = new[]
+    {
+        (5, "Definitivamente Si"),
+        (4, "Probablemente Si"),
+        (3, "Ni Probable Ni Improbable"),
+        (2, "Probablemente No"),
+        (1, "Definitivamente NO"),
+    };
+
+    private static string NpsLabel(int? v)
+        => v is null ? "-" : (OpcionesRecomendacion.FirstOrDefault(o => o.val == v).label ?? v.ToString()!);
 
     private sealed class EditForm
     {
@@ -513,6 +615,21 @@
     }
     private Guid? _openId;
     private EditForm _edit = new();
+
+    // Telefonos / contactos del paciente abierto + seleccion de "persona con quien se hablo".
+    private List<PacienteContactoEmergenciaDto> _contactos = new();
+    private string? _pacienteTelefono;
+    private string? _pacienteCodigoPais;
+    private string _personaSel = "";           // "", "__paciente__", <contactoId>, "__otra__"
+    private string _ncNombre = "";
+    private string _ncParentesco = "";
+    private string _ncCodigoPais = "+57";
+    private string _ncTelefono = "";
+
+    private static string TelefonoFmt(string? cod, string? tel)
+        => string.IsNullOrWhiteSpace(tel)
+            ? "sin telefono"
+            : $"{(string.IsNullOrWhiteSpace(cod) ? "" : cod.Trim() + " ")}{tel.Trim()}";
     private string _msg = string.Empty;
     private string _actorNombre = string.Empty;
 
@@ -522,6 +639,7 @@
     private bool _llamando;
     private string? _llamarMsg;
     private LlamadaDetalleDto? _llamadaDetalle;
+    private bool _resolviendoIa;
 
     // Tabs: "kanban" | "historial"
     private string _tab = "kanban";
@@ -738,7 +856,86 @@
             PersonaAtiende = it.PersonaAtiende,
             Observaciones = it.Observaciones
         };
+
+        // Telefonos y contactos del paciente (para elegir con quien se hablo y, si es otra
+        // persona, darla de alta en la ficha). Se cargan al abrir la tarjeta (1 paciente).
+        _contactos = new();
+        _pacienteTelefono = null; _pacienteCodigoPais = null;
+        _personaSel = ""; _ncNombre = ""; _ncParentesco = ""; _ncTelefono = ""; _ncCodigoPais = "+57";
+        try
+        {
+            var det = await PacienteSvc.GetAsync(it.PacienteId);
+            if (det is not null)
+            {
+                _pacienteTelefono = det.Telefono;
+                _pacienteCodigoPais = det.CodigoPaisTelefono;
+                _contactos = det.ContactosEmergencia?.ToList() ?? new();
+            }
+        }
+        catch { /* si falla, el modal sigue usable con texto libre */ }
+
+        // Prefill del selector segun la persona ya registrada en la encuesta.
+        var pa = it.PersonaAtiende?.Trim();
+        if (!string.IsNullOrWhiteSpace(pa))
+        {
+            var c = _contactos.FirstOrDefault(x => string.Equals(x.Nombre?.Trim(), pa, StringComparison.OrdinalIgnoreCase));
+            if (c?.Id is Guid cid) { _personaSel = cid.ToString(); }
+            else if (string.Equals(it.PacienteNombre?.Trim(), pa, StringComparison.OrdinalIgnoreCase)) { _personaSel = "__paciente__"; }
+            else { _personaSel = "__otra__"; _ncNombre = pa; }
+        }
+
         try { _llamadaDetalle = await VozSvc.ObtenerUltimaLlamadaAsync(id); } catch { _llamadaDetalle = null; }
+
+        // Auto-resolver con IA: si hay transcripcion y la encuesta esta sin responder, la IA la
+        // resuelve y mueve la tarjeta al abrir. Se dispara una sola vez (luego ya tiene respuestas).
+        try
+        {
+            if (await IaResolver.TieneTranscripcionSinResolverAsync(id))
+            {
+                await ResolverConIa(id, silencioso: true);
+            }
+        }
+        catch { /* best-effort: el usuario siempre puede usar el boton Resolver con IA */ }
+    }
+
+    private async Task ResolverConIa(Guid id) => await ResolverConIa(id, silencioso: false);
+
+    private async Task ResolverConIa(Guid id, bool silencioso)
+    {
+        if (_resolviendoIa) { return; }
+        _resolviendoIa = true;
+        if (!silencioso) { _llamarMsg = null; }
+        StateHasChanged();
+        try
+        {
+            var r = await IaResolver.ResolverDesdeUltimaLlamadaAsync(id);
+            if (!r.Ok)
+            {
+                if (!silencioso) { _llamarMsg = r.Error ?? "No se pudo resolver con IA."; }
+                return;
+            }
+            if (r.Cambio) { await RecargarAsync(); }
+            // Refresca el formulario del modal con lo que la IA escribio.
+            var it = _items.FirstOrDefault(x => x.Id == id);
+            if (it is not null)
+            {
+                _edit.Pregunta1 = it.Pregunta1; _edit.Pregunta2 = it.Pregunta2; _edit.Pregunta3 = it.Pregunta3;
+                _edit.Pregunta4 = it.Pregunta4; _edit.Pregunta5 = it.Pregunta5;
+                _edit.PersonaAtiende = it.PersonaAtiende; _edit.Observaciones = it.Observaciones;
+                if (it.FechaLlamada is DateTime f) { _edit.FechaLlamada = f; }
+            }
+            _llamarMsg = r.Cambio ? "Encuesta resuelta con IA." : "La IA no encontro datos nuevos.";
+        }
+        catch (Exception ex) { if (!silencioso) { _llamarMsg = "Error: " + ex.Message; } }
+        finally { _resolviendoIa = false; StateHasChanged(); }
+    }
+
+    private void OnPersonaSelChanged()
+    {
+        if (_personaSel != "__otra__")
+        {
+            _ncNombre = ""; _ncParentesco = ""; _ncTelefono = "";
+        }
     }
 
     private async Task LlamarUno(Guid id)
@@ -796,6 +993,35 @@
         if (_openId is not Guid id) { return; }
         try
         {
+            var it = _items.First(x => x.Id == id);
+
+            // Resuelve "persona con quien se hablo" desde el selector. Si es "otra persona",
+            // la damos de alta como contacto de emergencia en la ficha del paciente (si no existe).
+            string? persona = _personaSel switch
+            {
+                "__paciente__" => it.PacienteNombre,
+                "__otra__" => string.IsNullOrWhiteSpace(_ncNombre) ? null : _ncNombre.Trim(),
+                "" => string.IsNullOrWhiteSpace(_edit.PersonaAtiende) ? null : _edit.PersonaAtiende!.Trim(),
+                _ => _contactos.FirstOrDefault(c => c.Id?.ToString() == _personaSel)?.Nombre
+            };
+
+            if (_personaSel == "__otra__" && !string.IsNullOrWhiteSpace(_ncNombre))
+            {
+                var nombre = _ncNombre.Trim();
+                var yaExiste = _contactos.Any(c => string.Equals(c.Nombre?.Trim(), nombre, StringComparison.OrdinalIgnoreCase));
+                if (!yaExiste)
+                {
+                    var nuevo = new PacienteContactoEmergenciaDto(
+                        null, nombre,
+                        string.IsNullOrWhiteSpace(_ncParentesco) ? null : _ncParentesco.Trim(),
+                        string.IsNullOrWhiteSpace(_ncCodigoPais) ? "+57" : _ncCodigoPais.Trim(),
+                        string.IsNullOrWhiteSpace(_ncTelefono) ? null : _ncTelefono.Trim(),
+                        0, null);
+                    await PacienteSvc.UpsertContactoEmergenciaAsync(it.PacienteId, nuevo, await Actor());
+                }
+            }
+
+            _edit.PersonaAtiende = persona;
             var req = new GuardarEncuestaRequest(
                 _edit.FechaLlamada, _edit.Pregunta1, _edit.Pregunta2,
                 _edit.Pregunta3, _edit.Pregunta4, _edit.Pregunta5,

@@ -99,6 +99,13 @@ public static class DependencyInjection
         services.AddScoped<Application.Revision.Ia.IPreRevisionIaPendingStore, Revision.PreRevisionIaPendingStore>();
         services.AddHostedService<Revision.PreRevisionIaWorker>();
 
+        // Encuesta SIAU resuelta por IA sin-manos: cola in-process + worker que corre
+        // la inferencia (tenant-scoped) fuera del webhook anonimo de Retell.
+        services.AddSingleton<Voz.SeguimientoIaQueue>();
+        services.AddSingleton<Application.Voz.ISeguimientoIaQueue>(sp =>
+            sp.GetRequiredService<Voz.SeguimientoIaQueue>());
+        services.AddHostedService<Voz.SeguimientoIaWorker>();
+
         // Motor de alertas: worker diario que evalua reglas y dispara envios.
         services.AddHostedService<Alertas.AlertasWorker>();
         // Reintento automatico de envios RDA fallidos por causa transitoria (EVOL/timeout).

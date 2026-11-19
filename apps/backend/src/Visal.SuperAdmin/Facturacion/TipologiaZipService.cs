@@ -1258,7 +1258,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
             switch (c.Origen)
             {
                 case OrigenInformeItem.AutorizacionAsignacion:
-                    foreach (var b in await CargarAutorizacionesAsync(db, pacienteId, pac.Autorizaciones, c.SoloUltimo, ct))
+                    foreach (var b in await CargarAutorizacionesAsync(db, pacienteId, pac.Autorizaciones, c.SoloUltimo, ct, archivo.MembreteHcCup, hcSnapshot))
                     {
                         partes.Add(new PartePlan(b, -1, Etiqueta: "[AUT]"));
                     }
@@ -1321,7 +1321,8 @@ public sealed class TipologiaZipService : ITipologiaZipService
     /// <paramref name="soloUltimo"/> reduce a la ultima autorizacion.
     /// </summary>
     private async Task<List<byte[]>> CargarAutorizacionesAsync(
-        IApplicationDbContext db, Guid pacienteId, IReadOnlyList<string> codigosSnapshot, bool soloUltimo, CancellationToken ct)
+        IApplicationDbContext db, Guid pacienteId, IReadOnlyList<string> codigosSnapshot, bool soloUltimo, CancellationToken ct,
+        bool membrete = false, IReadOnlySet<Guid>? hcSnapshot = null)
     {
         var codSet = codigosSnapshot
             .Where(x => !string.IsNullOrWhiteSpace(x))
@@ -1350,13 +1351,121 @@ public sealed class TipologiaZipService : ITipologiaZipService
             ? porCodigo.OrderByDescending(x => x.CreatedAt).Take(1).ToList()
             : porCodigo.OrderBy(x => x.CreatedAt).ToList();
 
+        var textos = membrete
+            ? await ResolverTextosMembreteAutorizacionAsync(db, pacienteId, ordenadas.Select(x => x.CodigoAutorizacion!.Trim()).ToList(), hcSnapshot, ct)
+            : null;
+
         var res = new List<byte[]>();
         var urlsVistas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var f in ordenadas)
         {
             if (!urlsVistas.Add(f.PdfAutorizacionUrl!)) { continue; }  // mismo PDF compartido por 2 codigos
             var pdf = LeerArchivoComoPdf(f.PdfAutorizacionUrl!);
-            if (pdf is not null) { res.Add(pdf); }
+            if (pdf is null) { continue; }
+            // Membrete por documento (flag MembreteHcCup) tambien en la AUTORIZACION: la franja
+            // dice a que historias del snapshot y a que CUP corresponde ese PDF.
+            if (textos is not null && textos.TryGetValue(f.CodigoAutorizacion!.Trim(), out var texto))
+            {
+                pdf = EstamparMembrete(pdf, texto) ?? pdf;
+            }
+            res.Add(pdf);
+        }
+        return res;
+    }
+
+    /// <summary>Texto del membrete de cada PDF de autorizacion (por codigo). Las historias son
+    /// las del paciente colgadas (pivote sesion-&gt;turno-&gt;asignacion) de las asignaciones con
+    /// ese codigo, acotadas a las HC del snapshot cuando el set no esta vacio. Con 1 historia
+    /// el texto es identico al membrete de la historia ("HC | CUP - servicio | Atendido");
+    /// con varias resume "N historias: HC-a, HC-b..." + rango de fechas de atencion + CUP. Sin
+    /// historias usa el CUP/servicio de la asignacion y el numero de autorizacion.</summary>
+    private async Task<Dictionary<string, string>> ResolverTextosMembreteAutorizacionAsync(
+        IApplicationDbContext db, Guid pacienteId, IReadOnlyList<string> codigos,
+        IReadOnlySet<Guid>? hcSnapshot, CancellationToken ct)
+    {
+        var res = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var codSet = codigos.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (codSet.Count == 0) { return res; }
+
+        var asigs = (await db.Asignaciones.AsNoTracking()
+            .Where(a => a.PacienteId == pacienteId && a.CodigoAutorizacion != null)
+            .Select(a => new { a.Id, a.CodigoAutorizacion, a.CodigoRips, a.NombreServicio, a.CreatedAt })
+            .ToListAsync(ct))
+            .Where(a => codSet.Contains(a.CodigoAutorizacion!.Trim()))
+            .ToList();
+        var asigIds = asigs.Select(a => a.Id).ToList();
+
+        var hcRows = asigIds.Count == 0
+            ? new List<(Guid AsignacionId, Guid HcId)>()
+            : (await (
+                from p in db.AsignacionTurnoSesionHcs.AsNoTracking()
+                join s in db.AsignacionTurnoSesiones.AsNoTracking() on p.SesionId equals s.Id
+                join t in db.AsignacionTurnos.AsNoTracking() on s.AsignacionTurnoId equals t.Id
+                where asigIds.Contains(t.AsignacionId)
+                select new { t.AsignacionId, p.HistoriaClinicaId })
+                .ToListAsync(ct))
+                .Select(x => (AsignacionId: x.AsignacionId, HcId: x.HistoriaClinicaId))
+                .ToList();
+        if (hcSnapshot is { Count: > 0 })
+        {
+            hcRows = hcRows.Where(x => hcSnapshot.Contains(x.HcId)).ToList();
+        }
+        var info = await ResolverMembretePorHcAsync(db, hcRows.Select(x => x.HcId).Distinct().ToList(), ct);
+        var infoIds = info.Keys.ToList();
+        var consec = infoIds.Count == 0
+            ? new Dictionary<Guid, long>()
+            : await db.HistoriasClinicas.AsNoTracking()
+                .Where(h => infoIds.Contains(h.Id))
+                .Select(h => new { h.Id, h.Consecutivo })
+                .ToDictionaryAsync(h => h.Id, h => h.Consecutivo, ct);
+
+        foreach (var g in asigs.GroupBy(a => a.CodigoAutorizacion!.Trim(), StringComparer.OrdinalIgnoreCase))
+        {
+            var ids = g.Select(a => a.Id).ToHashSet();
+            var hcs = hcRows.Where(x => ids.Contains(x.AsignacionId)).Select(x => x.HcId).Distinct()
+                .Where(info.ContainsKey)
+                .OrderBy(id => consec.TryGetValue(id, out var c) ? c : long.MaxValue)
+                .ToList();
+            if (hcs.Count == 1)
+            {
+                res[g.Key] = ConstruirTextoMembrete(hcs[0], info);
+                continue;
+            }
+
+            var primera = g.OrderByDescending(a => a.CreatedAt).First();
+            var cup = hcs.Select(id => info[id].Cup).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))
+                      ?? primera.CodigoRips?.Trim() ?? "";
+            var serv = hcs.Select(id => info[id].Serv).FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))
+                       ?? primera.NombreServicio?.Trim() ?? "";
+            var sb = new StringBuilder();
+            if (hcs.Count == 0)
+            {
+                sb.Append("Autorizacion ").Append(g.Key);
+            }
+            else
+            {
+                var codigosHc = hcs.Select(id => info[id].Hc).Where(x => !string.IsNullOrWhiteSpace(x)).ToList();
+                sb.Append(hcs.Count).Append(" historias: ");
+                sb.Append(codigosHc.Count <= 3
+                    ? string.Join(", ", codigosHc)
+                    : codigosHc[0] + " ... " + codigosHc[^1]);
+            }
+            // Con varias historias el rango de fechas va ANTES del CUP: la franja se recorta a
+            // 120 caracteres y es preferible que se corte el nombre del servicio, no las fechas.
+            var fechas = hcs.Select(id => info[id].Fecha).Where(f => f.HasValue)
+                .Select(f => f!.Value.ToOffset(TimeSpan.FromHours(-5)).Date).Distinct().OrderBy(d => d).ToList();
+            if (fechas.Count > 0)
+            {
+                var ic = System.Globalization.CultureInfo.InvariantCulture;
+                sb.Append("   |   Atendido: ").Append(fechas[0].ToString("dd/MM/yyyy", ic));
+                if (fechas.Count > 1) { sb.Append(" a ").Append(fechas[^1].ToString("dd/MM/yyyy", ic)); }
+            }
+            if (!string.IsNullOrWhiteSpace(cup))
+            {
+                sb.Append("   |   CUP ").Append(cup);
+                if (!string.IsNullOrWhiteSpace(serv)) { sb.Append(" - ").Append(serv); }
+            }
+            res[g.Key] = sb.ToString();
         }
         return res;
     }
@@ -1510,7 +1619,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
             {
                 case OrigenInformeItem.AutorizacionAsignacion:
                     // Solo el PDF de ESTA autorizacion.
-                    foreach (var b in await CargarAutorizacionesAsync(db, pacienteId, unoCodigo, c.SoloUltimo, ct))
+                    foreach (var b in await CargarAutorizacionesAsync(db, pacienteId, unoCodigo, c.SoloUltimo, ct, archivo.MembreteHcCup, hcSnapshot))
                     {
                         partes.Add(new PartePlan(b, -1, Etiqueta: $"[AUT {codigo}]"));
                     }

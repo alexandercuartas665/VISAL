@@ -9899,6 +9899,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("auditoria_ia_timeout_seg");
 
+                    b.Property<string>("AuditoriaIaTiposServicioJson")
+                        .HasColumnType("text")
+                        .HasColumnName("auditoria_ia_tipos_servicio_json");
+
                     b.Property<bool>("AutoTriggerCierre")
                         .HasColumnType("boolean")
                         .HasColumnName("auto_trigger_cierre");

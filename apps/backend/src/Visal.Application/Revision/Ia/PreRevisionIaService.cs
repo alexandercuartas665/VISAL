@@ -268,6 +268,27 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
                 return null;
             }
         }
+        if (policy.AuditoriaIaTiposServicio is { Count: > 0 } tipos)
+        {
+            // Tipo de servicio de la asignacion que origino la HC (cadena pivote -> sesion -> turno ->
+            // asignacion). HC sin asignacion (creada por fuera de Coordinacion) no se audita.
+            // Plural/singular tolerante: asignaciones legacy "TERAPIAS"/"CONSULTAS".
+            using var db = _dbFactory.Create();
+            var tiposHc = await (
+                from pv in db.AsignacionTurnoSesionHcs.AsNoTracking()
+                where pv.HistoriaClinicaId == historiaClinicaId
+                join se in db.AsignacionTurnoSesiones.AsNoTracking() on pv.SesionId equals se.Id
+                join t in db.AsignacionTurnos.AsNoTracking() on se.AsignacionTurnoId equals t.Id
+                join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+                select a.TipoServicio)
+                .Distinct()
+                .ToListAsync(ct);
+            if (!tiposHc.Any(th => !string.IsNullOrWhiteSpace(th)
+                                   && tipos.Any(tp => Visal.Application.Tenancy.AsignacionService.TiposCoinciden(th.Trim(), tp))))
+            {
+                return null;
+            }
+        }
         return new AuditoriaCierreConfig(Math.Clamp(policy.AuditoriaIaTimeoutSeg, 30, 300));
     }
 

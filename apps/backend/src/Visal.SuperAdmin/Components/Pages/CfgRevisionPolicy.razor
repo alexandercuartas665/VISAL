@@ -272,6 +272,23 @@ else if (_policy is not null)
                     </div>
                     <small class="rp-help-sm">Ninguno marcado = se auditan todos los formatos. Marca algunos para un piloto.</small>
                 </div>
+                <div class="rp-field">
+                    <label>Tipos de servicio que se auditan (@(_tiposSel.Count == 0 ? "todos" : _tiposSel.Count.ToString()))</label>
+                    <div class="rp-fmt-list">
+                        @foreach (var t in TiposServicio)
+                        {
+                            var marcadoT = _tiposSel.Contains(t);
+                            <label class="rp-fmt">
+                                <input type="checkbox" checked="@marcadoT" disabled="@(!_policy.AuditoriaIaAlCerrar)"
+                                       @onchange="e => ToggleTipo(t, e.Value is bool b && b)" />
+                                <span>@t</span>
+                            </label>
+                        }
+                    </div>
+                    <small class="rp-help-sm">Tipo de la asignaci&oacute;n con que se coordin&oacute; la historia. Ninguno marcado = todos.
+                        Con alguno marcado, las historias creadas por fuera de Coordinaci&oacute;n (sin asignaci&oacute;n) no se auditan.
+                        Si tambi&eacute;n hay formatos marcados, la historia debe cumplir ambos.</small>
+                </div>
             </div>
         </div>
     </div>
@@ -384,6 +401,7 @@ else if (_policy is not null)
                 AuditoriaIaTimeoutSeg = dto.AuditoriaIaTimeoutSeg,
             };
             _formatosSel = new HashSet<string>(dto.AuditoriaIaFormatos ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            _tiposSel = new HashSet<string>(dto.AuditoriaIaTiposServicio ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
             try
             {
                 // Formatos clinicos activos (sin las ordenes ni escalas/consentimientos).
@@ -408,6 +426,15 @@ else if (_policy is not null)
         if (marcado) { _formatosSel.Add(codigo); } else { _formatosSel.Remove(codigo); }
     }
 
+    // Mismos tipos del filtro "Selecione tipo asignacion" de Coordinacion (Asignacion.TipoServicio).
+    private static readonly string[] TiposServicio = { "TERAPIA", "ENFERMERIA", "CONSULTA", "EQUIPOS", "INSUMOS" };
+    private HashSet<string> _tiposSel = new(StringComparer.OrdinalIgnoreCase);
+
+    private void ToggleTipo(string tipo, bool marcado)
+    {
+        if (marcado) { _tiposSel.Add(tipo); } else { _tiposSel.Remove(tipo); }
+    }
+
     private async Task GuardarAsync()
     {
         if (_policy is null) { return; }
@@ -430,7 +457,8 @@ else if (_policy is not null)
                 _policy.HistorialMaxTokens,
                 _policy.AuditoriaIaAlCerrar,
                 _formatosSel.ToList(),
-                _policy.AuditoriaIaTimeoutSeg);
+                _policy.AuditoriaIaTimeoutSeg,
+                _tiposSel.ToList());
             await Svc.SaveAsync(dto, _actorId);
             _msg = "Politica guardada. Aplica en el proximo cierre de HC.";
         }

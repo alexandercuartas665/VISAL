@@ -97,4 +97,9 @@ public class RevisionPolicy : TenantEntity
     /// <summary>Segundos maximos que el profesional espera la auditoria al cerrar; si se pasa, la HC
     /// se cierra normal y la auditoria sigue en segundo plano.</summary>
     public int AuditoriaIaTimeoutSeg { get; set; } = 180;
+
+    /// <summary>JSON con los tipos de servicio de la asignacion (TERAPIA, ENFERMERIA, CONSULTA, EQUIPOS,
+    /// INSUMOS) cuyas HC se auditan al cerrar. Null/vacio = todos. Con lista, una HC sin asignacion
+    /// (creada por fuera de Coordinacion) NO se audita. Se combina (Y) con la lista de formatos.</summary>
+    public string? AuditoriaIaTiposServicioJson { get; set; }
 }

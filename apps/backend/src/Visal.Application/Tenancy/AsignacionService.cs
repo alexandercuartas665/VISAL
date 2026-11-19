@@ -1708,7 +1708,7 @@ public sealed class AsignacionService(ITenantContext tenant, IAuditWriter audit,
     /// Ejemplos: "TERAPIA" == "TERAPIAS", "CONSULTA" == "CONSULTAS". Case-insensitive.
     /// Sirve para asignaciones legacy con datos plurales que el catalogo tiene en
     /// singular (o viceversa).</summary>
-    private static bool TiposCoinciden(string a, string b)
+    internal static bool TiposCoinciden(string a, string b)
     {
         if (string.Equals(a, b, StringComparison.OrdinalIgnoreCase)) { return true; }
         var au = a.ToUpperInvariant();

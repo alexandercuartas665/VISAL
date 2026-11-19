@@ -453,6 +453,56 @@ public sealed class PreRevisionIaServiceTests
         Assert.NotNull(await incluido.Svc.ConfigAuditoriaAlCerrarAsync(incluido.HcId));
     }
 
+    /// <summary>IMP-50: filtro por tipo de servicio de la asignacion que origino la HC.</summary>
+    [Fact]
+    public async Task ConfigAuditoriaAlCerrar_filtra_por_tipo_de_servicio_de_la_asignacion()
+    {
+        static RevisionPolicy Pol(string tiposJson, string? formatosJson = null) => new()
+            { AuditoriaIaAlCerrar = true, AuditoriaIaTiposServicioJson = tiposJson, AuditoriaIaFormatosJson = formatosJson };
+
+        // HC de ENFERMERIA con filtro ENFERMERIA -> se audita.
+        var enf = await BuildAsync(TenantA, OkResponse("{}"), crearRevision: false, politica: Pol("[\"ENFERMERIA\"]"));
+        await VincularAsignacionAsync(enf, "ENFERMERIA");
+        Assert.NotNull(await enf.Svc.ConfigAuditoriaAlCerrarAsync(enf.HcId));
+
+        // HC de TERAPIAS (legacy plural) con filtro ENFERMERIA -> no; con filtro TERAPIA -> si.
+        var ter = await BuildAsync(TenantA, OkResponse("{}"), crearRevision: false, politica: Pol("[\"ENFERMERIA\"]"));
+        await VincularAsignacionAsync(ter, "TERAPIAS");
+        Assert.Null(await ter.Svc.ConfigAuditoriaAlCerrarAsync(ter.HcId));
+        var ter2 = await BuildAsync(TenantA, OkResponse("{}"), crearRevision: false, politica: Pol("[\"TERAPIA\"]"));
+        await VincularAsignacionAsync(ter2, "TERAPIAS");
+        Assert.NotNull(await ter2.Svc.ConfigAuditoriaAlCerrarAsync(ter2.HcId));
+
+        // HC sin asignacion con filtro de tipo -> no se audita.
+        var libre = await BuildAsync(TenantA, OkResponse("{}"), crearRevision: false, politica: Pol("[\"ENFERMERIA\"]"));
+        Assert.Null(await libre.Svc.ConfigAuditoriaAlCerrarAsync(libre.HcId));
+
+        // Tipo OK pero formato fuera de la lista -> no (se combinan con Y).
+        var ambos = await BuildAsync(TenantA, OkResponse("{}"), crearRevision: false,
+            politica: Pol("[\"ENFERMERIA\"]", "[\"PP-FO-84\"]"));
+        await VincularAsignacionAsync(ambos, "ENFERMERIA");
+        Assert.Null(await ambos.Svc.ConfigAuditoriaAlCerrarAsync(ambos.HcId));
+    }
+
+    private static async Task VincularAsignacionAsync(Fixture fx, string tipoServicio)
+    {
+        var hc = await fx.Db.HistoriasClinicas.SingleAsync(h => h.Id == fx.HcId);
+        var asig = new Asignacion
+        {
+            TenantId = hc.TenantId, LoteId = Guid.NewGuid(), PacienteId = hc.PacienteId,
+            Sucursal = "CALI", ServicioId = "SV1", NombreServicio = "X", TipoServicio = tipoServicio,
+            Cantidad = 1, ContratoCodigo = "C1", MesVigencia = 8, FechaInicio = new DateOnly(2026, 8, 1),
+            Estado = AsignacionEstado.Asignado
+        };
+        var turno = new AsignacionTurno { TenantId = hc.TenantId, AsignacionId = asig.Id, ProfesionalId = Guid.NewGuid(), Cantidad = 1 };
+        var ses = new AsignacionTurnoSesion { TenantId = hc.TenantId, AsignacionTurnoId = turno.Id, SessionNo = 1, FechaAtencion = new DateOnly(2026, 8, 1) };
+        fx.Db.Asignaciones.Add(asig);
+        fx.Db.AsignacionTurnos.Add(turno);
+        fx.Db.AsignacionTurnoSesiones.Add(ses);
+        fx.Db.AsignacionTurnoSesionHcs.Add(new AsignacionTurnoSesionHc { TenantId = hc.TenantId, SesionId = ses.Id, HistoriaClinicaId = hc.Id });
+        await fx.Db.SaveChangesAsync();
+    }
+
     [Fact]
     public void ParsearSugerencias_tolera_ausencia_y_nombres_alternos()
     {
@@ -493,11 +543,12 @@ public sealed class PreRevisionIaServiceTests
         await Assert.ThrowsAsync<ArgumentException>(() =>
             svc.SaveAsync(def with { AuditoriaIaTimeoutSeg = 10 }, Actor));
 
-        await svc.SaveAsync(def with { AuditoriaIaAlCerrar = true, AuditoriaIaFormatos = new[] { "PP-FO-84", "pp-fo-84", " " } }, Actor);
+        await svc.SaveAsync(def with { AuditoriaIaAlCerrar = true, AuditoriaIaFormatos = new[] { "PP-FO-84", "pp-fo-84", " " }, AuditoriaIaTiposServicio = new[] { " enfermeria", "ENFERMERIA", "" } }, Actor);
         var leida = await new RevisionPolicyService(new SingleStoreDbContextFactory(opts, tenant), tenant,
             new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions())).GetAsync();
         Assert.True(leida.AuditoriaIaAlCerrar);
         Assert.Equal(new[] { "PP-FO-84" }, leida.AuditoriaIaFormatos);
+        Assert.Equal(new[] { "ENFERMERIA" }, leida.AuditoriaIaTiposServicio);
     }
 
     // ---- Fakes ----

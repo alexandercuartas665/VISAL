@@ -121,6 +121,10 @@ public sealed class RevisionPolicyService : IRevisionPolicyService
             .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         row.AuditoriaIaFormatosJson = formatos.Count == 0 ? null : System.Text.Json.JsonSerializer.Serialize(formatos);
         row.AuditoriaIaTimeoutSeg = policy.AuditoriaIaTimeoutSeg;
+        var tipos = (policy.AuditoriaIaTiposServicio ?? Array.Empty<string>())
+            .Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim().ToUpperInvariant())
+            .Distinct().ToList();
+        row.AuditoriaIaTiposServicioJson = tipos.Count == 0 ? null : System.Text.Json.JsonSerializer.Serialize(tipos);
         row.UpdatedAt = DateTimeOffset.UtcNow;
         row.UpdatedBy = actor;
         await db.SaveChangesAsync(ct);
@@ -145,7 +149,8 @@ public sealed class RevisionPolicyService : IRevisionPolicyService
         r.HistorialMaxTokens,
         r.AuditoriaIaAlCerrar,
         LeerFormatos(r.AuditoriaIaFormatosJson),
-        r.AuditoriaIaTimeoutSeg);
+        r.AuditoriaIaTimeoutSeg,
+        LeerFormatos(r.AuditoriaIaTiposServicioJson));
 
     private static IReadOnlyList<string> LeerFormatos(string? json)
     {

@@ -118,8 +118,13 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
     public async Task<IReadOnlyList<RevisionAgenteLogDto>> ListarAgenteLogsAsync(Guid revisionClinicaId, CancellationToken ct = default)
     {
         using var db = _dbFactory.Create();
+        // Incluye los INTENTOS de cierre auditados en Atencion que el profesional decidio corregir
+        // (log sin ciclo, misma HC): el revisor ve que dijo el agente antes de la version final.
+        var hcId = await db.RevisionesClinica.AsNoTracking()
+            .Where(r => r.Id == revisionClinicaId).Select(r => (Guid?)r.HistoriaClinicaId).FirstOrDefaultAsync(ct);
         var logs = await db.RevisionAgenteLogs.AsNoTracking()
-            .Where(x => x.RevisionClinicaId == revisionClinicaId)
+            .Where(x => x.RevisionClinicaId == revisionClinicaId
+                     || (hcId != null && x.RevisionClinicaId == null && x.HistoriaClinicaId == hcId))
             .OrderByDescending(x => x.CreatedAt)
             .ThenByDescending(x => x.Id)
             .ToListAsync(ct);
@@ -128,7 +133,8 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
             l.Resultado, l.Confianza, l.TokensIn, l.TokensOut,
             l.Nota, DeserializarHallazgos(l.HallazgosJson),
             l.SystemPrompt, l.ContextoEnviado, l.CamposLegiblesJson, l.ToolsJson, l.RespuestaCruda,
-            DeserializarSugerencias(l.SugerenciasJson)))
+            DeserializarSugerencias(l.SugerenciasJson),
+            l.FeedbackUtil, l.FeedbackComentario, l.FeedbackEn, l.RevisionClinicaId is null))
             .ToList();
     }
 

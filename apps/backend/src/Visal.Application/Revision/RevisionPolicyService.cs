@@ -91,9 +91,9 @@ public sealed class RevisionPolicyService : IRevisionPolicyService
         {
             throw new ArgumentException("El tope de tokens del historial debe estar entre 5.000 y 120.000.", nameof(policy));
         }
-        if (policy.AuditoriaIaTimeoutSeg < 30 || policy.AuditoriaIaTimeoutSeg > 180)
+        if (policy.AuditoriaIaTimeoutSeg < 30 || policy.AuditoriaIaTimeoutSeg > 300)
         {
-            throw new ArgumentException("El tiempo maximo de la auditoria al cerrar debe estar entre 30 y 180 segundos.", nameof(policy));
+            throw new ArgumentException("El tiempo maximo de la auditoria al cerrar debe estar entre 30 y 300 segundos.", nameof(policy));
         }
 
         using var db = _dbFactory.Create();

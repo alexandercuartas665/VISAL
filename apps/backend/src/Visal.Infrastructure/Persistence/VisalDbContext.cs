@@ -1176,6 +1176,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.CamposLegiblesJson).HasColumnType("text");
             b.Property(x => x.ToolsJson).HasColumnType("text");
             b.Property(x => x.RespuestaCruda).HasColumnType("text");
+            b.Property(x => x.FeedbackComentario).HasColumnType("text");
             b.HasIndex(x => new { x.TenantId, x.RevisionClinicaId });
             b.HasIndex(x => x.HistoriaClinicaId);
         });

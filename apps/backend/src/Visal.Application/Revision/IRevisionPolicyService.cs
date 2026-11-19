@@ -18,7 +18,7 @@ public sealed record RevisionPolicyDto(
     int HistorialMaxTokens = 60000,
     bool AuditoriaIaAlCerrar = false,
     IReadOnlyList<string>? AuditoriaIaFormatos = null,
-    int AuditoriaIaTimeoutSeg = 90);
+    int AuditoriaIaTimeoutSeg = 180);
 
 /// <summary>
 /// Acceso a la <see cref="RevisionPolicy"/> singleton por tenant. Cuando no hay

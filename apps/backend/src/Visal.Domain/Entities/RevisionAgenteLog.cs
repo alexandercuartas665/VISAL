@@ -12,7 +12,9 @@ namespace Visal.Domain.Entities;
 /// </summary>
 public class RevisionAgenteLog : TenantEntity
 {
-    public Guid RevisionClinicaId { get; set; }
+    /// <summary>Ciclo de revision al que pertenece la corrida. NULL = intento de cierre auditado en
+    /// Atencion que el profesional decidio corregir (la HC siguio abierta y aun no hay ciclo).</summary>
+    public Guid? RevisionClinicaId { get; set; }
     public Guid HistoriaClinicaId { get; set; }
 
     /// <summary>Codigo/nombre del agente (ej. "REVISOR CLINICO IA").</summary>
@@ -52,4 +54,12 @@ public class RevisionAgenteLog : TenantEntity
     public string? ToolsJson { get; set; }
     /// <summary>Respuesta cruda del modelo (antes de parsear el veredicto).</summary>
     public string? RespuestaCruda { get; set; }
+
+    // -- Calificacion del usuario (pulgar arriba/abajo en el modal de auditoria al cerrar) --
+    /// <summary>True = le sirvio la revision (pulgar arriba); false = pulgar abajo; null = sin calificar.</summary>
+    public bool? FeedbackUtil { get; set; }
+    /// <summary>Que salio mal segun el usuario (solo con pulgar abajo).</summary>
+    public string? FeedbackComentario { get; set; }
+    public Guid? FeedbackUsuarioId { get; set; }
+    public DateTimeOffset? FeedbackEn { get; set; }
 }

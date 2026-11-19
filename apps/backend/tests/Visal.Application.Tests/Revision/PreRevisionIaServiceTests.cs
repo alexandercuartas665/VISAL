@@ -336,6 +336,76 @@ public sealed class PreRevisionIaServiceTests
     }
 
     [Fact]
+    public async Task GuardarLogIntento_y_feedback_quedan_en_el_log_sin_ciclo()
+    {
+        var fx = await BuildAsync(TenantA, OkResponse(BodyRechazoConSugerencia), crearRevision: false,
+            estadoHc: HistoriaClinicaEstado.Abierta);
+        var a = await fx.Svc.AuditarHcAsync(fx.HcId);
+
+        var logId = await fx.Svc.GuardarLogIntentoCierreAsync(a);
+        Assert.NotNull(logId);
+        Assert.Equal(0, await fx.Db.RevisionesClinica.CountAsync());
+
+        Assert.True(await fx.Svc.RegistrarFeedbackAsync(logId!.Value, false, "  El hallazgo 1 es falso: es texto de la plantilla  ", Actor));
+
+        var log = await fx.Db.RevisionAgenteLogs.AsNoTracking().SingleAsync();
+        Assert.Null(log.RevisionClinicaId);            // intento: sin ciclo de revision
+        Assert.Equal(fx.HcId, log.HistoriaClinicaId);
+        Assert.Equal("Rechazado", log.Resultado);
+        Assert.False(log.FeedbackUtil);
+        Assert.Equal("El hallazgo 1 es falso: es texto de la plantilla", log.FeedbackComentario);
+        Assert.NotNull(log.FeedbackEn);
+
+        // Cambia de opinion: pulgar arriba sin comentario.
+        Assert.True(await fx.Svc.RegistrarFeedbackAsync(logId.Value, true, null, Actor));
+        log = await fx.Db.RevisionAgenteLogs.AsNoTracking().SingleAsync();
+        Assert.True(log.FeedbackUtil);
+        Assert.Null(log.FeedbackComentario);
+    }
+
+    [Fact]
+    public async Task RegistrarAuditoriaCierre_vincula_el_log_del_intento_sin_duplicarlo_y_conserva_feedback()
+    {
+        var fx = await BuildAsync(TenantA, OkResponse(BodyRechazoConSugerencia), crearRevision: false,
+            estadoHc: HistoriaClinicaEstado.Abierta);
+        var a = await fx.Svc.AuditarHcAsync(fx.HcId);
+        var logId = await fx.Svc.GuardarLogIntentoCierreAsync(a);
+        await fx.Svc.RegistrarFeedbackAsync(logId!.Value, false, "confundio medicacion previa", Actor);
+
+        var res = await fx.Svc.RegistrarAuditoriaCierreAsync(fx.HcId, a with { LogId = logId }, cerradaPeseARechazo: true, Actor);
+
+        Assert.True(res.Ok, res.Error);
+        Assert.Equal(1, fx.AiClient.CantidadLlamadas);
+        var rev = await fx.Db.RevisionesClinica.AsNoTracking().SingleAsync(r => r.HistoriaClinicaId == fx.HcId);
+        var log = await fx.Db.RevisionAgenteLogs.AsNoTracking().SingleAsync();   // uno solo
+        Assert.Equal(logId, log.Id);
+        Assert.Equal(rev.Id, log.RevisionClinicaId);
+        Assert.Equal("confundio medicacion previa", log.FeedbackComentario);
+    }
+
+    [Fact]
+    public async Task GuardarLogIntento_no_guarda_si_la_auditoria_fallo()
+    {
+        var fx = await BuildAsync(TenantA, OkResponse(BodyRechazoConSugerencia), crearRevision: false);
+        var fallo = AuditoriaIaResultado.Fallo(fx.HcId, "timeout");
+        Assert.Null(await fx.Svc.GuardarLogIntentoCierreAsync(fallo));
+        Assert.False(await fx.Svc.RegistrarFeedbackAsync(Guid.NewGuid(), true, null, Actor));
+        Assert.Equal(0, await fx.Db.RevisionAgenteLogs.CountAsync());
+    }
+
+    [Fact]
+    public void Prompt_incluye_reglas_de_plantilla_medicacion_previa_y_calificadores()
+    {
+        var m = typeof(PreRevisionIaService).GetMethod("ArmarSystemPrompt",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        var prompt = (string)m.Invoke(null, new object[] { "" })!;
+        Assert.Contains("TEXTO DE PLANTILLA", prompt);
+        Assert.Contains("MEDICACION PREVIA vs NUEVA FORMULACION", prompt);
+        Assert.Contains("CALIFICADORES DE TIEMPO", prompt);
+        Assert.Contains("TABLAS DEL FORMATO", prompt);
+    }
+
+    [Fact]
     public async Task RegistrarAuditoriaCierre_rechaza_resultado_de_otra_hc()
     {
         var fx = await BuildAsync(TenantA, OkResponse(BodyRechazoConSugerencia), crearRevision: false);
@@ -418,7 +488,7 @@ public sealed class PreRevisionIaServiceTests
 
         var def = await svc.GetAsync();
         Assert.False(def.AuditoriaIaAlCerrar);
-        Assert.Equal(90, def.AuditoriaIaTimeoutSeg);
+        Assert.Equal(180, def.AuditoriaIaTimeoutSeg);
 
         await Assert.ThrowsAsync<ArgumentException>(() =>
             svc.SaveAsync(def with { AuditoriaIaTimeoutSeg = 10 }, Actor));

@@ -82,7 +82,11 @@ public sealed class SnapshotRelacionFacturasBuilder(
         "Historia con listado firmas",                // 47  Cantidad de archivos "Lista de firmas" colgados de la HC
         "Autorizacion cargada por",                   // 48  Usuario que cargo la autorizacion (vacio en historicas)
         "Origen autorizacion",                        // 49  Modulo por el que entro la autorizacion (vacio en historicas)
-        "Listado firmas cargado por"                  // 50  Usuario(s) que cargaron los "Lista de firmas" de la HC
+        "Listado firmas cargado por",                 // 50  Usuario(s) que cargaron los "Lista de firmas" de la HC
+        "Validacion IA",                              // 51  Ultimo veredicto del agente revisor IA (Aprobado/Rechazado)
+        "Confianza IA (%)",                           // 52  Confianza de ese veredicto (0-100)
+        "Hallazgos IA",                               // 53  Cantidad de hallazgos de ese veredicto
+        "Observacion IA"                              // 54  Nota/concepto del agente
     };
 
     /// <summary>
@@ -129,6 +133,10 @@ public sealed class SnapshotRelacionFacturasBuilder(
         ["Autorizacion cargada por"]                = "Nombre del usuario que cargo/completo la autorizacion de la fila (Asignacion.AutorizacionCargadaPorNombre, denormalizado al cargarla desde cualquier modulo). Vacio en autorizaciones historicas (anteriores a esta funcionalidad, sin registro de usuario) y cuando la fila no trae autorizacion. No forma parte del template EPS.",
         ["Origen autorizacion"]                     = "Modulo por el que entro la autorizacion (Asignacion.AutorizacionOrigenModulo): 'Asignaciones', 'Ordenes Clinicas', 'Asignacion por agendas'. Vacio en autorizaciones historicas y cuando la fila no trae autorizacion. No forma parte del template EPS.",
         ["Listado firmas cargado por"]              = "Nombre(s) del/los usuario(s) que cargaron los documentos con tipologia 'Lista de firmas' de ESTA Historia Clinica (NotaMedicaDocumento.CreatedBy, por historia_clinica_id). Si hay varios usuarios distintos, se listan separados por coma (ordenados por fecha de carga). Vacio si la HC no tiene ningun 'Lista de firmas'. En la CABECERA de un paquete queda vacio (no es una HC real). No forma parte del template EPS.",
+        ["Validacion IA"]                           = "Resultado de la ULTIMA validacion del agente revisor clinico IA sobre ESTA Historia Clinica: 'Aprobado' o 'Rechazado'. Toma la corrida mas reciente (auditoria al cerrar la historia, intento de cierre o revision desde Ordenes Clinicas). Vacio si la HC nunca fue validada por el agente y en la CABECERA de un paquete. Es el concepto del agente, no la decision del revisor humano. No forma parte del template EPS.",
+        ["Confianza IA (%)"]                        = "Confianza (0 a 100) que el agente revisor IA asigno a su ultima validacion de ESTA Historia Clinica. Vacio si no hay validacion IA. No forma parte del template EPS.",
+        ["Hallazgos IA"]                            = "Cantidad de hallazgos que reporto el agente revisor IA en su ultima validacion de ESTA Historia Clinica (0 si no reporto ninguno). El detalle se consulta en Ordenes Clinicas > Log del agente. Vacio si no hay validacion IA. No forma parte del template EPS.",
+        ["Observacion IA"]                          = "Nota/concepto del agente revisor IA en su ultima validacion de ESTA Historia Clinica. Vacio si no hay validacion IA. No forma parte del template EPS.",
     };
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> ConstruirAsync(
@@ -255,6 +263,16 @@ public sealed class SnapshotRelacionFacturasBuilder(
             ["Listado firmas cargado por"] = h.EsLineaPaquetePrimaria
                 ? (object?)null
                 : h.ListadoFirmasCargadoPor,
+            // 51-54 — ultima validacion del agente revisor IA de ESTA HC. Vacio si nunca se valido
+            // y en la cabecera de paquete (no es una HC real).
+            ["Validacion IA"] = h.EsLineaPaquetePrimaria ? null : h.ValidacionIaResultado,
+            ["Confianza IA (%)"] = h.EsLineaPaquetePrimaria || h.ValidacionIaConfianza is not decimal confIa
+                ? (object?)null
+                : (int)Math.Round(confIa * 100m, MidpointRounding.AwayFromZero),
+            ["Hallazgos IA"] = h.EsLineaPaquetePrimaria || h.ValidacionIaResultado is null
+                ? (object?)null
+                : h.ValidacionIaHallazgos ?? 0,
+            ["Observacion IA"] = h.EsLineaPaquetePrimaria ? null : h.ValidacionIaNota,
         };
     }
 

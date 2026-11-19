@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
 using Visal.Domain.Entities;
@@ -312,6 +313,35 @@ public sealed class RelacionFacturasSelector(IApplicationDbContextFactory dbFact
             }
         }
 
+        // 6.b.5) Ultima validacion del agente revisor IA por HC (revision_agente_logs con Ok y
+        //        veredicto, la mas reciente: auditoria al cerrar, intentos de cierre o revision de
+        //        Ordenes Clinicas). Dos consultas: ids del ultimo log por HC y luego solo sus datos
+        //        (evita traer prompts/contexto de todos los logs). Alimenta las columnas
+        //        "Validacion IA", "Confianza IA (%)", "Hallazgos IA" y "Observacion IA".
+        var validacionIaPorHc = new Dictionary<Guid, ValidacionIaHc>();
+        if (hcIdsPrefil.Count > 0)
+        {
+            var ultimosLogIds = (await db.RevisionAgenteLogs.AsNoTracking()
+                    .Where(l => hcIdsPrefil.Contains(l.HistoriaClinicaId) && l.Ok && l.Resultado != null)
+                    .Select(l => new { l.Id, l.HistoriaClinicaId, l.CreatedAt })
+                    .ToListAsync(ct))
+                .GroupBy(l => l.HistoriaClinicaId)
+                .Select(g => g.OrderByDescending(l => l.CreatedAt).First().Id)
+                .ToList();
+            if (ultimosLogIds.Count > 0)
+            {
+                var datosIa = await db.RevisionAgenteLogs.AsNoTracking()
+                    .Where(l => ultimosLogIds.Contains(l.Id))
+                    .Select(l => new { l.HistoriaClinicaId, l.Resultado, l.Confianza, l.Nota, l.HallazgosJson })
+                    .ToListAsync(ct);
+                foreach (var d in datosIa)
+                {
+                    validacionIaPorHc[d.HistoriaClinicaId] =
+                        new ValidacionIaHc(d.Resultado, d.Confianza, ContarHallazgosIa(d.HallazgosJson), d.Nota);
+                }
+            }
+        }
+
         // 6.c) TipoArchivoRips desde el catalogo de tipos de servicio — mapeamos
         //      por codigo del modulo de la asignacion (CONSULTA/TERAPIA/...).
         var catalogoTipos = await db.CatalogosTipoServicio.AsNoTracking()
@@ -544,7 +574,12 @@ public sealed class RelacionFacturasSelector(IApplicationDbContextFactory dbFact
                 AutorizacionOrigenModulo: asigRelevante?.AutorizacionOrigenModulo,
                 // Usuario(s) distintos que cargaron los "Lista de firmas" de ESTA HC (por historia).
                 ListadoFirmasCargadoPor: listadoFirmasUsuariosPorHc.GetValueOrDefault(hc.Id),
-                TipoUsuarioNombre: paciente.TipoUsuarioId is Guid tuId && tiposUsuario.TryGetValue(tuId, out var tuNom) ? tuNom : null));
+                TipoUsuarioNombre: paciente.TipoUsuarioId is Guid tuId && tiposUsuario.TryGetValue(tuId, out var tuNom) ? tuNom : null,
+                // Ultima validacion del agente revisor IA de ESTA HC (vacio si nunca se valido).
+                ValidacionIaResultado: validacionIaPorHc.GetValueOrDefault(hc.Id)?.Resultado,
+                ValidacionIaConfianza: validacionIaPorHc.GetValueOrDefault(hc.Id)?.Confianza,
+                ValidacionIaHallazgos: validacionIaPorHc.GetValueOrDefault(hc.Id)?.Hallazgos,
+                ValidacionIaNota: validacionIaPorHc.GetValueOrDefault(hc.Id)?.Nota));
         }
 
         // ── Lineas primarias de paquete ────────────────────────────────────────────────
@@ -734,5 +769,23 @@ public sealed class RelacionFacturasSelector(IApplicationDbContextFactory dbFact
             }
         }
         return sb.ToString().Normalize(System.Text.NormalizationForm.FormC).ToUpperInvariant();
+    }
+
+    /// <summary>Ultima validacion del agente revisor IA de una HC (columnas IA del snapshot).</summary>
+    private sealed record ValidacionIaHc(string? Resultado, decimal? Confianza, int Hallazgos, string? Nota);
+
+    /// <summary>Cantidad de hallazgos del log del agente (arreglo JSON). 0 si no hay o no se puede leer.</summary>
+    internal static int ContarHallazgosIa(string? hallazgosJson)
+    {
+        if (string.IsNullOrWhiteSpace(hallazgosJson)) { return 0; }
+        try
+        {
+            using var doc = JsonDocument.Parse(hallazgosJson);
+            return doc.RootElement.ValueKind == JsonValueKind.Array ? doc.RootElement.GetArrayLength() : 0;
+        }
+        catch (JsonException)
+        {
+            return 0;
+        }
     }
 }

@@ -96,5 +96,5 @@ public class RevisionPolicy : TenantEntity
 
     /// <summary>Segundos maximos que el profesional espera la auditoria al cerrar; si se pasa, la HC
     /// se cierra normal y la auditoria sigue en segundo plano.</summary>
-    public int AuditoriaIaTimeoutSeg { get; set; } = 90;
+    public int AuditoriaIaTimeoutSeg { get; set; } = 180;
 }

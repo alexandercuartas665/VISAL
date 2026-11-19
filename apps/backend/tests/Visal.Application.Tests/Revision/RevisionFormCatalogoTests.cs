@@ -189,4 +189,89 @@ public sealed class RevisionFormCatalogoTests
         Assert.Contains("2026-10-20", fechas.GetProperty("cierre_registro_admin").GetString());
         Assert.Contains("2026-10-01", fechas.GetProperty("apertura_registro_admin").GetString());
     }
+    /// <summary>
+    /// IMP-48: las TABLAS guardan sus celdas en "tbl:{id}:{fila}:{colId}", no bajo el name del
+    /// nodo. Antes el catalogo las marcaba SIEMPRE "vacio" y el agente reportaba tablas vacias que
+    /// estaban diligenciadas. Las filas con solo rotulos de plantilla (seedRows) no cuentan.
+    /// Ademas, el texto armado por la plantilla del formato (__tmpl:) sale marcado como AUTOGENERADO.
+    /// </summary>
+    [Fact]
+    public async Task GetFormDefinition_LeeTablasDiligenciadas_y_marca_texto_de_plantilla()
+    {
+        var opts = new DbContextOptionsBuilder<VisalDbContext>()
+            .UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        var tenant = new FakeTenantContext { TenantId = Tenant };
+        var db = new VisalDbContext(opts, tenant);
+
+        const string schema = """
+        {
+          "children": [
+            { "type": "field", "id": "t1", "name": "diagnosticos", "label": "Diagnosticos", "fieldType": "table", "required": true,
+              "columns": [ { "id": "c1", "label": "Diagnostico" }, { "id": "c2", "label": "Tipo" } ] },
+            { "type": "field", "id": "t2", "name": "examen", "label": "Examen fisico", "fieldType": "table",
+              "columns": [ { "id": "e1", "label": "Sistema" }, { "id": "e2", "label": "Hallazgo" } ],
+              "seedRows": [ ["CABEZA", null], ["CUELLO", null], ["TORAX", null] ] },
+            { "type": "field", "id": "t3", "name": "vacia", "label": "Tabla vacia", "fieldType": "table",
+              "columns": [ { "id": "v1", "label": "Algo" } ], "seedRows": [ ["ROTULO"] ] },
+            { "type": "field", "name": "sv", "label": "Signos vitales turno", "fieldType": "textarea",
+              "formulaTemplate": "TA: {ta}" },
+            { "type": "field", "name": "nota", "label": "Nota", "fieldType": "textarea",
+              "formulaTemplate": "TA: {ta}" }
+          ]
+        }
+        """;
+        var form = new FormDefinition { TenantId = Tenant, Codigo = "HC-FO-08", Nombre = "HC", Tipo = "HC", SchemaJson = schema };
+        var paciente = new Paciente { TenantId = Tenant, NombreCompleto = "PAC", TipoDocumento = "CC", NumeroDocumento = "9" };
+        var valores = new Dictionary<string, string?>
+        {
+            ["tbl:t1:_rows"] = "2",
+            ["tbl:t1:0:c1"] = "G403 - EPILEPSIA",
+            ["tbl:t1:0:c2"] = "PRINCIPAL",
+            ["tbl:t1:1:c1"] = "Z931 - TRAQUEOSTOMIA",
+            ["tbl:t2:1:e2"] = "LEVE GRANULOMA",
+            ["sv"] = "TA: 89/52",
+            ["__tmpl:sv"] = "TA: 89/52",
+            ["nota"] = "TA: 89/52 editada por la auxiliar",
+            ["__tmpl:nota"] = "TA: 89/52",
+        };
+        var hc = new HistoriaClinica
+        {
+            TenantId = Tenant, PacienteId = paciente.Id, FormDefinitionId = form.Id,
+            Estado = HistoriaClinicaEstado.Abierta, FechaApertura = DateTimeOffset.UtcNow,
+            ValoresJson = JsonSerializer.Serialize(valores),
+        };
+        db.FormDefinitions.Add(form);
+        db.Pacientes.Add(paciente);
+        db.HistoriasClinicas.Add(hc);
+        await db.SaveChangesAsync();
+
+        var svc = new RevisionMcpToolsService(new TestDbContextFactory(db, tenant));
+        var r = await svc.EjecutarToolAsync(RevisionMcpToolNames.GetFormDefinition, hc.Id, RevisionMcpToolNames.Todas, 30);
+        Assert.True(r.Ok);
+
+        using var doc = JsonDocument.Parse(r.JsonPayload!);
+        var campos = doc.RootElement.GetProperty("campos").EnumerateArray().ToList();
+
+        var dx = campos.Single(c => c.GetProperty("Campo").GetString() == "Diagnosticos");
+        Assert.Equal("lleno", dx.GetProperty("Estado").GetString());
+        Assert.Contains("G403 - EPILEPSIA", dx.GetProperty("Valor").GetString());
+        Assert.Contains("Z931 - TRAQUEOSTOMIA", dx.GetProperty("Valor").GetString());
+        Assert.Contains("2 filas", dx.GetProperty("Tipo").GetString());
+
+        // Solo la fila CUELLO tiene dato capturado: CABEZA/TORAX son rotulos de plantilla.
+        var ex = campos.Single(c => c.GetProperty("Campo").GetString() == "Examen fisico");
+        Assert.Equal("lleno", ex.GetProperty("Estado").GetString());
+        var exVal = ex.GetProperty("Valor").GetString()!;
+        Assert.Contains("Sistema: CUELLO; Hallazgo: LEVE GRANULOMA", exVal);
+        Assert.DoesNotContain("CABEZA", exVal);
+
+        var vacia = campos.Single(c => c.GetProperty("Campo").GetString() == "Tabla vacia");
+        Assert.Equal("vacio", vacia.GetProperty("Estado").GetString());
+
+        // Plantilla sin editar -> AUTOGENERADO; editada a mano -> sin marca.
+        var sv = campos.Single(c => c.GetProperty("Campo").GetString() == "Signos vitales turno");
+        Assert.Contains("AUTOGENERADO", sv.GetProperty("Origen").GetString());
+        var nota = campos.Single(c => c.GetProperty("Campo").GetString() == "Nota");
+        Assert.False(nota.TryGetProperty("Origen", out _));
+    }
 }

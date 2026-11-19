@@ -131,4 +131,15 @@ public sealed record RelacionFacturasHecho(
     /// <summary>Nombre del "Tipo Usuario" del paciente (catalogo de Admision, primer tab;
     /// Paciente.TipoUsuarioId -> catalogos_paciente.nombre). Alimenta la columna "Regimen".
     /// Null si el paciente no tiene Tipo Usuario.</summary>
-    string? TipoUsuarioNombre = null);
+    string? TipoUsuarioNombre = null,
+    /// <summary>Resultado de la ULTIMA validacion del agente revisor IA sobre ESTA HC
+    /// (revision_agente_logs mas reciente con Ok y veredicto): "Aprobado" / "Rechazado".
+    /// Incluye la auditoria al cerrar, los intentos de cierre y las revisiones de Ordenes
+    /// Clinicas. Null si la HC nunca fue validada por el agente.</summary>
+    string? ValidacionIaResultado = null,
+    /// <summary>Confianza (0..1) de esa validacion IA.</summary>
+    decimal? ValidacionIaConfianza = null,
+    /// <summary>Cantidad de hallazgos de esa validacion IA (0 si no reporto ninguno).</summary>
+    int? ValidacionIaHallazgos = null,
+    /// <summary>Nota/concepto del agente en esa validacion IA.</summary>
+    string? ValidacionIaNota = null);

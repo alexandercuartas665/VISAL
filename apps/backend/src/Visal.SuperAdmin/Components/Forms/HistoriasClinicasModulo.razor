@@ -1184,6 +1184,18 @@
     .aud-sug-t { padding:8px 10px; font-size:12.5px; white-space:pre-wrap; color:#1e293b; }
     .aud-copy { border:1px solid #a5b4fc; background:#fff; color:#3730a3; border-radius:6px; font-size:11.5px; padding:2px 8px; cursor:pointer; }
     .aud-foot { display:flex; justify-content:flex-end; gap:8px; padding:12px 22px; border-top:1px solid #e2e8f0; background:#f8fafc; }
+    .aud-fb { margin-top:14px; padding-top:10px; border-top:1px dashed #cbd5e1; text-align:left; }
+    .aud-fb-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:12.5px; color:#475569; }
+    .aud-fb-btn { border:1px solid #cbd5e1; background:#fff; border-radius:999px; padding:2px 12px; font-size:17px; line-height:1.4; cursor:pointer; transition:transform .1s; }
+    .aud-fb-btn:hover { transform:scale(1.08); }
+    .aud-fb-btn:disabled { opacity:.6; cursor:default; transform:none; }
+    .aud-fb-up { background:#dcfce7; border-color:#16a34a; }
+    .aud-fb-down { background:#fee2e2; border-color:#dc2626; }
+    .aud-fb-ok { color:#15803d; font-weight:600; }
+    .aud-fb-err { color:#b91c1c; }
+    .aud-fb-box { margin-top:8px; }
+    .aud-fb-box textarea { width:100%; min-height:70px; font-size:12.5px; border:1px solid #cbd5e1; border-radius:6px; padding:6px 8px; }
+    .aud-fb-box-act { display:flex; justify-content:flex-end; gap:6px; margin-top:6px; }
 </style>
 
 @* ===== Auditoria IA al cerrar ("Guardar definitivamente") ===== *@
@@ -1218,9 +1230,16 @@
             <div class="aud-ok-wrap">
                 <div class="aud-ok-check">&#10004;</div>
                 <div class="aud-title">Aprobada por el auditor IA</div>
-                <div class="aud-sub">Confianza @((_audRes.Confianza * 100m).ToString("0"))%. Cerrando la historia...</div>
+                <div class="aud-sub">Confianza @((_audRes.Confianza * 100m).ToString("0"))%. @(_audCerradaOk ? "Historia cerrada." : "Cerrando la historia...")</div>
                 @if (!string.IsNullOrWhiteSpace(_audRes.Nota)) { <div class="aud-nota">@_audRes.Nota</div> }
+                @AudFeedback
             </div>
+            @if (_audCerradaOk)
+            {
+                <div class="aud-foot">
+                    <button class="btn btn-primary btn-sm" @onclick="CerrarModalAuditoriaAsync">Listo</button>
+                </div>
+            }
         }
         else if (_audFase == "rechazada" && _audRes is not null)
         {
@@ -1256,6 +1275,7 @@
                         </div>
                     }
                 }
+                @AudFeedback
             </div>
             <div class="aud-foot">
                 <button class="btn btn-outline-secondary btn-sm" disabled="@_audCerrando" @onclick="VolverACorregirAsync">&#9998; Volver a corregir</button>
@@ -3202,6 +3222,116 @@
     // Ultima auditoria hecha (hc + texto auditado + decision): si el cierre se interrumpe por el
     // token de fecha y se reintenta SIN cambios, se reusa en vez de volver a pagar la auditoria.
     private (Guid HcId, string Valores, Visal.Application.Revision.Ia.AuditoriaIaResultado Res, bool PeseRechazo)? _audReuso;
+    // Calificacion del usuario (pulgar arriba/abajo + que salio mal) -> log de la corrida.
+    private bool? _audFb;
+    private bool _audFbAbierto, _audFbGuardado, _audFbGuardando;
+    private string _audFbTexto = "";
+    private string? _audFbError;
+    private bool _audCerradaOk;   // aprobada: la HC ya cerro y el modal sigue para calificar
+
+    private RenderFragment AudFeedback => __builder =>
+    {
+        <div class="aud-fb">
+            <div class="aud-fb-row">
+                <span>&iquest;Te sirvi&oacute; esta revisi&oacute;n del auditor?</span>
+                <button type="button" class="aud-fb-btn @(_audFb == true ? "aud-fb-up" : "")" title="@AudFbTitArriba"
+                        disabled="@_audFbGuardando" @onclick="AudPulgarArribaAsync">&#128077;</button>
+                <button type="button" class="aud-fb-btn @(_audFb == false ? "aud-fb-down" : "")" title="@AudFbTitAbajo"
+                        disabled="@_audFbGuardando" @onclick="AudPulgarAbajoAsync">&#128078;</button>
+                @if (_audFbGuardado && !_audFbAbierto)
+                {
+                    <span class="aud-fb-ok">&iexcl;Gracias! Qued&oacute; registrado.</span>
+                }
+                @if (_audFbError is not null)
+                {
+                    <span class="aud-fb-err">@_audFbError</span>
+                }
+            </div>
+            @if (_audFbAbierto)
+            {
+                <div class="aud-fb-box">
+                    <textarea placeholder="@AudFbPlaceholder"
+                              maxlength="2000" @bind="_audFbTexto" @bind:event="oninput"></textarea>
+                    <div class="aud-fb-box-act">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => { _audFbAbierto = false; }">Omitir</button>
+                        <button type="button" class="btn btn-primary btn-sm" disabled="@(_audFbGuardando || string.IsNullOrWhiteSpace(_audFbTexto))"
+                                @onclick="AudEnviarComentarioAsync">Enviar comentario</button>
+                    </div>
+                </div>
+            }
+        </div>
+    };
+
+    // En atributos las entidades HTML se pintan literales: textos con escapes C# (archivo ASCII).
+    private const string AudFbTitArriba = "S\u00ed, me sirvi\u00f3";
+    private const string AudFbTitAbajo = "No, algo sali\u00f3 mal";
+    private const string AudFbPlaceholder = "\u00bfQu\u00e9 sali\u00f3 mal? Ej.: el hallazgo 2 no es cierto porque..., "
+        + "confundi\u00f3 la medicaci\u00f3n previa con la nueva...";
+
+    private void ResetFeedbackAuditoria()
+    {
+        _audFb = null; _audFbAbierto = false; _audFbGuardado = false; _audFbGuardando = false;
+        _audFbTexto = ""; _audFbError = null; _audCerradaOk = false;
+    }
+
+    private Task AudPulgarArribaAsync()
+    {
+        _audFb = true; _audFbAbierto = false;
+        return GuardarFeedbackAuditoriaAsync(true, null);
+    }
+
+    private Task AudPulgarAbajoAsync()
+    {
+        // Se guarda el pulgar de una vez (por si no escribe nada) y se abre la caja del comentario.
+        _audFb = false; _audFbAbierto = true;
+        return GuardarFeedbackAuditoriaAsync(false, string.IsNullOrWhiteSpace(_audFbTexto) ? null : _audFbTexto);
+    }
+
+    private async Task AudEnviarComentarioAsync()
+    {
+        await GuardarFeedbackAuditoriaAsync(false, _audFbTexto);
+        if (_audFbGuardado) { _audFbAbierto = false; }
+    }
+
+    /// <summary>Comentario escrito con pulgar abajo pero sin pulsar "Enviar": se guarda al salir.</summary>
+    private async Task GuardarFeedbackPendienteAsync()
+    {
+        if (_audFb == false && _audFbAbierto && !string.IsNullOrWhiteSpace(_audFbTexto))
+        {
+            await GuardarFeedbackAuditoriaAsync(false, _audFbTexto);
+        }
+    }
+
+    private async Task GuardarFeedbackAuditoriaAsync(bool util, string? comentario)
+    {
+        _audFbError = null;
+        if (_audRes?.LogId is not Guid logId)
+        {
+            _audFbError = "No se pudo registrar la calificaci\u00f3n (la corrida no qued\u00f3 en el log).";
+            return;
+        }
+        _audFbGuardando = true;
+        StateHasChanged();
+        try
+        {
+            _audFbGuardado = await PreIaSvc.RegistrarFeedbackAsync(logId, util, comentario, await ResolverActorAsync());
+            if (!_audFbGuardado) { _audFbError = "No se pudo registrar la calificaci\u00f3n."; }
+        }
+        catch (Exception ex)
+        {
+            Log.LogWarning(ex, "No se pudo guardar la calificacion de la auditoria IA");
+            _audFbGuardado = false;
+            _audFbError = "No se pudo registrar la calificaci\u00f3n.";
+        }
+        finally { _audFbGuardando = false; }
+    }
+
+    private async Task CerrarModalAuditoriaAsync()
+    {
+        await GuardarFeedbackPendienteAsync();
+        _audShow = false; _audFase = ""; _audRes = null; _audCerradaOk = false;
+        StateHasChanged();
+    }
 
     private async Task AuditarYCerrarAsync(HistoriaRow h, Visal.Application.Revision.Ia.AuditoriaCierreConfig cfg)
     {
@@ -3235,6 +3365,7 @@
 
         // 3) Auditoria con tope de tiempo.
         _audHc = h; _audRes = null; _audMsg = null; _audCerrando = false;
+        ResetFeedbackAuditoria();
         _audTimeout = cfg.TimeoutSeg; _audSeg = 0; _audPaso = 0;
         _audFase = "auditando"; _audShow = true;
         StateHasChanged();
@@ -3271,6 +3402,14 @@
             return;
         }
 
+        // El log de la corrida se guarda YA (sin ciclo): asi el usuario puede calificarla aunque
+        // decida corregir; al cerrar, ese mismo log se vincula al ciclo de revision.
+        try
+        {
+            if (await PreIaSvc.GuardarLogIntentoCierreAsync(res) is Guid logId) { res = res with { LogId = logId }; }
+        }
+        catch (Exception exLog) { Log.LogWarning(exLog, "No se pudo guardar el log del intento de cierre"); }
+
         _audRes = res;
         _audReuso = (h.Id, valoresJson, res, false);
         if (res.Resultado == Visal.Domain.Entities.RevisionResultado.Aprobado)
@@ -3278,7 +3417,13 @@
             _audFase = "aprobada";
             StateHasChanged();
             await Task.Delay(1800);
-            await CerrarYRegistrarAsync(peseRechazo: false);
+            await CerrarYRegistrarAsync(peseRechazo: false, mantenerModal: true);
+            if (!_audCerradaOk) { return; }
+            // La HC ya cerro sola; el modal queda unos segundos para calificar al auditor. Si el
+            // usuario abrio la caja de "que salio mal", espera a que envie / omita / pulse Listo.
+            await Task.Delay(9000);
+            while (_audShow && _audCerradaOk && (_audFbAbierto || _audFbGuardando)) { await Task.Delay(1000); }
+            if (_audShow && _audCerradaOk && ReferenceEquals(_audRes, res)) { await CerrarModalAuditoriaAsync(); }
             return;
         }
         _audFase = "rechazada";
@@ -3302,6 +3447,7 @@
 
     private async Task VolverACorregirAsync()
     {
+        await GuardarFeedbackPendienteAsync();
         if (_audHc is HistoriaRow h && _audRes is not null)
         {
             try { await PreIaSvc.RegistrarIntentoCierreAsync(h.Id, _audRes, await ResolverActorAsync()); }
@@ -3311,15 +3457,16 @@
         _audShow = false; _audFase = ""; _audRes = null;
     }
 
-    private Task CerrarDeTodasFormasAsync()
+    private async Task CerrarDeTodasFormasAsync()
     {
+        await GuardarFeedbackPendienteAsync();
         if (_audReuso is { } r) { _audReuso = (r.HcId, r.Valores, r.Res, true); }
-        return CerrarYRegistrarAsync(peseRechazo: true);
+        await CerrarYRegistrarAsync(peseRechazo: true);
     }
 
     /// <summary>Cierra la HC (sin pre-revision en segundo plano: ya se audito) y registra el MISMO
     /// resultado en el ciclo de revision, para que Ordenes Clinicas no reprocese.</summary>
-    private async Task CerrarYRegistrarAsync(bool peseRechazo)
+    private async Task CerrarYRegistrarAsync(bool peseRechazo, bool mantenerModal = false)
     {
         if (_audHc is not HistoriaRow h || _audRes is null) { _audShow = false; return; }
         _audCerrando = true;
@@ -3350,7 +3497,9 @@
         try { await PreIaSvc.RegistrarAuditoriaCierreAsync(h.Id, _audRes, peseRechazo, actor); }
         catch (Exception ex) { Log.LogWarning(ex, "No se pudo registrar la auditoria IA del cierre"); }
         _audReuso = null;
-        _audShow = false; _audFase = ""; _audRes = null; _audCerrando = false;
+        _audCerrando = false;
+        if (mantenerModal) { _audCerradaOk = true; }
+        else { _audShow = false; _audFase = ""; _audRes = null; }
         LimpiarTrasCierre();
         StateHasChanged();
     }

@@ -9614,6 +9614,22 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("error");
 
+                    b.Property<string>("FeedbackComentario")
+                        .HasColumnType("text")
+                        .HasColumnName("feedback_comentario");
+
+                    b.Property<DateTimeOffset?>("FeedbackEn")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("feedback_en");
+
+                    b.Property<Guid?>("FeedbackUsuarioId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("feedback_usuario_id");
+
+                    b.Property<bool?>("FeedbackUtil")
+                        .HasColumnType("boolean")
+                        .HasColumnName("feedback_util");
+
                     b.Property<string>("HallazgosJson")
                         .HasColumnType("text")
                         .HasColumnName("hallazgos_json");
@@ -9649,7 +9665,7 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("resultado");
 
-                    b.Property<Guid>("RevisionClinicaId")
+                    b.Property<Guid?>("RevisionClinicaId")
                         .HasColumnType("uuid")
                         .HasColumnName("revision_clinica_id");
 

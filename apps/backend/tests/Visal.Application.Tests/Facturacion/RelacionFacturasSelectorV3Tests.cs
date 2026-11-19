@@ -337,4 +337,48 @@ public sealed class RelacionFacturasSelectorV3Tests
         Assert.Single(hechos);
         Assert.Equal("7300103531", hechos[0].CodigoHabilitacionResuelto);
     }
+
+    /// <summary>
+    /// IMP-49: el snapshot lleva la ULTIMA validacion del agente revisor IA de cada HC
+    /// (log Ok con veredicto mas reciente; los logs fallidos no cuentan). HC sin validacion -> vacio.
+    /// </summary>
+    [Fact]
+    public async Task Validacion_IA_toma_el_ultimo_veredicto_del_agente_por_HC()
+    {
+        var s = await SembrarBaseAsync();
+        var pid = await SembrarPacienteAsync(s, s.ContratoId, s.SucursalId);
+        var hc1 = await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 7, 15, 10, 0, 0, TimeSpan.Zero));
+        var hc2 = await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 7, 16, 10, 0, 0, TimeSpan.Zero));
+
+        var t0 = new DateTimeOffset(2026, 7, 15, 11, 0, 0, TimeSpan.Zero);
+        var logs = new[]
+        {
+            // Intento de cierre rechazado (el profesional corrigio): queda viejo.
+            new RevisionAgenteLog { Id = Guid.NewGuid(), TenantId = TenantId, HistoriaClinicaId = hc1, AgenteCodigo = "REVISOR",
+                Ok = true, Resultado = "Rechazado", Confianza = 0.72m, Nota = "vieja", HallazgosJson = "[{},{},{}]" },
+            // Validacion vigente.
+            new RevisionAgenteLog { Id = Guid.NewGuid(), TenantId = TenantId, HistoriaClinicaId = hc1, AgenteCodigo = "REVISOR",
+                Ok = true, Resultado = "Aprobado", Confianza = 0.835m, Nota = "Historia coherente", HallazgosJson = "[{\"campo\":\"a\"},{\"campo\":\"b\"}]" },
+            // Corrida fallida mas reciente: se ignora.
+            new RevisionAgenteLog { Id = Guid.NewGuid(), TenantId = TenantId, HistoriaClinicaId = hc1, AgenteCodigo = "REVISOR",
+                Ok = false, Error = "timeout" },
+        };
+        s.Ctx.RevisionAgenteLogs.AddRange(logs);
+        await s.Ctx.SaveChangesAsync();
+        for (var i = 0; i < logs.Length; i++) { logs[i].CreatedAt = t0.AddMinutes(i); }
+        await s.Ctx.SaveChangesAsync();
+
+        var sel = new RelacionFacturasSelector(new TestDbContextFactory(s.Ctx, new FakeTenantContext { TenantId = TenantId }));
+        var hechos = await sel.SelectAsync(Filtros(s, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31)));
+
+        var h1 = hechos.Single(h => h.Hc.Id == hc1);
+        Assert.Equal("Aprobado", h1.ValidacionIaResultado);
+        Assert.Equal(0.835m, h1.ValidacionIaConfianza);
+        Assert.Equal(2, h1.ValidacionIaHallazgos);
+        Assert.Equal("Historia coherente", h1.ValidacionIaNota);
+
+        var h2 = hechos.Single(h => h.Hc.Id == hc2);
+        Assert.Null(h2.ValidacionIaResultado);
+        Assert.Null(h2.ValidacionIaConfianza);
+    }
 }

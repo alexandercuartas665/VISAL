@@ -248,10 +248,10 @@ else if (_policy is not null)
             <div class="rp-grid" style="margin-top:12px;">
                 <div class="rp-field">
                     <label>Tiempo máximo de espera (segundos)</label>
-                    <input type="number" class="form-control form-control-sm" min="30" max="180" step="5"
+                    <input type="number" class="form-control form-control-sm" min="30" max="300" step="5"
                            disabled="@(!_policy.AuditoriaIaAlCerrar)"
                            @bind="_policy.AuditoriaIaTimeoutSeg" />
-                    <small class="rp-help-sm">Si la auditoría tarda más, la historia se cierra normal y la auditoría sigue en segundo plano. Default 90.</small>
+                    <small class="rp-help-sm">Si la auditoría tarda más, la historia se cierra normal y la auditoría sigue en segundo plano. Default 180 (m&aacute;ximo 300).</small>
                 </div>
                 <div class="rp-field">
                     <label>Formatos que se auditan al cerrar (@(_formatosSel.Count == 0 ? "todos" : _formatosSel.Count.ToString()))</label>
@@ -321,7 +321,7 @@ else if (_policy is not null)
         public int HistorialMaxCompletas { get; set; } = 30;
         public int HistorialMaxTokens { get; set; } = 60000;
         public bool AuditoriaIaAlCerrar { get; set; }
-        public int AuditoriaIaTimeoutSeg { get; set; } = 90;
+        public int AuditoriaIaTimeoutSeg { get; set; } = 180;
     }
 
     private PolicyModel? _policy;

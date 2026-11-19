@@ -44,6 +44,9 @@ public sealed record AuditoriaIaResultado(
 {
     public Guid HistoriaClinicaId { get; init; }
     public AuditoriaIaTraza? Traza { get; init; }
+    /// <summary>Log ya guardado para esta corrida (intento de cierre). Al registrar el cierre se
+    /// vincula ese mismo log al ciclo en vez de crear otro.</summary>
+    public Guid? LogId { get; init; }
 
     public static AuditoriaIaResultado Fallo(Guid hcId, string error, int inTok = 0, int outTok = 0, AuditoriaIaTraza? traza = null)
         => new(false, error, null, 0m, null, Array.Empty<string>(), Array.Empty<SugerenciaTexto>(), inTok, outTok)
@@ -97,6 +100,15 @@ public interface IPreRevisionIaService
     /// auditado (veredicto + log + sugerencias + adopcion automatica), sin llamar al proveedor.</summary>
     Task<PreRevisionIaResult> RegistrarAuditoriaCierreAsync(
         Guid historiaClinicaId, AuditoriaIaResultado auditoria, bool cerradaPeseARechazo, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Guarda el log de la corrida apenas termina la auditoria al cerrar (sin ciclo de
+    /// revision todavia), para que el usuario pueda calificarla aunque decida corregir. Devuelve el
+    /// Id del log o null si no aplica / no se pudo.</summary>
+    Task<Guid?> GuardarLogIntentoCierreAsync(AuditoriaIaResultado auditoria, CancellationToken ct = default);
+
+    /// <summary>Calificacion del usuario sobre una corrida del agente (pulgar arriba/abajo + que
+    /// salio mal). Queda en el log de esa corrida.</summary>
+    Task<bool> RegistrarFeedbackAsync(Guid logId, bool util, string? comentario, Guid actor, CancellationToken ct = default);
 
     /// <summary>Intento de cierre que el profesional decidio corregir: solo queda en auditoria (metricas).</summary>
     Task RegistrarIntentoCierreAsync(Guid historiaClinicaId, AuditoriaIaResultado auditoria, Guid actor, CancellationToken ct = default);

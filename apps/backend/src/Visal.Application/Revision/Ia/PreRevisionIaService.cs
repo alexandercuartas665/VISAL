@@ -188,7 +188,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         {
             if (a.Traza is not null)
             {
-                await GuardarAgenteLogAsync(db, revision, a.Traza,
+                await GuardarAgenteLogAsync(db, revision.TenantId, revision.Id, revision.HistoriaClinicaId, a.Traza,
                     ok: false, error: a.Error, resultado: null, confianza: null,
                     a.InputTokens, a.OutputTokens, ct);
             }
@@ -215,9 +215,12 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
 
         // Log completo del agente (que recibio, que proceso hizo, que respondio) para el
         // panel "Log del agente". Best-effort: nunca rompe la revision ya registrada.
-        if (a.Traza is not null)
+        // Si la corrida ya quedo guardada como intento de cierre (Atencion), se VINCULA ese mismo
+        // log al ciclo (conserva la calificacion del usuario) en vez de duplicarlo.
+        var vinculado = a.LogId is Guid logId && await VincularLogAsync(db, logId, revision.Id, ct);
+        if (!vinculado && a.Traza is not null)
         {
-            await GuardarAgenteLogAsync(db, revision, a.Traza,
+            await GuardarAgenteLogAsync(db, revision.TenantId, revision.Id, revision.HistoriaClinicaId, a.Traza,
                 ok: true, error: null, resultado: resultado.ToString(), confianza: a.Confianza,
                 a.InputTokens, a.OutputTokens, ct,
                 nota: a.Nota, hallazgos: a.Hallazgos, sugerencias: a.Sugerencias);
@@ -265,7 +268,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
                 return null;
             }
         }
-        return new AuditoriaCierreConfig(Math.Clamp(policy.AuditoriaIaTimeoutSeg, 30, 180));
+        return new AuditoriaCierreConfig(Math.Clamp(policy.AuditoriaIaTimeoutSeg, 30, 300));
     }
 
     public async Task<PreRevisionIaResult> RegistrarAuditoriaCierreAsync(
@@ -292,6 +295,53 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
                 revisionId = rev.Id,
             }, ct);
         return res;
+    }
+
+    public async Task<Guid?> GuardarLogIntentoCierreAsync(AuditoriaIaResultado auditoria, CancellationToken ct = default)
+    {
+        if (!auditoria.Ok || auditoria.Traza is null || auditoria.Resultado is null) { return null; }
+        if (auditoria.LogId is Guid ya) { return ya; }
+        using var db = _dbFactory.Create();
+        var tenantId = await db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.Id == auditoria.HistoriaClinicaId).Select(h => (Guid?)h.TenantId).FirstOrDefaultAsync(ct);
+        if (tenantId is null) { return null; }
+        return await GuardarAgenteLogAsync(db, tenantId.Value, null, auditoria.HistoriaClinicaId, auditoria.Traza,
+            ok: true, error: null, resultado: auditoria.Resultado.ToString(), confianza: auditoria.Confianza,
+            auditoria.InputTokens, auditoria.OutputTokens, ct,
+            nota: auditoria.Nota, hallazgos: auditoria.Hallazgos, sugerencias: auditoria.Sugerencias);
+    }
+
+    public async Task<bool> RegistrarFeedbackAsync(Guid logId, bool util, string? comentario, Guid actor, CancellationToken ct = default)
+    {
+        using var db = _dbFactory.Create();
+        var log = await db.RevisionAgenteLogs.FirstOrDefaultAsync(x => x.Id == logId, ct);
+        if (log is null) { return false; }
+        var txt = string.IsNullOrWhiteSpace(comentario) ? null : comentario.Trim();
+        if (txt is { Length: > MaxFeedbackChars }) { txt = txt[..MaxFeedbackChars]; }
+        log.FeedbackUtil = util;
+        log.FeedbackComentario = txt;
+        log.FeedbackUsuarioId = actor == Guid.Empty ? null : actor;
+        log.FeedbackEn = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        await AuditarEventoAsync(actor, log.HistoriaClinicaId, "revision-ia.feedback",
+            new { logId, util, conComentario = txt is not null }, ct);
+        return true;
+    }
+
+    /// <summary>Tope del comentario del usuario al calificar al agente.</summary>
+    public const int MaxFeedbackChars = 2000;
+
+    private static async Task<bool> VincularLogAsync(IApplicationDbContext db, Guid logId, Guid revisionId, CancellationToken ct)
+    {
+        try
+        {
+            var log = await db.RevisionAgenteLogs.FirstOrDefaultAsync(x => x.Id == logId, ct);
+            if (log is null) { return false; }
+            log.RevisionClinicaId = revisionId;
+            await db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch { return false; }
     }
 
     public Task RegistrarIntentoCierreAsync(Guid historiaClinicaId, AuditoriaIaResultado auditoria, Guid actor, CancellationToken ct = default)
@@ -485,6 +535,26 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         sb.AppendLine("- NO GENERES RUIDO: no reportes como hallazgo que algo narrado en el texto (escalas, ordenes,");
         sb.AppendLine("  procedimientos) no este registrado ademas en OTRO modulo del sistema si el formato no lo exige.");
         sb.AppendLine("  Errores de digitacion solo son hallazgo si cambian el sentido clinico o hacen ilegible el dato.");
+        sb.AppendLine("- TEXTO DE PLANTILLA (regla dura): en get_form_definition, los campos con 'origen' AUTOGENERADO los");
+        sb.AppendLine("  arma el FORMATO a partir de otros campos (p.ej. el renglon 'TA: .. FC: .. SpO2: ..' armado desde");
+        sb.AppendLine("  los signos vitales). Las claves '__tmpl:...' de ValoresJson son copias internas del sistema:");
+        sb.AppendLine("  IGNORALAS. Que un texto AUTOGENERADO se repita igual en varios turnos o secciones NO es copia/pega");
+        sb.AppendLine("  ni falta del profesional. Lo que SI evaluas es el CONTENIDO clinico de esos valores (p.ej. una");
+        sb.AppendLine("  TA o SpO2 fuera de rango registrada como 'estable').");
+        sb.AppendLine("- MEDICACION PREVIA vs NUEVA FORMULACION (regla dura): distingue la medicacion que el paciente");
+        sb.AppendLine("  VENIA tomando (textos como 'en manejo con', 'medicamentos actuales', 'antecedentes farmacologicos',");
+        sb.AppendLine("  conciliacion) de lo que se FORMULA en esta atencion (plan, formula, tabla de medicamentos).");
+        sb.AppendLine("  Suspender, cambiar de molecula (p.ej. omeprazol -> esomeprazol) o ajustar dosis/esquema frente a");
+        sb.AppendLine("  lo previo es una DECISION MEDICA, NO una contradiccion: a lo sumo una observacion menor sugiriendo");
+        sb.AppendLine("  dejar escrito el motivo del cambio, nunca motivo de rechazo. SI es hallazgo cuando DENTRO de la");
+        sb.AppendLine("  nueva formulacion el MISMO medicamento aparece con posologias distintas, o cuando el plan nombra");
+        sb.AppendLine("  un medicamento/examen que no aparece en la formula u ordenes de esta misma historia.");
+        sb.AppendLine("- CALIFICADORES DE TIEMPO Y CONDICION: lee completos los calificadores ('en el dia', 'nocturno',");
+        sb.AppendLine("  'en reposo', 'durante la visita', 'al momento', 'previo', 'por ahora'). Antes de reportar una");
+        sb.AppendLine("  contradiccion verifica que ambos textos hablen del MISMO momento, condicion y sujeto: 'sin oxigeno");
+        sb.AppendLine("  en el dia, ni VMI' NO contradice el uso de VMI nocturna. Ante la duda, NO es contradiccion.");
+        sb.AppendLine("- TABLAS DEL FORMATO: en get_form_definition cada tabla trae sus filas diligenciadas en 'Valor'");
+        sb.AppendLine("  (tipo 'tabla (N filas diligenciadas)'). Una tabla solo esta vacia si su 'estado' es 'vacio'.");
         sb.AppendLine("- Las historias del historial con estado 'Abierta - en curso' son contexto PROVISIONAL: no bases un");
         sb.AppendLine("  rechazo solo en ellas. 'documentos' trae las historias anteriores COMPLETAS (las mas recientes);");
         sb.AppendLine("  'indice' lista el resto en una linea cada una: solo prueban que la atencion existio, no infieras");
@@ -595,10 +665,12 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         });
     }
 
-    /// <summary>Persiste el log completo de una corrida del agente (best-effort). Nunca lanza.</summary>
-    private async Task GuardarAgenteLogAsync(
+    /// <summary>Persiste el log completo de una corrida del agente (best-effort). Nunca lanza.
+    /// <paramref name="revisionId"/> null = intento de cierre todavia sin ciclo de revision.
+    /// Devuelve el Id del log (null si no se pudo guardar).</summary>
+    private async Task<Guid?> GuardarAgenteLogAsync(
         IApplicationDbContext db,
-        RevisionClinica revision, AuditoriaIaTraza traza,
+        Guid tenantId, Guid? revisionId, Guid historiaClinicaId, AuditoriaIaTraza traza,
         bool ok, string? error, string? resultado, decimal? confianza,
         int tokensIn, int tokensOut, CancellationToken ct,
         string? nota = null, IReadOnlyList<string>? hallazgos = null,
@@ -607,7 +679,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         var contexto = traza.Contexto;
         try
         {
-            var camposJson = await BuildCamposLegiblesAsync(db, revision.HistoriaClinicaId, ct);
+            var camposJson = await BuildCamposLegiblesAsync(db, historiaClinicaId, ct);
             string? toolsJson = null;
             if (contexto is not null)
             {
@@ -618,11 +690,11 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
                     .ToList();
                 toolsJson = JsonSerializer.Serialize(tools, new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
             }
-            db.RevisionAgenteLogs.Add(new RevisionAgenteLog
+            var log = new RevisionAgenteLog
             {
-                TenantId = revision.TenantId,
-                RevisionClinicaId = revision.Id,
-                HistoriaClinicaId = revision.HistoriaClinicaId,
+                TenantId = tenantId,
+                RevisionClinicaId = revisionId,
+                HistoriaClinicaId = historiaClinicaId,
                 AgenteCodigo = traza.AgenteNombre,
                 Proveedor = traza.Proveedor,
                 Modelo = traza.Modelo,
@@ -645,10 +717,12 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
                 CamposLegiblesJson = camposJson,
                 ToolsJson = toolsJson,
                 RespuestaCruda = traza.RespuestaCruda,
-            });
+            };
+            db.RevisionAgenteLogs.Add(log);
             await db.SaveChangesAsync(ct);
+            return log.Id;
         }
-        catch { /* el log es best-effort; nunca romper la revision */ }
+        catch { return null; /* el log es best-effort; nunca romper la revision */ }
     }
 
     /// <summary>HC legible como JSON { "label del campo": "contenido" } cruzando ValoresJson con el

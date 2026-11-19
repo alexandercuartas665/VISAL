@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
@@ -364,7 +365,10 @@ public sealed partial class RevisionMcpToolsService : IRevisionMcpToolsService
         return JsonSerializer.Serialize(payload, JsonOpts);
     }
 
-    private sealed record CampoCatalogo(string Campo, string? Name, string Tipo, bool Requerido, string Estado, string? Valor);
+    private sealed record CampoCatalogo(string Campo, string? Name, string Tipo, bool Requerido, string Estado, string? Valor, string? Origen = null);
+    /// <summary>Marca de campo armado por la plantilla del formato (no redactado por el profesional).</summary>
+    public const string OrigenPlantilla = "AUTOGENERADO por la plantilla del formato a partir de otros campos "
+        + "(no lo redacto el profesional). Si se repite igual en varios turnos o secciones NO es copia/pega.";
     private sealed record FechaAtencionCampo(string Campo, string? Name, string? Valor);
     private sealed record CatalogoResult(List<CampoCatalogo> Campos, List<FechaAtencionCampo> HeaderFechas, List<FechaAtencionCampo> CuerpoFechas);
 
@@ -425,13 +429,38 @@ public sealed partial class RevisionMcpToolsService : IRevisionMcpToolsService
             {
                 if (n.IsSection) { Recurse(n.Children); continue; }
                 if (n.IsText) { continue; }
+                if (n.IsTable)
+                {
+                    // Las tablas NO guardan su valor bajo n.Name: cada celda vive en
+                    // "tbl:{id}:{fila}:{colId}". Antes se buscaba n.Name y TODA tabla salia
+                    // "vacio" (hallazgos falsos tipo "la tabla Diagnosticos esta vacia").
+                    var labelT = !string.IsNullOrWhiteSpace(n.Label) ? n.Label!
+                        : !string.IsNullOrWhiteSpace(n.Name) ? n.Name! : "Tabla";
+                    var (txt, filas) = LeerTabla(n, valores, Math.Max(maxChars, 1500));
+                    campos.Add(new CampoCatalogo(
+                        labelT, n.Name ?? ("tbl:" + n.Id), $"tabla ({filas} filas diligenciadas)",
+                        n.Required, filas > 0 ? "lleno" : "vacio", txt));
+                    continue;
+                }
                 if (string.IsNullOrWhiteSpace(n.Name)) { continue; }
                 var val = ValorDe(n.Name!);
                 var label = string.IsNullOrWhiteSpace(n.Label) ? n.Name! : n.Label!;
+                // Texto que el FORMATO arma solo (FormulaTemplate, p.ej. "TA: x/y FC: ..." desde los
+                // signos vitales): el espejo "__tmpl:{name}" guarda lo expandido; si coincide con el
+                // valor, el profesional no lo escribio ni lo edito.
+                string? origen = null;
+                if (!string.IsNullOrWhiteSpace(n.FormulaTemplate)
+                    && valores.TryGetValue("__tmpl:" + n.Name, out var espejo)
+                    && !string.IsNullOrWhiteSpace(espejo)
+                    && valores.TryGetValue(n.Name!, out var actual)
+                    && string.Equals(espejo, actual, StringComparison.Ordinal))
+                {
+                    origen = OrigenPlantilla;
+                }
                 campos.Add(new CampoCatalogo(
                     label, n.Name,
                     string.IsNullOrWhiteSpace(n.FieldType) ? "text" : n.FieldType!,
-                    n.Required, val is null ? "vacio" : "lleno", val));
+                    n.Required, val is null ? "vacio" : "lleno", val, origen));
                 // Fecha de atencion reportada en el cuerpo: campos marcados IsFechaAtencion.
                 if (n.IsFechaAtencion)
                 {
@@ -442,5 +471,58 @@ public sealed partial class RevisionMcpToolsService : IRevisionMcpToolsService
         Recurse(schema.Children);
 
         return new CatalogoResult(campos, headerFechas, cuerpoFechas);
+    }
+
+    /// <summary>Lee las filas de una tabla del formato desde <paramref name="valores"/> (claves
+    /// "tbl:{id}:{fila}:{colId}", mismo criterio que la impresion). Una fila cuenta como
+    /// diligenciada solo si tiene alguna celda CAPTURADA (las celdas fijas de la plantilla
+    /// -seedRows- son rotulos, no datos). Devuelve el texto "Col: valor; Col: valor" por fila
+    /// (null si no hay filas) y cuantas filas tienen datos.</summary>
+    public static (string? Texto, int Filas) LeerTabla(FormNode tabla, IReadOnlyDictionary<string, string?> valores, int maxChars = 1500)
+    {
+        var cols = tabla.Columns ?? new List<FormColumn>();
+        if (cols.Count == 0) { return (null, 0); }
+        var key = $"tbl:{tabla.Id}";
+        var seed = tabla.SeedRows?.Count ?? 0;
+        var extra = valores.TryGetValue($"{key}:_rows", out var rs) && int.TryParse(rs, out var p) && p > 0 ? p : 0;
+        // Defensivo (igual que HcDiagnosticosReader): si _rows no esta seteado se escanea una
+        // ventana amplia para no perder filas capturadas.
+        var scanMax = Math.Max(seed + extra, 60);
+
+        var sb = new StringBuilder();
+        var filas = 0;
+        for (var i = 0; i < scanMax; i++)
+        {
+            var seedRow = i < seed ? tabla.SeedRows![i] : null;
+            if (seedRow is not null && tabla.SeedRowBanner is not null && tabla.SeedRowBanner.ContainsKey(i.ToString()))
+            {
+                continue; // fila-titulo de la plantilla
+            }
+            var partes = new List<string>();
+            var capturada = false;
+            for (var c = 0; c < cols.Count; c++)
+            {
+                var col = cols[c];
+                if (string.Equals(col.FieldType, "calculated", StringComparison.OrdinalIgnoreCase)) { continue; }
+                var seedVal = seedRow is not null && c < seedRow.Count ? seedRow[c] : null;
+                string? val;
+                if (!string.IsNullOrWhiteSpace(seedVal)) { val = seedVal; }
+                else
+                {
+                    val = valores.TryGetValue($"{key}:{i}:{col.Id}", out var v) ? v : null;
+                    if (!string.IsNullOrWhiteSpace(val)) { capturada = true; }
+                }
+                if (string.IsNullOrWhiteSpace(val)) { continue; }
+                var lbl = string.IsNullOrWhiteSpace(col.Label) ? (col.Name ?? col.Id) : col.Label;
+                partes.Add($"{lbl}: {val!.Trim()}");
+            }
+            if (!capturada) { continue; }
+            filas++;
+            if (sb.Length > 0) { sb.Append('\n'); }
+            sb.Append(filas).Append(") ").Append(string.Join("; ", partes));
+        }
+        if (filas == 0) { return (null, 0); }
+        var s = sb.ToString();
+        return (s.Length > maxChars ? s[..maxChars] + "..." : s, filas);
     }
 }

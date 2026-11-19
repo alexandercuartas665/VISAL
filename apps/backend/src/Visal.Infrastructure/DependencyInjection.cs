@@ -66,7 +66,10 @@ public static class DependencyInjection
         services.AddScoped<WhatsApp.EvolutionWhatsAppProvider>();
         services.AddScoped<WhatsApp.GupshupWhatsAppProvider>();
         services.AddScoped<Application.Tenancy.WhatsApp.IWhatsAppProviderResolver, WhatsApp.WhatsAppProviderResolver>();
-        services.AddHttpClient<Visal.Application.Tenancy.IAiProviderClient, Ai.AiProviderClient>();
+        // Timeout HTTP del proveedor IA: el default de HttpClient (100 s) cortaba auditorias clinicas
+        // grandes (~90K tokens de entrada). Cada llamador acota con su propio CancellationToken.
+        services.AddHttpClient<Visal.Application.Tenancy.IAiProviderClient, Ai.AiProviderClient>(
+            c => c.Timeout = TimeSpan.FromMinutes(5));
         services.AddHttpClient<Visal.Application.Auth.IGoogleOAuthClient, Auth.GoogleOAuthClient>();
         services.AddScoped<DatabaseSeeder>();
         services.AddScoped<Visal.Application.Tenancy.ISqlConsoleService, Sql.SqlConsoleService>();

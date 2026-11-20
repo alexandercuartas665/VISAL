@@ -32,6 +32,14 @@
         los adjuntos de notas medicas y las firmas capturadas por WhatsApp.
     </div>
 
+    @* Filtro principal: archivos que aun no estan enlazados a ninguna historia clinica
+       (sincronizado con el selector "Historia"). *@
+    <label class="docg-sinhc @(SoloSinEnlace ? "on" : "")">
+        <input type="checkbox" @bind="SoloSinEnlace" @bind:after="BuscarDesdeInicioAsync" />
+        <span>&#128279; Solo documentos sin enlace a historia medica</span>
+        <small>Muestra los archivos sueltos para enlazarlos con el boton "Enlazar".</small>
+    </label>
+
     <div class="docg-filtros">
         <div class="docg-f">
             <label>Tipologia</label>
@@ -67,7 +75,7 @@
             <select class="form-select form-select-sm" @bind="_fHistoria" @bind:after="BuscarDesdeInicioAsync">
                 <option value="">(todas)</option>
                 <option value="con">Con historia</option>
-                <option value="sin">Sin historia (por enlazar)</option>
+                <option value="sin">Sin enlace a historia</option>
             </select>
         </div>
         <div class="docg-f">
@@ -282,6 +290,10 @@
 <DocumentoEnlazarHcModal Documento="_docLink" OnCerrar="() => _docLink = null" OnEnlazado="OnEnlazadoAsync" />
 
 <style>
+    .docg-sinhc { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 12px; margin-bottom: 12px; border: 1px solid #93c5fd; background: #eff6ff; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; color: #1e3a8a; }
+    .docg-sinhc input { width: 16px; height: 16px; }
+    .docg-sinhc small { font-weight: 400; color: #475569; font-size: 11.5px; }
+    .docg-sinhc.on { background: #dbeafe; border-color: #3b82f6; }
     .docg-filtros { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 12px; }
     .docg-f label { font-size: 11px; font-weight: 600; color: #334155; margin-bottom: 3px; display: block; }
     .docg-f select, .docg-f input { min-width: 140px; }
@@ -332,6 +344,13 @@
 
     // Modales compartidos (null = cerrado)
     private DocumentoPacienteDto? _visorDoc, _docEdit, _docLink;
+
+    /// <summary>Casilla "Solo documentos sin enlace a historia medica" = filtro Historia "sin".</summary>
+    private bool SoloSinEnlace
+    {
+        get => _fHistoria == "sin";
+        set => _fHistoria = value ? "sin" : "";
+    }
 
     private int TotalPaginas => Math.Max(1, (int)Math.Ceiling(_total / (double)_tamPagina));
 

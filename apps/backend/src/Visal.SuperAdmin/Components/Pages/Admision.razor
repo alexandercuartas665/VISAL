@@ -752,6 +752,17 @@
                                             {
                                                 <div class="pac-doc-obs" title="Observacion">&#128221; @d.Anotaciones</div>
                                             }
+                                            <div class="pac-doc-card-meta" @onclick:stopPropagation="true">
+                                                @if (!string.IsNullOrWhiteSpace(d.CodigoHc))
+                                                {
+                                                    <span class="pac-doc-hc" title="@TituloHc(d)">&#128203; @d.CodigoHc</span>
+                                                }
+                                                else if (d.EsLibre)
+                                                {
+                                                    <button class="btn btn-link btn-sm p-0 pac-doc-hc-link" title="Enlazar este archivo a una historia clinica del paciente"
+                                                            @onclick="() => AbrirEnlazarHcAsync(d)" @onclick:stopPropagation="true">&#128279; Enlazar a historia</button>
+                                                }
+                                            </div>
                                         </div>
                                     </div>
                                 }
@@ -765,6 +776,7 @@
                                         <tr>
                                             <th>Categoria</th>
                                             <th>Nombre del archivo</th>
+                                            <th title="Historia clinica de la que viene el archivo">Historia</th>
                                             <th>Nota</th>
                                             <th>Fecha nota</th>
                                             <th>Fecha doc</th>
@@ -802,6 +814,24 @@
                                                     {
                                                         <div class="text-muted" style="font-size:11px;" title="Observacion">&#128221; @d.Anotaciones</div>
                                                     }
+                                                </td>
+                                                <td style="white-space:nowrap;">
+                                                    @* HC de origen del archivo (directa o via la nota medica). Si es un archivo
+                                                       suelto del paciente, se puede enlazar a una de sus historias. *@
+                                                    @if (!string.IsNullOrWhiteSpace(d.CodigoHc))
+                                                    {
+                                                        <span class="pac-doc-hc" title="@TituloHc(d)">@d.CodigoHc</span>
+                                                        @if (d.FechaAtencionHc is DateTimeOffset fah)
+                                                        {
+                                                            <div class="text-muted" style="font-size:11px;">Atencion @fah.ToOffset(Bog).ToString("dd/MM/yyyy")</div>
+                                                        }
+                                                    }
+                                                    else if (d.EsLibre)
+                                                    {
+                                                        <button class="btn btn-sm pac-doc-hc-btn" title="Enlazar este archivo a una historia clinica del paciente"
+                                                                @onclick="() => AbrirEnlazarHcAsync(d)">&#128279; Enlazar</button>
+                                                    }
+                                                    else { <span class="text-muted">-</span> }
                                                 </td>
                                                 <td>
                                                     @if (!string.IsNullOrWhiteSpace(d.CodigoNota))
@@ -1029,6 +1059,116 @@
     </div>
 }
 
+@* ===== Modal: enlazar un archivo suelto del paciente a una de sus historias clinicas ===== *@
+@if (_docLink is not null)
+{
+    <div class="doc-edit-backdrop" @onclick="CerrarEnlazarHc"></div>
+    <div class="doc-edit" style="width:min(820px, 96vw);">
+        <div class="doc-edit-head">
+            <strong>Enlazar a una historia clinica</strong>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarEnlazarHc">&times;</button>
+        </div>
+        <div class="doc-edit-name" title="@_docLink.NombreOriginal">
+            @_docLink.NombreOriginal
+            @if (_docLink.FechaDocumento is DateTimeOffset fdl)
+            {
+                <span class="text-muted" style="font-weight:400;"> &middot; fecha del documento @fdl.ToOffset(Bog).ToString("dd/MM/yyyy")</span>
+            }
+        </div>
+        <div class="doc-edit-body">
+            <div class="doc-link-filtros">
+                <div>
+                    <label class="doc-edit-lbl">Atencion desde</label>
+                    <input type="date" class="form-control form-control-sm" @bind="_lnkDesde" />
+                </div>
+                <div>
+                    <label class="doc-edit-lbl">Atencion hasta</label>
+                    <input type="date" class="form-control form-control-sm" @bind="_lnkHasta" />
+                </div>
+                <div style="flex:1;min-width:200px;">
+                    <label class="doc-edit-lbl">Buscar</label>
+                    <input type="text" class="form-control form-control-sm" placeholder="HC, formato, profesional o fecha (dd/mm/aaaa)"
+                           @bind="_lnkFiltro" @bind:event="oninput" />
+                </div>
+            </div>
+            <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;margin-top:6px;">
+                <input type="checkbox" @bind="_lnkSoloSinFirmas" />
+                Mostrar solo historias sin lista de firmas
+            </label>
+            @if (_lnkBusy && _lnkHcs.Count == 0)
+            {
+                <div class="ase-empty"><em>Cargando historias...</em></div>
+            }
+            else if (_lnkHcs.Count == 0)
+            {
+                <div class="ase-empty">El paciente no tiene historias clinicas activas para enlazar.</div>
+            }
+            else
+            {
+                var lista = HcsEnlazablesFiltradas();
+                <div class="text-muted" style="font-size:11.5px;margin-top:6px;">
+                    Mostrando @lista.Count de @_lnkHcs.Count historias del paciente
+                </div>
+                <div class="doc-link-tbl-wrap">
+                    <table class="table table-sm doc-link-tbl">
+                        <thead>
+                            <tr><th></th><th>Historia</th><th>Fecha atencion</th><th>Formato</th><th>Profesional</th><th title="Archivos 'Lista de firmas' ya enlazados a la historia">Listas firmas</th><th>Estado</th></tr>
+                        </thead>
+                        <tbody>
+                            @if (lista.Count == 0)
+                            {
+                                <tr><td colspan="7" class="text-muted">
+                                    Ninguna historia coincide con los filtros. Amplia el rango de fechas@(_lnkSoloSinFirmas ? " o desmarca 'Mostrar solo historias sin lista de firmas'" : "").
+                                </td></tr>
+                            }
+                            @foreach (var h in lista)
+                            {
+                                var sel = _lnkSel == h.Id;
+                                <tr class="@(sel ? "doc-link-sel" : "")" style="cursor:pointer;" @onclick="() => _lnkSel = h.Id">
+                                    <td><input type="radio" name="lnkhc" checked="@sel" @onclick="() => _lnkSel = h.Id" /></td>
+                                    <td style="white-space:nowrap;">
+                                        <strong>@h.Codigo</strong>
+                                        @if (MismaFechaQueDoc(h))
+                                        {
+                                            <span class="doc-link-match" title="La fecha de atencion coincide con la fecha del documento">misma fecha</span>
+                                        }
+                                    </td>
+                                    <td style="white-space:nowrap;">@FechaHc(h)</td>
+                                    <td>@(string.IsNullOrWhiteSpace(h.FormatoCodigo) ? "-" : h.FormatoCodigo) <span class="text-muted" style="font-size:11px;">@h.FormatoNombre</span></td>
+                                    <td>@(h.Profesional ?? "-")</td>
+                                    <td style="text-align:center;">
+                                        @if (h.ListasFirmas > 0) { <span class="doc-link-firmas">@h.ListasFirmas</span> }
+                                        else { <span class="text-muted">0</span> }
+                                    </td>
+                                    <td>@h.Estado</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;margin-top:6px;">
+                <input type="checkbox" @bind="_lnkUsarFecha" />
+                Usar la fecha de atencion de la historia como fecha del documento
+            </label>
+            <small class="text-muted" style="font-size:11px;">
+                Al enlazarlo, el archivo aparece en "Archivos de esta HC" de esa historia y viaja con ella en la Cuenta Medica / ZIP de Snapshots.
+                El cambio queda auditado.
+            </small>
+            @if (_lnkError is not null)
+            {
+                <div class="ase-alert" style="margin-top:8px;">@_lnkError</div>
+            }
+        </div>
+        <div class="doc-edit-acts">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarEnlazarHc">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="EnlazarHcAsync" disabled="@(_lnkSel is null || _lnkBusy)">
+                @(_lnkBusy && _lnkHcs.Count > 0 ? "Enlazando..." : "Enlazar")
+            </button>
+        </div>
+    </div>
+}
+
 @* ===== Modal de edicion de datos de un documento libre (tipologia, subcategoria, fecha, observacion) ===== *@
 @if (_docEdit is not null)
 {
@@ -1110,6 +1250,20 @@
     .pac-doc-subcat { background: #eef2ff; color: #4338ca; }
     .pac-doc-obs { font-size: 11px; color: #334155; background: #f8fafc; border-left: 3px solid #cbd5e1; padding: 3px 6px; border-radius: 4px; margin-top: 4px; word-break: break-word; }
     .doc-edit-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 1060; }
+    .pac-doc-hc { display: inline-block; font-size: 11.5px; font-weight: 700; color: #0f766e; background: #ccfbf1; border-radius: 999px; padding: 2px 8px; cursor: help; }
+    /* Sin btn-primary/outline-primary a proposito: .ase-locked (paciente Cerrado) los bloquea, y enlazar
+       un archivo a su HC debe poder hacerse con el paciente cerrado (igual que editar sus datos). */
+    .pac-doc-hc-btn { font-size: 11.5px; padding: 1px 8px; color: #1d4ed8; border: 1px solid #93c5fd; background: #eff6ff; }
+    .pac-doc-hc-btn:hover { background: #dbeafe; color: #1e40af; }
+    .pac-doc-hc-link { font-size: 11.5px; }
+    .doc-link-tbl-wrap { max-height: 340px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 6px; }
+    .doc-link-tbl { margin: 0; font-size: 12.5px; }
+    .doc-link-tbl thead th { position: sticky; top: 0; background: #f8fafc; font-size: 11px; text-transform: uppercase; color: #475569; }
+    .doc-link-tbl tr.doc-link-sel td { background: #eff6ff; }
+    .doc-link-filtros { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
+    .doc-link-filtros input[type=date] { width: 150px; }
+    .doc-link-firmas { font-size: 11px; font-weight: 700; color: #92400e; background: #fef3c7; border-radius: 999px; padding: 1px 7px; }
+    .doc-link-match { font-size: 10.5px; font-weight: 700; color: #166534; background: #dcfce7; border-radius: 999px; padding: 1px 6px; margin-left: 4px; }
     .doc-edit { position: fixed; z-index: 1061; top: 50%; left: 50%; transform: translate(-50%,-50%); width: min(460px, 94vw); background: #fff; border-radius: 10px; box-shadow: 0 20px 50px rgba(0,0,0,.25); padding: 16px 18px; }
     .doc-edit-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
     .doc-edit-name { font-size: 12.5px; font-weight: 600; color: #0f172a; word-break: break-word; margin-bottom: 10px; }
@@ -1608,6 +1762,100 @@
             await RecargarDocsPacienteAsync();
         }
         catch (Exception ex) { _docEditError = ex.Message; }
+    }
+
+    // ---- Enlazar un archivo suelto del paciente a una historia clinica ----
+    private DocumentoPacienteDto? _docLink;
+    private List<HcEnlazableDto> _lnkHcs = new();
+    private Guid? _lnkSel;
+    private string _lnkFiltro = "";
+    private bool _lnkUsarFecha;
+    private bool _lnkSoloSinFirmas = true;
+    private DateOnly? _lnkDesde, _lnkHasta;
+    private bool _lnkBusy;
+    private string? _lnkError;
+
+    private static string TituloHc(DocumentoPacienteDto d)
+    {
+        var partes = new List<string> { "Historia clinica " + d.CodigoHc };
+        if (!string.IsNullOrWhiteSpace(d.FormatoHc)) { partes.Add("Formato: " + d.FormatoHc); }
+        if (d.FechaAtencionHc is DateTimeOffset f) { partes.Add("Atencion: " + f.ToOffset(Bog).ToString("dd/MM/yyyy")); }
+        if (d.NotaMedicaId is not null) { partes.Add("(anexo de una nota medica de esa historia)"); }
+        return string.Join("\n", partes);
+    }
+
+    /// <summary>Dia (Bogota) de la atencion de la HC; si no tiene fecha de atencion, el de apertura.</summary>
+    private static DateOnly DiaHc(HcEnlazableDto h) =>
+        DateOnly.FromDateTime((h.FechaAtencion ?? h.FechaApertura).ToOffset(Bog).DateTime);
+
+    private static string FechaHc(HcEnlazableDto h) =>
+        (h.FechaAtencion ?? h.FechaApertura).ToOffset(Bog).ToString("dd/MM/yyyy");
+
+    private bool MismaFechaQueDoc(HcEnlazableDto h) =>
+        _docLink?.FechaDocumento is DateTimeOffset fd && h.FechaAtencion is DateTimeOffset fa
+        && fd.ToOffset(Bog).Date == fa.ToOffset(Bog).Date;
+
+    private List<HcEnlazableDto> HcsEnlazablesFiltradas()
+    {
+        IEnumerable<HcEnlazableDto> q = _lnkHcs;
+        if (_lnkSoloSinFirmas) { q = q.Where(h => h.ListasFirmas == 0); }
+        if (_lnkDesde is DateOnly d0) { q = q.Where(h => DiaHc(h) >= d0); }
+        if (_lnkHasta is DateOnly d1) { q = q.Where(h => DiaHc(h) <= d1); }
+        var f = _lnkFiltro?.Trim();
+        if (!string.IsNullOrEmpty(f))
+        {
+            q = q.Where(h =>
+                h.Codigo.Contains(f, StringComparison.OrdinalIgnoreCase)
+                || (h.FormatoCodigo ?? "").Contains(f, StringComparison.OrdinalIgnoreCase)
+                || (h.FormatoNombre ?? "").Contains(f, StringComparison.OrdinalIgnoreCase)
+                || (h.Profesional ?? "").Contains(f, StringComparison.OrdinalIgnoreCase)
+                || FechaHc(h).Contains(f, StringComparison.OrdinalIgnoreCase));
+        }
+        // Primero las de la misma fecha del documento (candidatas naturales), luego por fecha desc.
+        return q.OrderByDescending(MismaFechaQueDoc).ThenByDescending(h => h.FechaAtencion ?? h.FechaApertura).ToList();
+    }
+
+    private async Task AbrirEnlazarHcAsync(DocumentoPacienteDto d)
+    {
+        if (_id is not Guid pid) { return; }
+        _docLink = d;
+        _lnkSel = null; _lnkFiltro = ""; _lnkUsarFecha = false; _lnkError = null;
+        _lnkSoloSinFirmas = true;
+        // Rango por defecto: el mes completo de la fecha del documento (o de su carga si no tiene).
+        var refFecha = (d.FechaDocumento ?? d.CreatedAt).ToOffset(Bog);
+        _lnkDesde = new DateOnly(refFecha.Year, refFecha.Month, 1);
+        _lnkHasta = _lnkDesde.Value.AddMonths(1).AddDays(-1);
+        _lnkHcs = new();
+        _lnkBusy = true;
+        try { _lnkHcs = (await NotaSvc.ListarHcEnlazablesAsync(pid)).ToList(); }
+        catch (Exception ex) { _lnkError = "No se pudieron cargar las historias: " + ex.Message; }
+        finally { _lnkBusy = false; }
+    }
+
+    private void CerrarEnlazarHc()
+    {
+        _docLink = null;
+        _lnkHcs = new();
+        _lnkSel = null; _lnkError = null;
+    }
+
+    private async Task EnlazarHcAsync()
+    {
+        if (_docLink is null || _lnkSel is not Guid hcId) { return; }
+        var hc = _lnkHcs.FirstOrDefault(h => h.Id == hcId);
+        if (!await JS.InvokeAsync<bool>("confirm",
+                $"Enlazar \"{_docLink.NombreOriginal}\" a la historia {hc?.Codigo}?\nDesde esta pantalla no se puede deshacer.")) { return; }
+        _lnkBusy = true; _lnkError = null;
+        try
+        {
+            var actor = await ResolverActorAsync();
+            await NotaSvc.EnlazarDocumentoAHistoriaAsync(_docLink.Id, hcId, _lnkUsarFecha, actor);
+            _docUpMsg = $"Archivo enlazado a {hc?.Codigo}.";
+            CerrarEnlazarHc();
+            await RecargarDocsPacienteAsync();
+        }
+        catch (Exception ex) { _lnkError = ex.Message; }
+        finally { _lnkBusy = false; }
     }
 
     /// <summary>Hoy en hora de Bogota (el server corre en UTC), como DateOnly.</summary>

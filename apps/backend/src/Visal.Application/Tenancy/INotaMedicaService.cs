@@ -94,7 +94,29 @@ public sealed record DocumentoPacienteDto(
     string? Subcategoria = null,
     string? SubidoPor = null,
     // Fecha efectiva (editable) del documento. Distinta de CreatedAt (carga).
-    DateTimeOffset? FechaDocumento = null);
+    DateTimeOffset? FechaDocumento = null,
+    // Historia clinica de ORIGEN del documento: la HC a la que esta atado directamente
+    // (documento externo de la HC) o, si es anexo de una nota medica, la HC de esa nota.
+    // Null = documento suelto del paciente (se puede enlazar desde Admision).
+    Guid? HistoriaClinicaId = null,
+    string? CodigoHc = null,
+    DateTimeOffset? FechaAtencionHc = null,
+    string? FormatoHc = null);
+
+/// <summary>Historia clinica del paciente candidata para enlazar un documento suelto
+/// (modal "Enlazar a historia clinica" del tab Documentos de Admision).</summary>
+public sealed record HcEnlazableDto(
+    Guid Id,
+    string Codigo,
+    DateTimeOffset? FechaAtencion,
+    DateTimeOffset FechaApertura,
+    string? FormatoCodigo,
+    string? FormatoNombre,
+    string? Profesional,
+    string Estado,
+    // Cuantos archivos de tipologia "Lista de firmas" cuelgan ya de esta HC (directos o via
+    // nota medica). El modal permite ver solo las HC que aun no tienen ninguno.
+    int ListasFirmas = 0);
 
 public sealed record AdjuntarDocumentoRequest(
     Guid NotaMedicaId,
@@ -251,4 +273,16 @@ public interface INotaMedicaService
         DateTimeOffset? fechaDocumento, Guid actorUserId, CancellationToken ct = default);
 
     Task<bool> EliminarDocumentoAsync(Guid documentoId, Guid actorUserId, CancellationToken ct = default);
+
+    /// <summary>Historias clinicas del paciente (no inactivas) para elegir a cual enlazar un
+    /// documento suelto. Mas recientes primero.</summary>
+    Task<IReadOnlyList<HcEnlazableDto>> ListarHcEnlazablesAsync(
+        Guid pacienteId, CancellationToken ct = default);
+
+    /// <summary>Enlaza un documento SUELTO del paciente (sin nota medica y sin HC) a una
+    /// historia clinica del MISMO paciente. Si <paramref name="usarFechaAtencion"/> es true,
+    /// la fecha del documento pasa a ser la fecha de atencion de la HC. Queda auditado.</summary>
+    Task EnlazarDocumentoAHistoriaAsync(
+        Guid documentoId, Guid historiaClinicaId, bool usarFechaAtencion, Guid actorUserId,
+        CancellationToken ct = default);
 }

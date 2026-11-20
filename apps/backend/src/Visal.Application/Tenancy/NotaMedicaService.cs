@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Common;
+using Visal.Domain.Common;
 using Visal.Domain.Entities;
 
 namespace Visal.Application.Tenancy;
@@ -8,7 +9,8 @@ namespace Visal.Application.Tenancy;
 public sealed class NotaMedicaService(
     IApplicationDbContextFactory dbFactory,
     ITenantContext tenant,
-    IConfiguracionClinicaService clinica) : INotaMedicaService
+    IConfiguracionClinicaService clinica,
+    IAuditWriter audit) : INotaMedicaService
 {
     public async Task<IReadOnlyList<NotaMedicaDto>> ListarPorHistoriaAsync(
         Guid historiaId, CancellationToken ct = default)
@@ -306,10 +308,26 @@ public sealed class NotaMedicaService(
                             SubidoPor = db.PlatformUsers.Where(u => u.Id == x.d.CreatedBy).Select(u => u.DisplayName).FirstOrDefault(),
                             FechaNota = (DateOnly?)(n != null ? n.FechaNota : null),
                             CodigoUnico = n != null ? n.CodigoUnico : null,
-                            EstadoNota = n != null ? (int?)n.Estado : null
+                            EstadoNota = n != null ? (int?)n.Estado : null,
+                            // HC de origen: la directa del documento o la de su nota medica.
+                            HcOrigenId = x.d.HistoriaClinicaId ?? (n != null ? (Guid?)n.HistoriaClinicaId : null)
                         })
             .OrderByDescending(x => x.CreatedAt)
             .ToListAsync(ct);
+
+        // Datos de la HC de origen (consecutivo, fecha de atencion, formato) en una sola consulta.
+        var hcIds = raw.Where(x => x.HcOrigenId.HasValue).Select(x => x.HcOrigenId!.Value).Distinct().ToList();
+        var hcs = hcIds.Count == 0
+            ? new Dictionary<Guid, (long Consecutivo, DateTimeOffset? FechaAtencion, string? Formato)>()
+            : (await db.HistoriasClinicas.AsNoTracking()
+                .Where(h => hcIds.Contains(h.Id))
+                .Select(h => new
+                {
+                    h.Id, h.Consecutivo, h.FechaAtencion,
+                    Formato = h.FormDefinition != null ? h.FormDefinition.Codigo + " - " + h.FormDefinition.Nombre : null
+                })
+                .ToListAsync(ct))
+              .ToDictionary(h => h.Id, h => (h.Consecutivo, h.FechaAtencion, h.Formato));
 
         return raw
             .Select(x => new DocumentoPacienteDto(
@@ -325,8 +343,92 @@ public sealed class NotaMedicaService(
                 EsLibre: x.NotaMedicaId is null,
                 Subcategoria: x.Subcategoria,
                 SubidoPor: x.SubidoPor,
-                FechaDocumento: x.FechaDocumento))
+                FechaDocumento: x.FechaDocumento,
+                HistoriaClinicaId: x.HcOrigenId,
+                CodigoHc: x.HcOrigenId is Guid h1 && hcs.TryGetValue(h1, out var i1) ? CodigoPublico.Hc(i1.Consecutivo) : null,
+                FechaAtencionHc: x.HcOrigenId is Guid h2 && hcs.TryGetValue(h2, out var i2) ? i2.FechaAtencion : null,
+                FormatoHc: x.HcOrigenId is Guid h3 && hcs.TryGetValue(h3, out var i3) ? i3.Formato : null))
             .ToList();
+    }
+
+    public async Task<IReadOnlyList<HcEnlazableDto>> ListarHcEnlazablesAsync(
+        Guid pacienteId, CancellationToken ct = default)
+    {
+        using var db = dbFactory.Create();
+        var raw = await db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.PacienteId == pacienteId && h.Estado != HistoriaClinicaEstado.Inactiva)
+            .OrderByDescending(h => h.FechaAtencion ?? h.FechaApertura)
+            .Select(h => new
+            {
+                h.Id, h.Consecutivo, h.FechaAtencion, h.FechaApertura, h.Estado,
+                FormatoCodigo = h.FormDefinition != null ? h.FormDefinition.Codigo : null,
+                FormatoNombre = h.FormDefinition != null ? h.FormDefinition.Nombre : null,
+                Profesional = h.Profesional != null ? h.Profesional.NombreCompleto : h.EspecialistaNombre
+            })
+            .ToListAsync(ct);
+
+        // Archivos "Lista de firmas" por HC: atados directo a la HC o como anexo de una nota de
+        // esa HC. Misma tipologia canonica que la columna "Historia con listado firmas" de Snapshots.
+        var ids = raw.Select(h => h.Id).ToList();
+        var firmas = ids.Count == 0
+            ? new Dictionary<Guid, int>()
+            : (await db.NotaMedicaDocumentos.AsNoTracking()
+                .Where(d => d.PacienteId == pacienteId && d.Categoria != null && d.Categoria.ToLower() == "lista de firmas")
+                .Select(d => new
+                {
+                    HcId = d.HistoriaClinicaId
+                        ?? db.NotasMedicas.Where(n => n.Id == d.NotaMedicaId).Select(n => (Guid?)n.HistoriaClinicaId).FirstOrDefault()
+                })
+                .Where(x => x.HcId != null)
+                .ToListAsync(ct))
+              .GroupBy(x => x.HcId!.Value)
+              .ToDictionary(g => g.Key, g => g.Count());
+
+        return raw.Select(h => new HcEnlazableDto(
+                h.Id, CodigoPublico.Hc(h.Consecutivo), h.FechaAtencion, h.FechaApertura,
+                h.FormatoCodigo, h.FormatoNombre, h.Profesional, h.Estado.ToString(),
+                firmas.GetValueOrDefault(h.Id)))
+            .ToList();
+    }
+
+    public async Task EnlazarDocumentoAHistoriaAsync(
+        Guid documentoId, Guid historiaClinicaId, bool usarFechaAtencion, Guid actor,
+        CancellationToken ct = default)
+    {
+        using var db = dbFactory.Create();
+        var e = await db.NotaMedicaDocumentos.FirstOrDefaultAsync(d => d.Id == documentoId, ct)
+            ?? throw new InvalidOperationException("Documento no encontrado.");
+        if (e.NotaMedicaId is not null)
+        {
+            throw new InvalidOperationException("El documento es anexo de una nota medica; ya pertenece a la historia de esa nota.");
+        }
+        if (e.HistoriaClinicaId is not null)
+        {
+            throw new InvalidOperationException("El documento ya esta enlazado a una historia clinica.");
+        }
+        // Validacion cruzada: la HC debe ser del MISMO paciente del documento (y del tenant
+        // activo, por el filtro global). Evita enlazar con IDs arbitrarios.
+        var hc = await db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.Id == historiaClinicaId && h.PacienteId == e.PacienteId)
+            .Select(h => new { h.Consecutivo, h.FechaAtencion, h.Estado })
+            .FirstOrDefaultAsync(ct)
+            ?? throw new InvalidOperationException("Historia clinica no encontrada o no pertenece al paciente del documento.");
+        if (hc.Estado == HistoriaClinicaEstado.Inactiva)
+        {
+            throw new InvalidOperationException("No se puede enlazar a una historia clinica inactiva.");
+        }
+
+        var fechaAntes = e.FechaDocumento;
+        e.HistoriaClinicaId = historiaClinicaId;
+        if (usarFechaAtencion && hc.FechaAtencion is DateTimeOffset fa)
+        {
+            e.FechaDocumento = fa.ToUniversalTime();
+        }
+        audit.Write(db, actor, "documento-paciente.enlazar-hc", "NotaMedicaDocumento", e.Id,
+            new { HistoriaClinicaId = (Guid?)null, FechaDocumento = fechaAntes },
+            new { HistoriaClinicaId = historiaClinicaId, Hc = CodigoPublico.Hc(hc.Consecutivo), e.FechaDocumento, e.NombreOriginal },
+            tenant.TenantId);
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task<NotaDocumentoDto> AdjuntarDocumentoAsync(

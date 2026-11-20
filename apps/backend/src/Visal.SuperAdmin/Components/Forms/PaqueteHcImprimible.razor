@@ -788,6 +788,9 @@ else
 
     private async Task CargarPaqueteAsync()
     {
+        // El componente puede recargarse con otra HC (listado): no arrastrar el tratante anterior.
+        _datosTratanteMed = null;
+        _datosTratanteMedResueltos = false;
         // Tipos a incluir: si Docs viene vacio o "ALL", se incluyen TODOS (el
         // listado quiere el paquete completo); cada bloque igual solo se pinta si
         // tiene datos (guardas `&& _coleccion.Count > 0` en el markup).
@@ -958,6 +961,11 @@ else
                 // Bag para renderizar el formato ORD-MEDI: emitida -> snapshot congelado
                 // (con su codigo/QR ya inyectado); borrador -> prellenado con SUS meds.
                 om.Bag = ConstruirBagMed(om.Meds, om.Emision);
+                // Borrador (sin emitir): el prellenado no trae la firma ni el registro del
+                // medico, y la formula salia "Firmado Electronicamente" SIN rubrica. Se
+                // completan con los del medico TRATANTE de la HC (no con quien imprime),
+                // igual que el pie de las demas ordenes. La emitida ya los trae congelados.
+                if (om.Emision is null) { await CompletarFirmanteBorradorMedAsync(om.Bag); }
                 _ordenesMed.Add(om);
             }
             // Compat: FechaFormulaMed/_bagMed apuntan a la primera orden.
@@ -2033,6 +2041,50 @@ else
                 || actual.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
         if (yaImg) { return; }
         bag["firma_profesional"] = _firmaProfActual;
+    }
+
+    // Datos del medico tratante para las formulas en borrador (se resuelven una vez por paquete).
+    private PrefillProfesionalDatosDto? _datosTratanteMed;
+    private bool _datosTratanteMedResueltos;
+
+    /// <summary>
+    /// Formula en BORRADOR (orden sin emitir): completa firma, nombre y registro del medico
+    /// TRATANTE de la HC (HistoriaClinica.ProfesionalId) cuando el prellenado no los trae.
+    /// Si la HC no tiene profesional vinculado no se inventa firmante (queda sin rubrica).
+    /// Best-effort: nunca rompe la impresion.
+    /// </summary>
+    private async Task CompletarFirmanteBorradorMedAsync(Dictionary<string, string?> bag)
+    {
+        if (_hc?.ProfesionalId is not Guid pid || pid == Guid.Empty) { return; }
+        try
+        {
+            if (!_datosTratanteMedResueltos)
+            {
+                _datosTratanteMedResueltos = true;
+                _datosTratanteMed = await FirmaResolverSvc.ResolverDatosProfesionalAsync(pid, null, null);
+            }
+            // Firma: la vigente del tratante (_firmaProfActual ya resuelta al cargar la HC);
+            // si no estuviera, la de sus datos.
+            if (string.IsNullOrWhiteSpace(_firmaProfActual) && !string.IsNullOrWhiteSpace(_datosTratanteMed?.FirmaUrl))
+            {
+                _firmaProfActual = _datosTratanteMed!.FirmaUrl;
+            }
+            AplicarFirmaEnVivo(bag);
+            if (_datosTratanteMed is not null)
+            {
+                if (string.IsNullOrWhiteSpace(bag.TryGetValue("profesional_registro", out var reg) ? reg : null)
+                    && !string.IsNullOrWhiteSpace(_datosTratanteMed.RegistroMedico))
+                {
+                    bag["profesional_registro"] = _datosTratanteMed.RegistroMedico;
+                }
+                if (string.IsNullOrWhiteSpace(bag.TryGetValue("profesional_nombre", out var nom) ? nom : null)
+                    && !string.IsNullOrWhiteSpace(_datosTratanteMed.Nombre))
+                {
+                    bag["profesional_nombre"] = _datosTratanteMed.Nombre;
+                }
+            }
+        }
+        catch { /* best-effort: la formula se imprime igual, sin rubrica */ }
     }
 
     private Dictionary<string, string?> ConstruirBagMed(List<OrdenMedicamentoItemDto> meds, OrdenPublicaResumenDto? emision)

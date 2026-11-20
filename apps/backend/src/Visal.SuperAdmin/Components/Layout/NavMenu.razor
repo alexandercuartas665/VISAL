@@ -120,6 +120,14 @@
             </NavLink>
         }
 
+        @if (Puede("pacientes"))
+        {
+            <NavLink class="visal-nav-link" href="documentos">
+                @((MarkupString)MenuIcons.Svg("carpeta"))
+                <span>Documentos</span>
+            </NavLink>
+        }
+
         @if (Puede("asignacion"))
         {
             <NavLink class="visal-nav-link" href="asignacion">

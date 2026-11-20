@@ -101,7 +101,36 @@ public sealed record DocumentoPacienteDto(
     Guid? HistoriaClinicaId = null,
     string? CodigoHc = null,
     DateTimeOffset? FechaAtencionHc = null,
-    string? FormatoHc = null);
+    string? FormatoHc = null,
+    // Paciente dueno del documento. Lo llena la consulta GLOBAL (modulo Documentos);
+    // en la vista por paciente de Admision basta el PacienteId.
+    Guid? PacienteId = null,
+    string? PacienteNombre = null,
+    string? PacienteDocumento = null);
+
+/// <summary>Filtros de la consulta GLOBAL de documentos de pacientes (modulo /documentos).</summary>
+/// <param name="Categoria">Tipologia exacta; <see cref="SinCategoria"/> = documentos sin tipologia; null = todas.</param>
+/// <param name="Subcategoria">Subcategoria exacta (null = todas).</param>
+/// <param name="Paciente">Texto contenido en el nombre o el numero de documento del paciente.</param>
+/// <param name="Texto">Texto contenido en el nombre del archivo o su observacion.</param>
+/// <param name="Historia">"con" = con historia de origen, "sin" = sueltos, null = todos.</param>
+/// <param name="CampoFecha">"doc" filtra por fecha del documento; cualquier otro valor, por fecha de carga.</param>
+public sealed record DocumentosGlobalFiltro(
+    string? Categoria = null,
+    string? Subcategoria = null,
+    string? Paciente = null,
+    string? Texto = null,
+    string? Historia = null,
+    string? CampoFecha = null,
+    DateOnly? Desde = null,
+    DateOnly? Hasta = null,
+    int Pagina = 1,
+    int TamanoPagina = 50)
+{
+    public const string SinCategoria = "__sin__";
+}
+
+public sealed record DocumentosGlobalPagina(IReadOnlyList<DocumentoPacienteDto> Items, int Total);
 
 /// <summary>Historia clinica del paciente candidata para enlazar un documento suelto
 /// (modal "Enlazar a historia clinica" del tab Documentos de Admision).</summary>
@@ -231,6 +260,11 @@ public interface INotaMedicaService
     /// contexto.</summary>
     Task<IReadOnlyList<DocumentoPacienteDto>> ListarDocumentosPorPacienteAsync(
         Guid pacienteId, CancellationToken ct = default);
+
+    /// <summary>Consulta GLOBAL (todos los pacientes del tenant) de documentos anexos, paginada,
+    /// con los mismos datos que el tab Documentos de Admision + el paciente de cada archivo.</summary>
+    Task<DocumentosGlobalPagina> ListarDocumentosGlobalAsync(
+        DocumentosGlobalFiltro filtro, CancellationToken ct = default);
 
     Task<NotaDocumentoDto> AdjuntarDocumentoAsync(
         AdjuntarDocumentoRequest req, Guid actorUserId, CancellationToken ct = default);

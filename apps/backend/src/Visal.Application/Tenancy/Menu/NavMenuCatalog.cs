@@ -56,6 +56,9 @@ public static class NavMenuCatalog
     {
         // ===== Operacion Clinica =====
         new("admision", "Admision", "admision", "admision", "pacientes", "Operacion Clinica"),
+        // Consulta global de los documentos anexos de todos los pacientes. Mismo permiso que Admision
+        // (son los mismos archivos que Admision ya muestra por paciente).
+        new("documentos", "Documentos", "documentos", "carpeta", "pacientes", "Operacion Clinica"),
         new("asignacion", "Asignacion", "asignacion", "portapapeles", "asignacion", "Operacion Clinica"),
         new("coordinacion", "Coordinacion", "coordinacion", "red", "coordinacion", "Operacion Clinica"),
         new("asignacion-agendas", "Asignacion por agendas", "asignacion-agendas", "calendario", "asignacion-agendas", "Operacion Clinica"),

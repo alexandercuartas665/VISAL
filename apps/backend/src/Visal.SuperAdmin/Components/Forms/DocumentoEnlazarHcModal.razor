@@ -1,0 +1,239 @@
+@using Visal.Application.Tenancy
+@inject INotaMedicaService NotaSvc
+@inject IJSRuntime JS
+
+@*
+    Modal "Enlazar a una historia clinica": enlaza un archivo SUELTO del paciente (sin nota
+    medica y sin HC) a una de las historias activas de ESE paciente. Filtros: solo historias
+    sin lista de firmas (marcado por defecto), rango de atencion (por defecto el mes completo
+    del documento) y busqueda. Compartido por Admision y el modulo global /documentos.
+    Requiere Documento.PacienteId (o el parametro PacienteId).
+*@
+
+@if (Documento is not null)
+{
+    <div class="doc-edit-backdrop" @onclick="CerrarAsync"></div>
+    <div class="doc-edit" style="width:min(820px, 96vw);">
+        <div class="doc-edit-head">
+            <strong>Enlazar a una historia clinica</strong>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarAsync">&times;</button>
+        </div>
+        <div class="doc-edit-name" title="@Documento.NombreOriginal">
+            @Documento.NombreOriginal
+            @if (Documento.FechaDocumento is DateTimeOffset fdl)
+            {
+                <span class="text-muted" style="font-weight:400;"> &middot; fecha del documento @DocumentoArchivoUi.Dia(fdl)</span>
+            }
+            @if (!string.IsNullOrWhiteSpace(Documento.PacienteNombre))
+            {
+                <div class="text-muted" style="font-weight:400;">Paciente: @Documento.PacienteNombre @Documento.PacienteDocumento</div>
+            }
+        </div>
+        <div class="doc-edit-body">
+            <div class="doc-link-filtros">
+                <div>
+                    <label class="doc-edit-lbl">Atencion desde</label>
+                    <input type="date" class="form-control form-control-sm" @bind="_desde" />
+                </div>
+                <div>
+                    <label class="doc-edit-lbl">Atencion hasta</label>
+                    <input type="date" class="form-control form-control-sm" @bind="_hasta" />
+                </div>
+                <div style="flex:1;min-width:200px;">
+                    <label class="doc-edit-lbl">Buscar</label>
+                    <input type="text" class="form-control form-control-sm" placeholder="HC, formato, profesional o fecha (dd/mm/aaaa)"
+                           @bind="_filtro" @bind:event="oninput" />
+                </div>
+            </div>
+            <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;margin-top:6px;">
+                <input type="checkbox" @bind="_soloSinFirmas" />
+                Mostrar solo historias sin lista de firmas
+            </label>
+            @if (_busy && _hcs.Count == 0)
+            {
+                <div class="ase-empty"><em>Cargando historias...</em></div>
+            }
+            else if (_hcs.Count == 0)
+            {
+                <div class="ase-empty">El paciente no tiene historias clinicas activas para enlazar.</div>
+            }
+            else
+            {
+                var lista = Filtradas();
+                <div class="text-muted" style="font-size:11.5px;margin-top:6px;">
+                    Mostrando @lista.Count de @_hcs.Count historias del paciente
+                </div>
+                <div class="doc-link-tbl-wrap">
+                    <table class="table table-sm doc-link-tbl">
+                        <thead>
+                            <tr><th></th><th>Historia</th><th>Fecha atencion</th><th>Formato</th><th>Profesional</th><th title="Archivos 'Lista de firmas' ya enlazados a la historia">Listas firmas</th><th>Estado</th></tr>
+                        </thead>
+                        <tbody>
+                            @if (lista.Count == 0)
+                            {
+                                <tr><td colspan="7" class="text-muted">
+                                    Ninguna historia coincide con los filtros. Amplia el rango de fechas@(_soloSinFirmas ? " o desmarca 'Mostrar solo historias sin lista de firmas'" : "").
+                                </td></tr>
+                            }
+                            @foreach (var h in lista)
+                            {
+                                var sel = _sel == h.Id;
+                                <tr class="@(sel ? "doc-link-sel" : "")" style="cursor:pointer;" @onclick="() => _sel = h.Id">
+                                    <td><input type="radio" name="lnkhc" checked="@sel" @onclick="() => _sel = h.Id" /></td>
+                                    <td style="white-space:nowrap;">
+                                        <strong>@h.Codigo</strong>
+                                        @if (MismaFechaQueDoc(h))
+                                        {
+                                            <span class="doc-link-match" title="La fecha de atencion coincide con la fecha del documento">misma fecha</span>
+                                        }
+                                    </td>
+                                    <td style="white-space:nowrap;">@FechaHc(h)</td>
+                                    <td>@(string.IsNullOrWhiteSpace(h.FormatoCodigo) ? "-" : h.FormatoCodigo) <span class="text-muted" style="font-size:11px;">@h.FormatoNombre</span></td>
+                                    <td>@(h.Profesional ?? "-")</td>
+                                    <td style="text-align:center;">
+                                        @if (h.ListasFirmas > 0) { <span class="doc-link-firmas">@h.ListasFirmas</span> }
+                                        else { <span class="text-muted">0</span> }
+                                    </td>
+                                    <td>@h.Estado</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;margin-top:6px;">
+                <input type="checkbox" @bind="_usarFecha" />
+                Usar la fecha de atencion de la historia como fecha del documento
+            </label>
+            <small class="text-muted" style="font-size:11px;">
+                Al enlazarlo, el archivo aparece en "Archivos de esta HC" de esa historia y viaja con ella en la Cuenta Medica / ZIP de Snapshots.
+                El cambio queda auditado.
+            </small>
+            @if (_error is not null)
+            {
+                <div class="ase-alert" style="margin-top:8px;">@_error</div>
+            }
+        </div>
+        <div class="doc-edit-acts">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarAsync">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="EnlazarAsync" disabled="@(_sel is null || _busy)">
+                @(_busy && _hcs.Count > 0 ? "Enlazando..." : "Enlazar")
+            </button>
+        </div>
+    </div>
+}
+
+<style>
+    .doc-edit-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 1060; }
+    .doc-edit { position: fixed; z-index: 1061; top: 50%; left: 50%; transform: translate(-50%,-50%); width: min(460px, 94vw); background: #fff; border-radius: 10px; box-shadow: 0 20px 50px rgba(0,0,0,.25); padding: 16px 18px; max-height: 94vh; overflow: auto; }
+    .doc-edit-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+    .doc-edit-name { font-size: 12.5px; font-weight: 600; color: #0f172a; word-break: break-word; margin-bottom: 10px; }
+    .doc-edit-body { display: flex; flex-direction: column; gap: 4px; }
+    .doc-edit-lbl { font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .03em; margin: 6px 0 0; }
+    .doc-edit-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+    .doc-link-tbl-wrap { max-height: 340px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 6px; }
+    .doc-link-tbl { margin: 0; font-size: 12.5px; }
+    .doc-link-tbl thead th { position: sticky; top: 0; background: #f8fafc; font-size: 11px; text-transform: uppercase; color: #475569; }
+    .doc-link-tbl tr.doc-link-sel td { background: #eff6ff; }
+    .doc-link-filtros { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
+    .doc-link-filtros input[type=date] { width: 150px; }
+    .doc-link-firmas { font-size: 11px; font-weight: 700; color: #92400e; background: #fef3c7; border-radius: 999px; padding: 1px 7px; }
+    .doc-link-match { font-size: 10.5px; font-weight: 700; color: #166534; background: #dcfce7; border-radius: 999px; padding: 1px 6px; margin-left: 4px; }
+</style>
+
+@code {
+    /// <summary>Documento suelto a enlazar; null = modal cerrado.</summary>
+    [Parameter] public DocumentoPacienteDto? Documento { get; set; }
+    /// <summary>Paciente del documento si el DTO no lo trae (vista por paciente).</summary>
+    [Parameter] public Guid? PacienteId { get; set; }
+    [Parameter] public EventCallback OnCerrar { get; set; }
+    /// <summary>Se invoca tras enlazar, con el codigo de la HC (HC-xxxxxx).</summary>
+    [Parameter] public EventCallback<string> OnEnlazado { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Guid? _abiertoPara;
+    private List<HcEnlazableDto> _hcs = new();
+    private Guid? _sel;
+    private string _filtro = "";
+    private bool _usarFecha, _soloSinFirmas = true, _busy;
+    private DateOnly? _desde, _hasta;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Documento?.Id == _abiertoPara) { return; }
+        _abiertoPara = Documento?.Id;
+        _sel = null; _filtro = ""; _usarFecha = false; _error = null; _soloSinFirmas = true;
+        _hcs = new();
+        if (Documento is null) { return; }
+        // Rango por defecto: el mes completo de la fecha del documento (o de su carga si no tiene).
+        var refFecha = (Documento.FechaDocumento ?? Documento.CreatedAt).ToOffset(DocumentoArchivoUi.Bog);
+        _desde = new DateOnly(refFecha.Year, refFecha.Month, 1);
+        _hasta = _desde.Value.AddMonths(1).AddDays(-1);
+        var pid = Documento.PacienteId ?? PacienteId;
+        if (pid is not Guid p) { _error = "No se pudo determinar el paciente del documento."; return; }
+        _busy = true;
+        try { _hcs = (await NotaSvc.ListarHcEnlazablesAsync(p)).ToList(); }
+        catch (Exception ex) { _error = "No se pudieron cargar las historias: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private Task CerrarAsync() => OnCerrar.InvokeAsync();
+
+    /// <summary>Dia (Bogota) de la atencion de la HC; si no tiene fecha de atencion, el de apertura.</summary>
+    private static DateOnly DiaHc(HcEnlazableDto h) =>
+        DateOnly.FromDateTime((h.FechaAtencion ?? h.FechaApertura).ToOffset(DocumentoArchivoUi.Bog).DateTime);
+
+    private static string FechaHc(HcEnlazableDto h) => DocumentoArchivoUi.Dia(h.FechaAtencion ?? h.FechaApertura);
+
+    private bool MismaFechaQueDoc(HcEnlazableDto h) =>
+        Documento?.FechaDocumento is DateTimeOffset fd && h.FechaAtencion is DateTimeOffset fa
+        && fd.ToOffset(DocumentoArchivoUi.Bog).Date == fa.ToOffset(DocumentoArchivoUi.Bog).Date;
+
+    private List<HcEnlazableDto> Filtradas()
+    {
+        IEnumerable<HcEnlazableDto> q = _hcs;
+        if (_soloSinFirmas) { q = q.Where(h => h.ListasFirmas == 0); }
+        if (_desde is DateOnly d0) { q = q.Where(h => DiaHc(h) >= d0); }
+        if (_hasta is DateOnly d1) { q = q.Where(h => DiaHc(h) <= d1); }
+        var f = _filtro?.Trim();
+        if (!string.IsNullOrEmpty(f))
+        {
+            q = q.Where(h =>
+                h.Codigo.Contains(f, StringComparison.OrdinalIgnoreCase)
+                || (h.FormatoCodigo ?? "").Contains(f, StringComparison.OrdinalIgnoreCase)
+                || (h.FormatoNombre ?? "").Contains(f, StringComparison.OrdinalIgnoreCase)
+                || (h.Profesional ?? "").Contains(f, StringComparison.OrdinalIgnoreCase)
+                || FechaHc(h).Contains(f, StringComparison.OrdinalIgnoreCase));
+        }
+        // Primero las de la misma fecha del documento (candidatas naturales), luego por fecha desc.
+        return q.OrderByDescending(MismaFechaQueDoc).ThenByDescending(h => h.FechaAtencion ?? h.FechaApertura).ToList();
+    }
+
+    private async Task EnlazarAsync()
+    {
+        if (Documento is null || _sel is not Guid hcId) { return; }
+        var hc = _hcs.FirstOrDefault(h => h.Id == hcId);
+        if (!await JS.InvokeAsync<bool>("confirm",
+                $"Enlazar \"{Documento.NombreOriginal}\" a la historia {hc?.Codigo}?\nDesde esta pantalla no se puede deshacer.")) { return; }
+        _busy = true; _error = null;
+        try
+        {
+            await NotaSvc.EnlazarDocumentoAHistoriaAsync(Documento.Id, hcId, _usarFecha, await ActorAsync());
+            await OnEnlazado.InvokeAsync(hc?.Codigo ?? "");
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task<Guid> ActorAsync()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        try
+        {
+            var st = await AuthState;
+            return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var g) ? g : Guid.Empty;
+        }
+        catch { return Guid.Empty; }
+    }
+}

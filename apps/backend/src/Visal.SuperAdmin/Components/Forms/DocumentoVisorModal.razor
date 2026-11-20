@@ -1,0 +1,224 @@
+@using Visal.Application.Tenancy
+@inject IDocumentoNotaService DocNotaSvc
+
+@*
+    Visor de un documento anexo del paciente (imagen / PDF embebido) con el panel de notas
+    del documento (agregar, archivar, desarchivar). Compartido por el tab Documentos de
+    Admision y el modulo global /documentos.
+*@
+
+@if (Documento is not null)
+{
+    var d = Documento;
+    <div class="doc-visor-backdrop" @onclick="CerrarAsync"></div>
+    <div class="doc-visor">
+        <div class="doc-visor-head">
+            <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+                <span class="doc-visor-icon">@DocumentoArchivoUi.Icono(d.NombreOriginal)</span>
+                <div style="min-width:0;">
+                    <div class="doc-visor-name" title="@d.NombreOriginal">@d.NombreOriginal</div>
+                    <div class="doc-visor-meta">
+                        @if (!string.IsNullOrWhiteSpace(d.PacienteNombre))
+                        {
+                            <span><b>@d.PacienteNombre</b> @d.PacienteDocumento</span>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(d.Categoria))
+                        {
+                            <span class="pac-doc-cat">@d.Categoria</span>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(d.CodigoHc))
+                        {
+                            <span class="pac-doc-hc" title="@DocumentoArchivoUi.TituloHc(d)">@d.CodigoHc</span>
+                        }
+                        <span>@d.CreatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm")</span>
+                        <span>@DocumentoArchivoUi.Tamano(d.Tamano)</span>
+                    </div>
+                </div>
+            </div>
+            <div style="display:flex;gap:6px;">
+                <a class="btn btn-outline-secondary btn-sm" href="@d.RutaArchivo" target="_blank" title="Abrir / descargar">&#128190; Descargar</a>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarAsync">&times;</button>
+            </div>
+        </div>
+        <div class="doc-visor-body">
+            <div class="doc-visor-preview">
+                @if (DocumentoArchivoUi.EsImagen(d.TipoMime, d.NombreOriginal))
+                {
+                    <img src="@d.RutaArchivo" alt="@d.NombreOriginal" />
+                }
+                else if (DocumentoArchivoUi.EsPdf(d.TipoMime, d.NombreOriginal))
+                {
+                    <iframe src="@d.RutaArchivo" title="@d.NombreOriginal"></iframe>
+                }
+                else
+                {
+                    <div class="doc-visor-noprev">
+                        <span class="doc-visor-icon-big">@DocumentoArchivoUi.Icono(d.NombreOriginal)</span>
+                        <div class="text-muted" style="margin-top:8px;">Sin vista previa embebida.</div>
+                        <a class="btn btn-primary btn-sm" href="@d.RutaArchivo" target="_blank" style="margin-top:12px;">Abrir en pestana nueva</a>
+                    </div>
+                }
+            </div>
+            <div class="doc-visor-notas">
+                <div class="doc-visor-notas-h">
+                    <span>Notas del documento</span>
+                    <label class="doc-visor-arch-toggle" title="Incluir notas archivadas">
+                        <input type="checkbox" @bind="_incluirArch" @bind:after="RecargarNotasAsync" /> Ver archivadas
+                    </label>
+                </div>
+                <div class="doc-visor-notas-nueva">
+                    <textarea class="form-control form-control-sm" rows="2"
+                              placeholder="Escribe una nota sobre este archivo..."
+                              @bind="_borrador"></textarea>
+                    <button class="btn btn-primary btn-sm" @onclick="AgregarNotaAsync" disabled="@(_notaBusy || string.IsNullOrWhiteSpace(_borrador))">
+                        @(_notaBusy ? "Guardando..." : "Agregar nota")
+                    </button>
+                </div>
+                @if (_error is not null)
+                {
+                    <div class="ase-alert" style="margin:6px 0;">@_error</div>
+                }
+                <div class="doc-visor-notas-lista">
+                    @if (_notasBusy)
+                    {
+                        <div class="text-muted" style="padding:8px;">Cargando notas...</div>
+                    }
+                    else if (_notas.Count == 0)
+                    {
+                        <div class="text-muted" style="padding:8px;">Aun no hay notas para este documento.</div>
+                    }
+                    else
+                    {
+                        @foreach (var n in _notas)
+                        {
+                            <div class="doc-visor-nota @(n.Archivada ? "arch" : "")">
+                                <div class="doc-visor-nota-head">
+                                    <span class="doc-visor-nota-autor">@(n.AutorEmail ?? n.AutorUserId.ToString("N")[..8])</span>
+                                    <span class="doc-visor-nota-fecha">@n.CreatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm")</span>
+                                    @if (n.Archivada)
+                                    {
+                                        <span class="doc-visor-nota-arch" title="Archivada por @(n.ArchivadaPorEmail ?? "-") el @(n.ArchivadaEn?.LocalDateTime.ToString("dd/MM/yyyy HH:mm") ?? "-")">
+                                            &#128193; Archivada
+                                        </span>
+                                    }
+                                </div>
+                                <div class="doc-visor-nota-txt">@n.Texto</div>
+                                <div class="doc-visor-nota-acts">
+                                    @if (n.Archivada)
+                                    {
+                                        <button class="btn btn-link btn-sm p-0" @onclick="() => DesarchivarAsync(n.Id)">Desarchivar</button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-link btn-sm p-0" @onclick="() => ArchivarAsync(n.Id)">Archivar</button>
+                                    }
+                                </div>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .doc-visor-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:1050; }
+    .doc-visor { position:fixed; inset:5vh 5vw; background:#fff; border-radius:12px; z-index:1060; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,.3); }
+    .doc-visor-head { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid #e2e8f0; gap:12px; }
+    .doc-visor-icon { font-size:24px; }
+    .doc-visor-icon-big { font-size:72px; }
+    .doc-visor-name { font-weight:700; color:#0f172a; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .doc-visor-meta { display:flex; gap:8px; align-items:center; font-size:11.5px; color:#64748b; margin-top:2px; flex-wrap:wrap; }
+    .doc-visor-body { display:grid; grid-template-columns:1fr 380px; gap:0; flex:1; overflow:hidden; }
+    @@media (max-width:900px) { .doc-visor-body { grid-template-columns:1fr; grid-template-rows:1fr auto; } }
+    .doc-visor-preview { background:#0f172a; display:flex; align-items:center; justify-content:center; overflow:auto; }
+    .doc-visor-preview img { max-width:100%; max-height:100%; object-fit:contain; }
+    .doc-visor-preview iframe { width:100%; height:100%; border:none; background:#fff; }
+    .doc-visor-noprev { color:#e2e8f0; text-align:center; padding:24px; }
+    .doc-visor-notas { display:flex; flex-direction:column; border-left:1px solid #e2e8f0; overflow:hidden; }
+    .doc-visor-notas-h { padding:10px 14px; border-bottom:1px solid #e2e8f0; font-weight:700; color:#334155; font-size:13px; display:flex; justify-content:space-between; align-items:center; }
+    .doc-visor-arch-toggle { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:500; color:#64748b; margin:0; cursor:pointer; }
+    .doc-visor-notas-nueva { padding:10px 14px; border-bottom:1px solid #e2e8f0; display:flex; flex-direction:column; gap:6px; background:#f8fafc; }
+    .doc-visor-notas-lista { flex:1; overflow-y:auto; padding:8px 14px; }
+    .doc-visor-nota { padding:8px 10px; border-radius:6px; background:#fff; border:1px solid #e2e8f0; margin-bottom:8px; }
+    .doc-visor-nota.arch { opacity:.55; background:#f1f5f9; }
+    .doc-visor-nota-head { display:flex; gap:8px; align-items:center; font-size:11px; color:#64748b; margin-bottom:4px; flex-wrap:wrap; }
+    .doc-visor-nota-autor { font-weight:700; color:#0f172a; }
+    .doc-visor-nota-arch { font-size:10px; padding:1px 6px; border-radius:999px; background:#fef3c7; color:#92400e; }
+    .doc-visor-nota-txt { font-size:13px; color:#0f172a; white-space:pre-wrap; word-break:break-word; }
+    .doc-visor-nota-acts { display:flex; gap:8px; margin-top:4px; }
+</style>
+
+@code {
+    /// <summary>Documento a mostrar; null = modal cerrado.</summary>
+    [Parameter] public DocumentoPacienteDto? Documento { get; set; }
+    [Parameter] public EventCallback OnCerrar { get; set; }
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private Guid? _cargadoPara;
+    private List<DocumentoNotaDto> _notas = new();
+    private bool _notasBusy, _notaBusy, _incluirArch;
+    private string _borrador = "";
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Documento?.Id == _cargadoPara) { return; }
+        _cargadoPara = Documento?.Id;
+        _notas = new(); _borrador = ""; _error = null; _incluirArch = false;
+        if (Documento is not null) { await RecargarNotasAsync(); }
+    }
+
+    private Task CerrarAsync() => OnCerrar.InvokeAsync();
+
+    private async Task RecargarNotasAsync()
+    {
+        if (Documento is null) { return; }
+        _notasBusy = true;
+        try { _notas = (await DocNotaSvc.ListarPorDocumentoAsync(Documento.Id, _incluirArch)).ToList(); }
+        catch (Exception ex) { _error = "No se pudieron cargar las notas: " + ex.Message; }
+        finally { _notasBusy = false; }
+    }
+
+    private async Task AgregarNotaAsync()
+    {
+        if (Documento is null) { return; }
+        var txt = (_borrador ?? "").Trim();
+        if (txt.Length == 0) { return; }
+        _notaBusy = true; _error = null;
+        try
+        {
+            await DocNotaSvc.AgregarAsync(Documento.Id, txt, await ActorAsync());
+            _borrador = "";
+            await RecargarNotasAsync();
+        }
+        catch (Exception ex) { _error = "No se pudo agregar la nota: " + ex.Message; }
+        finally { _notaBusy = false; }
+    }
+
+    private async Task ArchivarAsync(Guid notaId)
+    {
+        _error = null;
+        try { await DocNotaSvc.ArchivarAsync(notaId, await ActorAsync()); await RecargarNotasAsync(); }
+        catch (Exception ex) { _error = "No se pudo archivar: " + ex.Message; }
+    }
+
+    private async Task DesarchivarAsync(Guid notaId)
+    {
+        _error = null;
+        try { await DocNotaSvc.DesarchivarAsync(notaId, await ActorAsync()); await RecargarNotasAsync(); }
+        catch (Exception ex) { _error = "No se pudo desarchivar: " + ex.Message; }
+    }
+
+    private async Task<Guid> ActorAsync()
+    {
+        if (AuthState is null) { return Guid.Empty; }
+        try
+        {
+            var st = await AuthState;
+            return Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var g) ? g : Guid.Empty;
+        }
+        catch { return Guid.Empty; }
+    }
+}

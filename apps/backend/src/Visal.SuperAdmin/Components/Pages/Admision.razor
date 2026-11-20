@@ -17,7 +17,6 @@
 @inject IDiagnosticoService DiagSvc
 @inject INotaMedicaService NotaSvc
 @inject ITipologiaArchivoService TipSvc
-@inject IDocumentoNotaService DocNotaSvc
 @inject Visal.Application.Tenancy.Forms.IBarthelDenormalizador BarthelSvc
 @inject IWebHostEnvironment Env
 @inject IJSRuntime JS
@@ -952,279 +951,14 @@
     </div>
 }
 
-@* ===== Modal visor de documento con panel de notas (task ADM5) ===== *@
-@if (_visorDoc is not null)
-{
-    <div class="doc-visor-backdrop" @onclick="CerrarVisor"></div>
-    <div class="doc-visor">
-        <div class="doc-visor-head">
-            <div style="display:flex;align-items:center;gap:10px;min-width:0;">
-                <span class="doc-visor-icon">@IconoArchivo(_visorDoc.NombreOriginal)</span>
-                <div style="min-width:0;">
-                    <div class="doc-visor-name" title="@_visorDoc.NombreOriginal">@_visorDoc.NombreOriginal</div>
-                    <div class="doc-visor-meta">
-                        @if (!string.IsNullOrWhiteSpace(_visorDoc.Categoria))
-                        {
-                            <span class="pac-doc-cat">@_visorDoc.Categoria</span>
-                        }
-                        <span>@_visorDoc.CreatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm")</span>
-                        <span>@FormatTam(_visorDoc.Tamano)</span>
-                    </div>
-                </div>
-            </div>
-            <div style="display:flex;gap:6px;">
-                <a class="btn btn-outline-secondary btn-sm" href="@_visorDoc.RutaArchivo" target="_blank" title="Abrir / descargar">&#128190; Descargar</a>
-                <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarVisor">&times;</button>
-            </div>
-        </div>
-        <div class="doc-visor-body">
-            <div class="doc-visor-preview">
-                @if (EsImagen(_visorDoc.TipoMime, _visorDoc.NombreOriginal))
-                {
-                    <img src="@_visorDoc.RutaArchivo" alt="@_visorDoc.NombreOriginal" />
-                }
-                else if (EsPdf(_visorDoc.TipoMime, _visorDoc.NombreOriginal))
-                {
-                    <iframe src="@_visorDoc.RutaArchivo" title="@_visorDoc.NombreOriginal"></iframe>
-                }
-                else
-                {
-                    <div class="doc-visor-noprev">
-                        <span class="doc-visor-icon-big">@IconoArchivo(_visorDoc.NombreOriginal)</span>
-                        <div class="text-muted" style="margin-top:8px;">Sin vista previa embebida.</div>
-                        <a class="btn btn-primary btn-sm" href="@_visorDoc.RutaArchivo" target="_blank" style="margin-top:12px;">Abrir en pestaña nueva</a>
-                    </div>
-                }
-            </div>
-            <div class="doc-visor-notas">
-                <div class="doc-visor-notas-h">
-                    <span>Notas del documento</span>
-                    <label class="doc-visor-arch-toggle" title="Incluir notas archivadas">
-                        <input type="checkbox" @bind="_visorIncluirArch" @bind:after="RecargarNotasVisorAsync" /> Ver archivadas
-                    </label>
-                </div>
-                <div class="doc-visor-notas-nueva">
-                    <textarea class="form-control form-control-sm" rows="2"
-                              placeholder="Escribe una nota sobre este archivo..."
-                              @bind="_notaBorrador"></textarea>
-                    <button class="btn btn-primary btn-sm" @onclick="AgregarNotaAsync" disabled="@(_notaBusy || string.IsNullOrWhiteSpace(_notaBorrador))">
-                        @(_notaBusy ? "Guardando..." : "Agregar nota")
-                    </button>
-                </div>
-                @if (_notaError is not null)
-                {
-                    <div class="ase-alert" style="margin:6px 0;">@_notaError</div>
-                }
-                <div class="doc-visor-notas-lista">
-                    @if (_notasBusy)
-                    {
-                        <div class="text-muted" style="padding:8px;">Cargando notas...</div>
-                    }
-                    else if (_notasDoc.Count == 0)
-                    {
-                        <div class="text-muted" style="padding:8px;">Aun no hay notas para este documento.</div>
-                    }
-                    else
-                    {
-                        @foreach (var n in _notasDoc)
-                        {
-                            <div class="doc-visor-nota @(n.Archivada ? "arch" : "")">
-                                <div class="doc-visor-nota-head">
-                                    <span class="doc-visor-nota-autor">@(n.AutorEmail ?? n.AutorUserId.ToString("N")[..8])</span>
-                                    <span class="doc-visor-nota-fecha">@n.CreatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm")</span>
-                                    @if (n.Archivada)
-                                    {
-                                        <span class="doc-visor-nota-arch" title="Archivada por @(n.ArchivadaPorEmail ?? "-") el @(n.ArchivadaEn?.LocalDateTime.ToString("dd/MM/yyyy HH:mm") ?? "-")">
-                                            &#128193; Archivada
-                                        </span>
-                                    }
-                                </div>
-                                <div class="doc-visor-nota-txt">@n.Texto</div>
-                                <div class="doc-visor-nota-acts">
-                                    @if (n.Archivada)
-                                    {
-                                        <button class="btn btn-link btn-sm p-0" @onclick="() => DesarchivarNotaAsync(n.Id)">Desarchivar</button>
-                                    }
-                                    else
-                                    {
-                                        <button class="btn btn-link btn-sm p-0" @onclick="() => ArchivarNotaAsync(n.Id)">Archivar</button>
-                                    }
-                                </div>
-                            </div>
-                        }
-                    }
-                </div>
-            </div>
-        </div>
-    </div>
-}
+@* ===== Modal visor de documento con panel de notas (task ADM5): componente compartido ===== *@
+<DocumentoVisorModal Documento="_visorDoc" OnCerrar="CerrarVisor" />
 
-@* ===== Modal: enlazar un archivo suelto del paciente a una de sus historias clinicas ===== *@
-@if (_docLink is not null)
-{
-    <div class="doc-edit-backdrop" @onclick="CerrarEnlazarHc"></div>
-    <div class="doc-edit" style="width:min(820px, 96vw);">
-        <div class="doc-edit-head">
-            <strong>Enlazar a una historia clinica</strong>
-            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarEnlazarHc">&times;</button>
-        </div>
-        <div class="doc-edit-name" title="@_docLink.NombreOriginal">
-            @_docLink.NombreOriginal
-            @if (_docLink.FechaDocumento is DateTimeOffset fdl)
-            {
-                <span class="text-muted" style="font-weight:400;"> &middot; fecha del documento @fdl.ToOffset(Bog).ToString("dd/MM/yyyy")</span>
-            }
-        </div>
-        <div class="doc-edit-body">
-            <div class="doc-link-filtros">
-                <div>
-                    <label class="doc-edit-lbl">Atencion desde</label>
-                    <input type="date" class="form-control form-control-sm" @bind="_lnkDesde" />
-                </div>
-                <div>
-                    <label class="doc-edit-lbl">Atencion hasta</label>
-                    <input type="date" class="form-control form-control-sm" @bind="_lnkHasta" />
-                </div>
-                <div style="flex:1;min-width:200px;">
-                    <label class="doc-edit-lbl">Buscar</label>
-                    <input type="text" class="form-control form-control-sm" placeholder="HC, formato, profesional o fecha (dd/mm/aaaa)"
-                           @bind="_lnkFiltro" @bind:event="oninput" />
-                </div>
-            </div>
-            <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;margin-top:6px;">
-                <input type="checkbox" @bind="_lnkSoloSinFirmas" />
-                Mostrar solo historias sin lista de firmas
-            </label>
-            @if (_lnkBusy && _lnkHcs.Count == 0)
-            {
-                <div class="ase-empty"><em>Cargando historias...</em></div>
-            }
-            else if (_lnkHcs.Count == 0)
-            {
-                <div class="ase-empty">El paciente no tiene historias clinicas activas para enlazar.</div>
-            }
-            else
-            {
-                var lista = HcsEnlazablesFiltradas();
-                <div class="text-muted" style="font-size:11.5px;margin-top:6px;">
-                    Mostrando @lista.Count de @_lnkHcs.Count historias del paciente
-                </div>
-                <div class="doc-link-tbl-wrap">
-                    <table class="table table-sm doc-link-tbl">
-                        <thead>
-                            <tr><th></th><th>Historia</th><th>Fecha atencion</th><th>Formato</th><th>Profesional</th><th title="Archivos 'Lista de firmas' ya enlazados a la historia">Listas firmas</th><th>Estado</th></tr>
-                        </thead>
-                        <tbody>
-                            @if (lista.Count == 0)
-                            {
-                                <tr><td colspan="7" class="text-muted">
-                                    Ninguna historia coincide con los filtros. Amplia el rango de fechas@(_lnkSoloSinFirmas ? " o desmarca 'Mostrar solo historias sin lista de firmas'" : "").
-                                </td></tr>
-                            }
-                            @foreach (var h in lista)
-                            {
-                                var sel = _lnkSel == h.Id;
-                                <tr class="@(sel ? "doc-link-sel" : "")" style="cursor:pointer;" @onclick="() => _lnkSel = h.Id">
-                                    <td><input type="radio" name="lnkhc" checked="@sel" @onclick="() => _lnkSel = h.Id" /></td>
-                                    <td style="white-space:nowrap;">
-                                        <strong>@h.Codigo</strong>
-                                        @if (MismaFechaQueDoc(h))
-                                        {
-                                            <span class="doc-link-match" title="La fecha de atencion coincide con la fecha del documento">misma fecha</span>
-                                        }
-                                    </td>
-                                    <td style="white-space:nowrap;">@FechaHc(h)</td>
-                                    <td>@(string.IsNullOrWhiteSpace(h.FormatoCodigo) ? "-" : h.FormatoCodigo) <span class="text-muted" style="font-size:11px;">@h.FormatoNombre</span></td>
-                                    <td>@(h.Profesional ?? "-")</td>
-                                    <td style="text-align:center;">
-                                        @if (h.ListasFirmas > 0) { <span class="doc-link-firmas">@h.ListasFirmas</span> }
-                                        else { <span class="text-muted">0</span> }
-                                    </td>
-                                    <td>@h.Estado</td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-            }
-            <label style="display:flex;gap:6px;align-items:center;font-size:12.5px;margin-top:6px;">
-                <input type="checkbox" @bind="_lnkUsarFecha" />
-                Usar la fecha de atencion de la historia como fecha del documento
-            </label>
-            <small class="text-muted" style="font-size:11px;">
-                Al enlazarlo, el archivo aparece en "Archivos de esta HC" de esa historia y viaja con ella en la Cuenta Medica / ZIP de Snapshots.
-                El cambio queda auditado.
-            </small>
-            @if (_lnkError is not null)
-            {
-                <div class="ase-alert" style="margin-top:8px;">@_lnkError</div>
-            }
-        </div>
-        <div class="doc-edit-acts">
-            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarEnlazarHc">Cancelar</button>
-            <button class="btn btn-primary btn-sm" @onclick="EnlazarHcAsync" disabled="@(_lnkSel is null || _lnkBusy)">
-                @(_lnkBusy && _lnkHcs.Count > 0 ? "Enlazando..." : "Enlazar")
-            </button>
-        </div>
-    </div>
-}
+@* ===== Modal: enlazar un archivo suelto del paciente a una de sus historias clinicas (componente compartido) ===== *@
+<DocumentoEnlazarHcModal Documento="_docLink" PacienteId="_id" OnCerrar="CerrarEnlazarHc" OnEnlazado="OnHcEnlazadoAsync" />
 
-@* ===== Modal de edicion de datos de un documento libre (tipologia, subcategoria, fecha, observacion) ===== *@
-@if (_docEdit is not null)
-{
-    <div class="doc-edit-backdrop" @onclick="CerrarEditDoc"></div>
-    <div class="doc-edit">
-        <div class="doc-edit-head">
-            <strong>Editar datos del archivo</strong>
-            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarEditDoc">&times;</button>
-        </div>
-        <div class="doc-edit-name" title="@_docEdit.NombreOriginal">@_docEdit.NombreOriginal</div>
-        <div class="doc-edit-body">
-            <label class="doc-edit-lbl">Tipologia</label>
-            <select class="form-select form-select-sm" value="@_edTip" @onchange="OnEdTipChanged">
-                <option value="">(sin tipologia)</option>
-                @foreach (var t in _tipologiasArchivo)
-                {
-                    <option value="@t.Nombre">@t.Nombre</option>
-                }
-            </select>
-            @* Subcategoria: se muestra SIEMPRE para que sea visible/editable tanto en Lista como en
-               Galeria. Si la tipologia seleccionada no tiene subcategorias, el selector queda
-               deshabilitado con una nota (al elegir una tipologia que si tenga, se habilita). *@
-            <label class="doc-edit-lbl">Subcategoria</label>
-            @if (SubcatsDe(_edTip).Count > 0)
-            {
-                <select class="form-select form-select-sm" @bind="_edSubcat">
-                    <option value="">(sin subcategoria)</option>
-                    @foreach (var s in SubcatsDe(_edTip))
-                    {
-                        <option value="@s.Nombre">@s.Nombre</option>
-                    }
-                </select>
-            }
-            else
-            {
-                <select class="form-select form-select-sm" disabled>
-                    <option>(esta tipologia no tiene subcategorias)</option>
-                </select>
-                <small class="text-muted" style="font-size:11px;">Elige una tipologia con subcategorias, o configuralas en Configuracion del Sistema -> Tipologia Archivos.</small>
-            }
-            <label class="doc-edit-lbl">Fecha del documento</label>
-            <input type="date" class="form-control form-control-sm" @bind="_edFecha" />
-            <label class="doc-edit-lbl">Observacion</label>
-            <input type="text" class="form-control form-control-sm" @bind="_edObs"
-                   placeholder="Observacion del archivo" maxlength="500" />
-            @if (_docEditError is not null)
-            {
-                <div class="ase-alert" style="margin-top:8px;">@_docEditError</div>
-            }
-        </div>
-        <div class="doc-edit-acts">
-            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarEditDoc">Cancelar</button>
-            <button class="btn btn-primary btn-sm" @onclick="GuardarEditDocAsync">Guardar</button>
-        </div>
-    </div>
-}
+@* ===== Modal de edicion de datos de un documento libre (componente compartido) ===== *@
+<DocumentoEditarModal Documento="_docEdit" Tipologias="_tipologiasArchivo" OnCerrar="CerrarEditDoc" OnGuardado="OnDocEditadoAsync" />
 
 <style>
     .pac-tabs { display: flex; gap: 4px; border-bottom: 1.5px solid #e2e8f0; margin-bottom: 18px; padding-bottom: 0; }
@@ -1249,27 +983,12 @@
     .pac-doc-cat { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #ecfdf5; color: #047857; font-size: 11px; font-weight: 700; }
     .pac-doc-subcat { background: #eef2ff; color: #4338ca; }
     .pac-doc-obs { font-size: 11px; color: #334155; background: #f8fafc; border-left: 3px solid #cbd5e1; padding: 3px 6px; border-radius: 4px; margin-top: 4px; word-break: break-word; }
-    .doc-edit-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 1060; }
     .pac-doc-hc { display: inline-block; font-size: 11.5px; font-weight: 700; color: #0f766e; background: #ccfbf1; border-radius: 999px; padding: 2px 8px; cursor: help; }
     /* Sin btn-primary/outline-primary a proposito: .ase-locked (paciente Cerrado) los bloquea, y enlazar
        un archivo a su HC debe poder hacerse con el paciente cerrado (igual que editar sus datos). */
     .pac-doc-hc-btn { font-size: 11.5px; padding: 1px 8px; color: #1d4ed8; border: 1px solid #93c5fd; background: #eff6ff; }
     .pac-doc-hc-btn:hover { background: #dbeafe; color: #1e40af; }
     .pac-doc-hc-link { font-size: 11.5px; }
-    .doc-link-tbl-wrap { max-height: 340px; overflow: auto; border: 1px solid #e2e8f0; border-radius: 8px; margin-top: 6px; }
-    .doc-link-tbl { margin: 0; font-size: 12.5px; }
-    .doc-link-tbl thead th { position: sticky; top: 0; background: #f8fafc; font-size: 11px; text-transform: uppercase; color: #475569; }
-    .doc-link-tbl tr.doc-link-sel td { background: #eff6ff; }
-    .doc-link-filtros { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
-    .doc-link-filtros input[type=date] { width: 150px; }
-    .doc-link-firmas { font-size: 11px; font-weight: 700; color: #92400e; background: #fef3c7; border-radius: 999px; padding: 1px 7px; }
-    .doc-link-match { font-size: 10.5px; font-weight: 700; color: #166534; background: #dcfce7; border-radius: 999px; padding: 1px 6px; margin-left: 4px; }
-    .doc-edit { position: fixed; z-index: 1061; top: 50%; left: 50%; transform: translate(-50%,-50%); width: min(460px, 94vw); background: #fff; border-radius: 10px; box-shadow: 0 20px 50px rgba(0,0,0,.25); padding: 16px 18px; }
-    .doc-edit-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-    .doc-edit-name { font-size: 12.5px; font-weight: 600; color: #0f172a; word-break: break-word; margin-bottom: 10px; }
-    .doc-edit-body { display: flex; flex-direction: column; gap: 4px; }
-    .doc-edit-lbl { font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .03em; margin: 6px 0 0; }
-    .doc-edit-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
     .pac-doc-upload { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px 14px; margin-bottom:14px; }
     /* Toolbar filtros + toggle Lista/Galeria (ADM4) */
     .pac-doc-toolbar { display:flex; justify-content:space-between; align-items:end; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
@@ -1295,31 +1014,6 @@
     .pac-doc-cat-edit { display:flex; align-items:center; gap:4px; }
     .pac-doc-cat-edit .form-select { min-width:0; flex:1; font-size:11px; padding:2px 6px; height:auto; }
     /* Modal visor + notas (ADM5) */
-    .doc-visor-backdrop { position:fixed; inset:0; background:rgba(15,23,42,.55); z-index:1050; }
-    .doc-visor { position:fixed; inset:5vh 5vw; background:#fff; border-radius:12px; z-index:1060; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,.3); }
-    .doc-visor-head { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-bottom:1px solid #e2e8f0; gap:12px; }
-    .doc-visor-icon { font-size:24px; }
-    .doc-visor-icon-big { font-size:72px; }
-    .doc-visor-name { font-weight:700; color:#0f172a; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-    .doc-visor-meta { display:flex; gap:8px; align-items:center; font-size:11.5px; color:#64748b; margin-top:2px; flex-wrap:wrap; }
-    .doc-visor-body { display:grid; grid-template-columns:1fr 380px; gap:0; flex:1; overflow:hidden; }
-    @@media (max-width:900px) { .doc-visor-body { grid-template-columns:1fr; grid-template-rows:1fr auto; } }
-    .doc-visor-preview { background:#0f172a; display:flex; align-items:center; justify-content:center; overflow:auto; }
-    .doc-visor-preview img { max-width:100%; max-height:100%; object-fit:contain; }
-    .doc-visor-preview iframe { width:100%; height:100%; border:none; background:#fff; }
-    .doc-visor-noprev { color:#e2e8f0; text-align:center; padding:24px; }
-    .doc-visor-notas { display:flex; flex-direction:column; border-left:1px solid #e2e8f0; overflow:hidden; }
-    .doc-visor-notas-h { padding:10px 14px; border-bottom:1px solid #e2e8f0; font-weight:700; color:#334155; font-size:13px; display:flex; justify-content:space-between; align-items:center; }
-    .doc-visor-arch-toggle { display:inline-flex; align-items:center; gap:4px; font-size:11px; font-weight:500; color:#64748b; margin:0; cursor:pointer; }
-    .doc-visor-notas-nueva { padding:10px 14px; border-bottom:1px solid #e2e8f0; display:flex; flex-direction:column; gap:6px; background:#f8fafc; }
-    .doc-visor-notas-lista { flex:1; overflow-y:auto; padding:8px 14px; }
-    .doc-visor-nota { padding:8px 10px; border-radius:6px; background:#fff; border:1px solid #e2e8f0; margin-bottom:8px; }
-    .doc-visor-nota.arch { opacity:.55; background:#f1f5f9; }
-    .doc-visor-nota-head { display:flex; gap:8px; align-items:center; font-size:11px; color:#64748b; margin-bottom:4px; flex-wrap:wrap; }
-    .doc-visor-nota-autor { font-weight:700; color:#0f172a; }
-    .doc-visor-nota-arch { font-size:10px; padding:1px 6px; border-radius:999px; background:#fef3c7; color:#92400e; }
-    .doc-visor-nota-txt { font-size:13px; color:#0f172a; white-space:pre-wrap; word-break:break-word; }
-    .doc-visor-nota-acts { display:flex; gap:8px; margin-top:4px; }
     .pac-doc-upload-row { display:grid; grid-template-columns:220px 1fr 260px; gap:12px; align-items:end; }
     .pac-doc-upload-f label { font-size:11px; font-weight:600; color:#334155; margin-bottom:4px; display:block; }
     .pac-doc-upload-f-wide { min-width:0; }
@@ -1684,9 +1378,6 @@
     private DateTime? _docFiltroHasta;
     // Modal de edicion de datos de un documento libre.
     private DocumentoPacienteDto? _docEdit;
-    private string _edTip = "", _edSubcat = "", _edObs = "";
-    private DateOnly? _edFecha;
-    private string? _docEditError;
     private static readonly TimeSpan Bog = TimeSpan.FromHours(-5);
 
     private List<DocumentoPacienteDto> FiltrarDocs(List<DocumentoPacienteDto> src)
@@ -1717,30 +1408,17 @@
         _docFiltroHasta = null;
     }
 
-    private void AbrirEditDoc(DocumentoPacienteDto d)
-    {
-        _docEdit = d;
-        _docEditError = null;
-        _edTip = d.Categoria ?? "";
-        _edSubcat = d.Subcategoria ?? "";
-        _edObs = d.Anotaciones ?? "";
-        _edFecha = d.FechaDocumento is DateTimeOffset fd ? DateOnly.FromDateTime(fd.ToOffset(Bog).DateTime) : null;
-    }
+    private void AbrirEditDoc(DocumentoPacienteDto d) => _docEdit = d;
 
-    private void CerrarEditDoc()
+    private void CerrarEditDoc() => _docEdit = null;
+
+    private async Task OnDocEditadoAsync()
     {
         _docEdit = null;
-        _docEditError = null;
-        _edTip = _edSubcat = _edObs = "";
-        _edFecha = null;
+        await RecargarDocsPacienteAsync();
     }
 
-    private void OnEdTipChanged(ChangeEventArgs e)
-    {
-        _edTip = e.Value?.ToString() ?? "";
-        _edSubcat = ""; // al cambiar la tipologia, la subcategoria anterior ya no aplica
-    }
-
+    /// <summary>Subcategorias de una tipologia (selector del formulario de carga).</summary>
     private IReadOnlyList<SubcategoriaArchivoDto> SubcatsDe(string? tipNombre)
     {
         if (string.IsNullOrWhiteSpace(tipNombre)) { return Array.Empty<SubcategoriaArchivoDto>(); }
@@ -1748,114 +1426,24 @@
         return t?.Subcategorias ?? (IReadOnlyList<SubcategoriaArchivoDto>)Array.Empty<SubcategoriaArchivoDto>();
     }
 
-    private async Task GuardarEditDocAsync()
-    {
-        if (_docEdit is null) { return; }
-        _docEditError = null;
-        try
-        {
-            // Si la tipologia elegida no tiene subcategorias, no persistir una subcategoria vieja.
-            var subcat = SubcatsDe(_edTip).Count > 0 ? _edSubcat : "";
-            await NotaSvc.ActualizarDocumentoEditableAsync(
-                _docEdit.Id, _edTip, subcat, _edObs, ParseFechaDoc(_edFecha), Guid.Empty);
-            CerrarEditDoc();
-            await RecargarDocsPacienteAsync();
-        }
-        catch (Exception ex) { _docEditError = ex.Message; }
-    }
-
-    // ---- Enlazar un archivo suelto del paciente a una historia clinica ----
+    // ---- Enlazar un archivo suelto del paciente a una historia clinica (modal compartido) ----
     private DocumentoPacienteDto? _docLink;
-    private List<HcEnlazableDto> _lnkHcs = new();
-    private Guid? _lnkSel;
-    private string _lnkFiltro = "";
-    private bool _lnkUsarFecha;
-    private bool _lnkSoloSinFirmas = true;
-    private DateOnly? _lnkDesde, _lnkHasta;
-    private bool _lnkBusy;
-    private string? _lnkError;
 
-    private static string TituloHc(DocumentoPacienteDto d)
+    private static string TituloHc(DocumentoPacienteDto d) => DocumentoArchivoUi.TituloHc(d);
+
+    private Task AbrirEnlazarHcAsync(DocumentoPacienteDto d)
     {
-        var partes = new List<string> { "Historia clinica " + d.CodigoHc };
-        if (!string.IsNullOrWhiteSpace(d.FormatoHc)) { partes.Add("Formato: " + d.FormatoHc); }
-        if (d.FechaAtencionHc is DateTimeOffset f) { partes.Add("Atencion: " + f.ToOffset(Bog).ToString("dd/MM/yyyy")); }
-        if (d.NotaMedicaId is not null) { partes.Add("(anexo de una nota medica de esa historia)"); }
-        return string.Join("\n", partes);
+        if (_id is Guid) { _docLink = d; }
+        return Task.CompletedTask;
     }
 
-    /// <summary>Dia (Bogota) de la atencion de la HC; si no tiene fecha de atencion, el de apertura.</summary>
-    private static DateOnly DiaHc(HcEnlazableDto h) =>
-        DateOnly.FromDateTime((h.FechaAtencion ?? h.FechaApertura).ToOffset(Bog).DateTime);
+    private void CerrarEnlazarHc() => _docLink = null;
 
-    private static string FechaHc(HcEnlazableDto h) =>
-        (h.FechaAtencion ?? h.FechaApertura).ToOffset(Bog).ToString("dd/MM/yyyy");
-
-    private bool MismaFechaQueDoc(HcEnlazableDto h) =>
-        _docLink?.FechaDocumento is DateTimeOffset fd && h.FechaAtencion is DateTimeOffset fa
-        && fd.ToOffset(Bog).Date == fa.ToOffset(Bog).Date;
-
-    private List<HcEnlazableDto> HcsEnlazablesFiltradas()
+    private async Task OnHcEnlazadoAsync(string codigoHc)
     {
-        IEnumerable<HcEnlazableDto> q = _lnkHcs;
-        if (_lnkSoloSinFirmas) { q = q.Where(h => h.ListasFirmas == 0); }
-        if (_lnkDesde is DateOnly d0) { q = q.Where(h => DiaHc(h) >= d0); }
-        if (_lnkHasta is DateOnly d1) { q = q.Where(h => DiaHc(h) <= d1); }
-        var f = _lnkFiltro?.Trim();
-        if (!string.IsNullOrEmpty(f))
-        {
-            q = q.Where(h =>
-                h.Codigo.Contains(f, StringComparison.OrdinalIgnoreCase)
-                || (h.FormatoCodigo ?? "").Contains(f, StringComparison.OrdinalIgnoreCase)
-                || (h.FormatoNombre ?? "").Contains(f, StringComparison.OrdinalIgnoreCase)
-                || (h.Profesional ?? "").Contains(f, StringComparison.OrdinalIgnoreCase)
-                || FechaHc(h).Contains(f, StringComparison.OrdinalIgnoreCase));
-        }
-        // Primero las de la misma fecha del documento (candidatas naturales), luego por fecha desc.
-        return q.OrderByDescending(MismaFechaQueDoc).ThenByDescending(h => h.FechaAtencion ?? h.FechaApertura).ToList();
-    }
-
-    private async Task AbrirEnlazarHcAsync(DocumentoPacienteDto d)
-    {
-        if (_id is not Guid pid) { return; }
-        _docLink = d;
-        _lnkSel = null; _lnkFiltro = ""; _lnkUsarFecha = false; _lnkError = null;
-        _lnkSoloSinFirmas = true;
-        // Rango por defecto: el mes completo de la fecha del documento (o de su carga si no tiene).
-        var refFecha = (d.FechaDocumento ?? d.CreatedAt).ToOffset(Bog);
-        _lnkDesde = new DateOnly(refFecha.Year, refFecha.Month, 1);
-        _lnkHasta = _lnkDesde.Value.AddMonths(1).AddDays(-1);
-        _lnkHcs = new();
-        _lnkBusy = true;
-        try { _lnkHcs = (await NotaSvc.ListarHcEnlazablesAsync(pid)).ToList(); }
-        catch (Exception ex) { _lnkError = "No se pudieron cargar las historias: " + ex.Message; }
-        finally { _lnkBusy = false; }
-    }
-
-    private void CerrarEnlazarHc()
-    {
+        _docUpMsg = $"Archivo enlazado a {codigoHc}.";
         _docLink = null;
-        _lnkHcs = new();
-        _lnkSel = null; _lnkError = null;
-    }
-
-    private async Task EnlazarHcAsync()
-    {
-        if (_docLink is null || _lnkSel is not Guid hcId) { return; }
-        var hc = _lnkHcs.FirstOrDefault(h => h.Id == hcId);
-        if (!await JS.InvokeAsync<bool>("confirm",
-                $"Enlazar \"{_docLink.NombreOriginal}\" a la historia {hc?.Codigo}?\nDesde esta pantalla no se puede deshacer.")) { return; }
-        _lnkBusy = true; _lnkError = null;
-        try
-        {
-            var actor = await ResolverActorAsync();
-            await NotaSvc.EnlazarDocumentoAHistoriaAsync(_docLink.Id, hcId, _lnkUsarFecha, actor);
-            _docUpMsg = $"Archivo enlazado a {hc?.Codigo}.";
-            CerrarEnlazarHc();
-            await RecargarDocsPacienteAsync();
-        }
-        catch (Exception ex) { _lnkError = ex.Message; }
-        finally { _lnkBusy = false; }
+        await RecargarDocsPacienteAsync();
     }
 
     /// <summary>Hoy en hora de Bogota (el server corre en UTC), como DateOnly.</summary>
@@ -1876,12 +1464,6 @@
         return ext is ".png" or ".jpg" or ".jpeg" or ".webp" or ".gif" or ".bmp";
     }
 
-    private static bool EsPdf(string? mime, string nombre)
-    {
-        if (!string.IsNullOrEmpty(mime) && mime.Contains("pdf", StringComparison.OrdinalIgnoreCase)) { return true; }
-        return Path.GetExtension(nombre ?? "").Equals(".pdf", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static string IconoArchivo(string nombre)
     {
         var ext = Path.GetExtension(nombre ?? "").ToLowerInvariant();
@@ -1897,98 +1479,16 @@
         };
     }
 
-    // ---- ADM5: modal visor + notas del documento ----
+    // ---- ADM5: modal visor + notas del documento (componente DocumentoVisorModal) ----
     private DocumentoPacienteDto? _visorDoc;
-    private List<DocumentoNotaDto> _notasDoc = new();
-    private bool _notasBusy;
-    private bool _visorIncluirArch;
-    private string _notaBorrador = "";
-    private bool _notaBusy;
-    private string? _notaError;
 
-    private async Task AbrirVisorAsync(DocumentoPacienteDto d)
+    private Task AbrirVisorAsync(DocumentoPacienteDto d)
     {
         _visorDoc = d;
-        _notasDoc = new();
-        _notaBorrador = "";
-        _notaError = null;
-        _visorIncluirArch = false;
-        await RecargarNotasVisorAsync();
+        return Task.CompletedTask;
     }
 
-    private void CerrarVisor()
-    {
-        _visorDoc = null;
-        _notasDoc = new();
-        _notaBorrador = "";
-        _notaError = null;
-    }
-
-    private async Task RecargarNotasVisorAsync()
-    {
-        if (_visorDoc is null) { return; }
-        _notasBusy = true;
-        try
-        {
-            _notasDoc = (await DocNotaSvc.ListarPorDocumentoAsync(_visorDoc.Id, _visorIncluirArch)).ToList();
-        }
-        catch (Exception ex) { _notaError = "No se pudieron cargar las notas: " + ex.Message; }
-        finally { _notasBusy = false; }
-    }
-
-    private async Task AgregarNotaAsync()
-    {
-        if (_visorDoc is null) { return; }
-        var txt = (_notaBorrador ?? "").Trim();
-        if (txt.Length == 0) { return; }
-        _notaBusy = true; _notaError = null;
-        try
-        {
-            // Resuelve el usuario autor del claim NameIdentifier de la cookie.
-            var actorId = await ResolverUsuarioActualAsync();
-            await DocNotaSvc.AgregarAsync(_visorDoc.Id, txt, actorId);
-            _notaBorrador = "";
-            await RecargarNotasVisorAsync();
-        }
-        catch (Exception ex) { _notaError = "No se pudo agregar la nota: " + ex.Message; }
-        finally { _notaBusy = false; }
-    }
-
-    private async Task ArchivarNotaAsync(Guid notaId)
-    {
-        _notaError = null;
-        try
-        {
-            var actorId = await ResolverUsuarioActualAsync();
-            await DocNotaSvc.ArchivarAsync(notaId, actorId);
-            await RecargarNotasVisorAsync();
-        }
-        catch (Exception ex) { _notaError = "No se pudo archivar: " + ex.Message; }
-    }
-
-    private async Task DesarchivarNotaAsync(Guid notaId)
-    {
-        _notaError = null;
-        try
-        {
-            var actorId = await ResolverUsuarioActualAsync();
-            await DocNotaSvc.DesarchivarAsync(notaId, actorId);
-            await RecargarNotasVisorAsync();
-        }
-        catch (Exception ex) { _notaError = "No se pudo desarchivar: " + ex.Message; }
-    }
-
-    private async Task<Guid> ResolverUsuarioActualAsync()
-    {
-        if (AuthState is null) { return Guid.Empty; }
-        try
-        {
-            var st = await AuthState;
-            var s = st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-            return Guid.TryParse(s, out var g) ? g : Guid.Empty;
-        }
-        catch { return Guid.Empty; }
-    }
+    private void CerrarVisor() => _visorDoc = null;
 
     private static string FormatTam(long bytes)
     {

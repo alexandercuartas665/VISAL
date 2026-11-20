@@ -115,10 +115,30 @@ public sealed class NavMenuConfigService : INavMenuConfigService
                 g = new NavMenuGroupDto { Id = Slug(def.Group), Label = def.Group, IconKey = DefaultGroupIcon(def.Group) };
                 tree.Groups.Add(g);
             }
-            g.Items.Add(ToDto(def));
+            // Se ubica justo despues del item del catalogo que lo precede en su grupo (p.ej.
+            // "Documentos" debajo de "Admision"); si ese no esta en el menu guardado, al final.
+            var idx = IndiceInsercion(g, def);
+            if (idx >= 0) { g.Items.Insert(idx, ToDto(def)); } else { g.Items.Add(ToDto(def)); }
             placed.Add(def.Key);
         }
         return tree;
+    }
+
+    /// <summary>Posicion para un item nuevo del catalogo: despues del item mas cercano que lo
+    /// precede en el catalogo (mismo grupo por defecto) y que ya este en el grupo. -1 = al final.</summary>
+    private static int IndiceInsercion(NavMenuGroupDto g, NavMenuItemDef def)
+    {
+        var catalogo = NavMenuCatalog.Items;
+        var pos = -1;
+        for (var i = 0; i < catalogo.Count; i++) { if (catalogo[i].Key == def.Key) { pos = i; break; } }
+        for (var i = pos - 1; i >= 0; i--)
+        {
+            if (!string.Equals(catalogo[i].Group, def.Group, StringComparison.OrdinalIgnoreCase)) { continue; }
+            var prevKey = catalogo[i].Key;
+            var j = g.Items.FindIndex(x => string.Equals(x.Key, prevKey, StringComparison.OrdinalIgnoreCase));
+            if (j >= 0) { return j + 1; }
+        }
+        return -1;
     }
 
     public async Task SaveAsync(NavMenuTreeDto tree, CancellationToken ct = default)

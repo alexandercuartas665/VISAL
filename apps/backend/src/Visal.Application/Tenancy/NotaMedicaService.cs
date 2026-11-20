@@ -286,15 +286,96 @@ public sealed class NotaMedicaService(
     public async Task<IReadOnlyList<DocumentoPacienteDto>> ListarDocumentosPorPacienteAsync(
         Guid pacienteId, CancellationToken ct = default)
     {
+        using var db = dbFactory.Create();
+        return await ProyectarDocumentosAsync(db,
+            db.NotaMedicaDocumentos.AsNoTracking().Where(d => d.PacienteId == pacienteId),
+            skip: null, take: null, incluirPaciente: false, ct);
+    }
+
+    public async Task<DocumentosGlobalPagina> ListarDocumentosGlobalAsync(
+        DocumentosGlobalFiltro f, CancellationToken ct = default)
+    {
+        using var db = dbFactory.Create();
+        // El filtro global de tenant (query filter) acota al tenant activo.
+        var q = db.NotaMedicaDocumentos.AsNoTracking();
+
+        if (!string.IsNullOrWhiteSpace(f.Categoria))
+        {
+            if (f.Categoria == DocumentosGlobalFiltro.SinCategoria)
+            {
+                q = q.Where(d => d.Categoria == null || d.Categoria == "");
+            }
+            else
+            {
+                var cat = f.Categoria.Trim().ToLower();
+                q = q.Where(d => d.Categoria != null && d.Categoria.ToLower() == cat);
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(f.Subcategoria))
+        {
+            var sub = f.Subcategoria.Trim().ToLower();
+            q = q.Where(d => d.Subcategoria != null && d.Subcategoria.ToLower() == sub);
+        }
+        if (!string.IsNullOrWhiteSpace(f.Paciente))
+        {
+            var pac = f.Paciente.Trim().ToLower();
+            var pacIds = db.Pacientes.AsNoTracking()
+                .Where(p => p.NombreCompleto.ToLower().Contains(pac) || p.NumeroDocumento.ToLower().Contains(pac))
+                .Select(p => p.Id);
+            q = q.Where(d => pacIds.Contains(d.PacienteId));
+        }
+        if (!string.IsNullOrWhiteSpace(f.Texto))
+        {
+            var t = f.Texto.Trim().ToLower();
+            q = q.Where(d => d.NombreOriginal.ToLower().Contains(t)
+                             || (d.Anotaciones != null && d.Anotaciones.ToLower().Contains(t)));
+        }
+        // Con / sin historia de origen: un anexo de nota medica siempre cuelga de la HC de la nota.
+        if (string.Equals(f.Historia, "con", StringComparison.OrdinalIgnoreCase))
+        {
+            q = q.Where(d => d.HistoriaClinicaId != null || d.NotaMedicaId != null);
+        }
+        else if (string.Equals(f.Historia, "sin", StringComparison.OrdinalIgnoreCase))
+        {
+            q = q.Where(d => d.HistoriaClinicaId == null && d.NotaMedicaId == null);
+        }
+        // Rango de fechas por dia de Bogota (UTC-5) -> limites en UTC.
+        var bog = TimeSpan.FromHours(-5);
+        var porFechaDoc = string.Equals(f.CampoFecha, "doc", StringComparison.OrdinalIgnoreCase);
+        if (f.Desde is DateOnly d0)
+        {
+            var desde = new DateTimeOffset(d0.Year, d0.Month, d0.Day, 0, 0, 0, bog).ToUniversalTime();
+            q = porFechaDoc ? q.Where(d => d.FechaDocumento >= desde) : q.Where(d => d.CreatedAt >= desde);
+        }
+        if (f.Hasta is DateOnly d1)
+        {
+            var hasta = new DateTimeOffset(d1.Year, d1.Month, d1.Day, 0, 0, 0, bog).AddDays(1).ToUniversalTime();
+            q = porFechaDoc ? q.Where(d => d.FechaDocumento < hasta) : q.Where(d => d.CreatedAt < hasta);
+        }
+
+        var total = await q.CountAsync(ct);
+        var tam = Math.Clamp(f.TamanoPagina, 10, 200);
+        var pag = Math.Max(1, f.Pagina);
+        var items = await ProyectarDocumentosAsync(db, q, (pag - 1) * tam, tam, incluirPaciente: true, ct);
+        return new DocumentosGlobalPagina(items, total);
+    }
+
+    /// <summary>
+    /// Proyeccion comun del listado de documentos (tab Documentos de Admision y modulo global):
+    /// datos de la nota origen, usuario que subio y la HC de origen (consecutivo, fecha de
+    /// atencion, formato). Orden: mas recientes primero.
+    /// </summary>
+    private static async Task<List<DocumentoPacienteDto>> ProyectarDocumentosAsync(
+        IApplicationDbContext db, IQueryable<NotaMedicaDocumento> baseQ,
+        int? skip, int? take, bool incluirPaciente, CancellationToken ct)
+    {
         // EF Core 9 NO traduce .ToString() sobre un enum dentro de la proyeccion
         // (igual que el caso de Escalas en task #135). Materializamos primero los
         // datos primitivos + el enum tal cual, despues proyectamos al DTO en memoria.
         // LEFT JOIN via SelectMany + DefaultIfEmpty para incluir documentos "libres"
         // que no tienen NotaMedicaId (ej. firmas remotas capturadas desde el chat
         // WhatsApp del paciente sin nota especifica).
-        using var db = dbFactory.Create();
-        var raw = await db.NotaMedicaDocumentos.AsNoTracking()
-            .Where(d => d.PacienteId == pacienteId)
+        var q = baseQ
             .GroupJoin(db.NotasMedicas.AsNoTracking(),
                   d => d.NotaMedicaId,
                   n => n.Id,
@@ -302,7 +383,7 @@ public sealed class NotaMedicaService(
             .SelectMany(x => x.ns.DefaultIfEmpty(),
                         (x, n) => new
                         {
-                            x.d.Id, x.d.NotaMedicaId, x.d.HistoriaClinicaId, x.d.NombreOriginal, x.d.RutaArchivo,
+                            x.d.Id, x.d.NotaMedicaId, x.d.HistoriaClinicaId, x.d.PacienteId, x.d.NombreOriginal, x.d.RutaArchivo,
                             x.d.TipoMime, x.d.Tamano, x.d.Categoria, x.d.Subcategoria, x.d.TipoTerapia, x.d.Mes,
                             x.d.Anotaciones, x.d.CreatedAt, x.d.FechaDocumento,
                             SubidoPor = db.PlatformUsers.Where(u => u.Id == x.d.CreatedBy).Select(u => u.DisplayName).FirstOrDefault(),
@@ -312,8 +393,9 @@ public sealed class NotaMedicaService(
                             // HC de origen: la directa del documento o la de su nota medica.
                             HcOrigenId = x.d.HistoriaClinicaId ?? (n != null ? (Guid?)n.HistoriaClinicaId : null)
                         })
-            .OrderByDescending(x => x.CreatedAt)
-            .ToListAsync(ct);
+            .OrderByDescending(x => x.CreatedAt).ThenBy(x => x.Id);
+        var paged = skip is int sk && take is int tk ? q.Skip(sk).Take(tk) : q;
+        var raw = await paged.ToListAsync(ct);
 
         // Datos de la HC de origen (consecutivo, fecha de atencion, formato) en una sola consulta.
         var hcIds = raw.Where(x => x.HcOrigenId.HasValue).Select(x => x.HcOrigenId!.Value).Distinct().ToList();
@@ -328,6 +410,18 @@ public sealed class NotaMedicaService(
                 })
                 .ToListAsync(ct))
               .ToDictionary(h => h.Id, h => (h.Consecutivo, h.FechaAtencion, h.Formato));
+
+        // Paciente de cada documento (solo la consulta global lo necesita).
+        var pacs = new Dictionary<Guid, (string Nombre, string Documento)>();
+        if (incluirPaciente && raw.Count > 0)
+        {
+            var pacIds = raw.Select(x => x.PacienteId).Distinct().ToList();
+            pacs = (await db.Pacientes.AsNoTracking()
+                    .Where(p => pacIds.Contains(p.Id))
+                    .Select(p => new { p.Id, p.NombreCompleto, p.TipoDocumento, p.NumeroDocumento })
+                    .ToListAsync(ct))
+                .ToDictionary(p => p.Id, p => (p.NombreCompleto, p.TipoDocumento + " " + p.NumeroDocumento));
+        }
 
         return raw
             .Select(x => new DocumentoPacienteDto(
@@ -347,7 +441,10 @@ public sealed class NotaMedicaService(
                 HistoriaClinicaId: x.HcOrigenId,
                 CodigoHc: x.HcOrigenId is Guid h1 && hcs.TryGetValue(h1, out var i1) ? CodigoPublico.Hc(i1.Consecutivo) : null,
                 FechaAtencionHc: x.HcOrigenId is Guid h2 && hcs.TryGetValue(h2, out var i2) ? i2.FechaAtencion : null,
-                FormatoHc: x.HcOrigenId is Guid h3 && hcs.TryGetValue(h3, out var i3) ? i3.Formato : null))
+                FormatoHc: x.HcOrigenId is Guid h3 && hcs.TryGetValue(h3, out var i3) ? i3.Formato : null,
+                PacienteId: x.PacienteId,
+                PacienteNombre: pacs.TryGetValue(x.PacienteId, out var p1) ? p1.Nombre : null,
+                PacienteDocumento: pacs.TryGetValue(x.PacienteId, out var p2) ? p2.Documento : null))
             .ToList();
     }
 

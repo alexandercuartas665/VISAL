@@ -1,0 +1,130 @@
+@using Visal.Application.Tenancy
+@inject INotaMedicaService NotaSvc
+
+@*
+    Modal de edicion de los datos de un documento LIBRE (no anexo de nota medica):
+    tipologia, subcategoria, fecha del documento y observacion. Compartido por el tab
+    Documentos de Admision y el modulo global /documentos.
+*@
+
+@if (Documento is not null)
+{
+    <div class="doc-edit-backdrop" @onclick="CerrarAsync"></div>
+    <div class="doc-edit">
+        <div class="doc-edit-head">
+            <strong>Editar datos del archivo</strong>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarAsync">&times;</button>
+        </div>
+        <div class="doc-edit-name" title="@Documento.NombreOriginal">@Documento.NombreOriginal</div>
+        <div class="doc-edit-body">
+            <label class="doc-edit-lbl">Tipologia</label>
+            <select class="form-select form-select-sm" value="@_tip" @onchange="OnTipChanged">
+                <option value="">(sin tipologia)</option>
+                @foreach (var t in Tipologias)
+                {
+                    <option value="@t.Nombre">@t.Nombre</option>
+                }
+            </select>
+            @* Subcategoria: visible siempre; deshabilitada si la tipologia no tiene subcategorias. *@
+            <label class="doc-edit-lbl">Subcategoria</label>
+            @if (SubcatsDe(_tip).Count > 0)
+            {
+                <select class="form-select form-select-sm" @bind="_subcat">
+                    <option value="">(sin subcategoria)</option>
+                    @foreach (var s in SubcatsDe(_tip))
+                    {
+                        <option value="@s.Nombre">@s.Nombre</option>
+                    }
+                </select>
+            }
+            else
+            {
+                <select class="form-select form-select-sm" disabled>
+                    <option>(esta tipologia no tiene subcategorias)</option>
+                </select>
+                <small class="text-muted" style="font-size:11px;">Elige una tipologia con subcategorias, o configuralas en Configuracion del Sistema -> Tipologia Archivos.</small>
+            }
+            <label class="doc-edit-lbl">Fecha del documento</label>
+            <input type="date" class="form-control form-control-sm" @bind="_fecha" />
+            <label class="doc-edit-lbl">Observacion</label>
+            <input type="text" class="form-control form-control-sm" @bind="_obs"
+                   placeholder="Observacion del archivo" maxlength="500" />
+            @if (_error is not null)
+            {
+                <div class="ase-alert" style="margin-top:8px;">@_error</div>
+            }
+        </div>
+        <div class="doc-edit-acts">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarAsync">Cancelar</button>
+            <button class="btn btn-primary btn-sm" @onclick="GuardarAsync" disabled="@_busy">Guardar</button>
+        </div>
+    </div>
+}
+
+<style>
+    .doc-edit-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 1060; }
+    .doc-edit { position: fixed; z-index: 1061; top: 50%; left: 50%; transform: translate(-50%,-50%); width: min(460px, 94vw); background: #fff; border-radius: 10px; box-shadow: 0 20px 50px rgba(0,0,0,.25); padding: 16px 18px; max-height: 94vh; overflow: auto; }
+    .doc-edit-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+    .doc-edit-name { font-size: 12.5px; font-weight: 600; color: #0f172a; word-break: break-word; margin-bottom: 10px; }
+    .doc-edit-body { display: flex; flex-direction: column; gap: 4px; }
+    .doc-edit-lbl { font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase; letter-spacing: .03em; margin: 6px 0 0; }
+    .doc-edit-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+</style>
+
+@code {
+    /// <summary>Documento a editar; null = modal cerrado.</summary>
+    [Parameter] public DocumentoPacienteDto? Documento { get; set; }
+    [Parameter] public IReadOnlyList<TipologiaArchivoDto> Tipologias { get; set; } = Array.Empty<TipologiaArchivoDto>();
+    [Parameter] public EventCallback OnCerrar { get; set; }
+    [Parameter] public EventCallback OnGuardado { get; set; }
+
+    private Guid? _abiertoPara;
+    private string _tip = "", _subcat = "", _obs = "";
+    private DateOnly? _fecha;
+    private string? _error;
+    private bool _busy;
+
+    protected override void OnParametersSet()
+    {
+        if (Documento?.Id == _abiertoPara) { return; }
+        _abiertoPara = Documento?.Id;
+        _error = null;
+        if (Documento is null) { _tip = _subcat = _obs = ""; _fecha = null; return; }
+        _tip = Documento.Categoria ?? "";
+        _subcat = Documento.Subcategoria ?? "";
+        _obs = Documento.Anotaciones ?? "";
+        _fecha = Documento.FechaDocumento is DateTimeOffset fd
+            ? DateOnly.FromDateTime(fd.ToOffset(DocumentoArchivoUi.Bog).DateTime) : null;
+    }
+
+    private Task CerrarAsync() => OnCerrar.InvokeAsync();
+
+    private void OnTipChanged(ChangeEventArgs e)
+    {
+        _tip = e.Value?.ToString() ?? "";
+        _subcat = ""; // al cambiar la tipologia, la subcategoria anterior ya no aplica
+    }
+
+    private IReadOnlyList<SubcategoriaArchivoDto> SubcatsDe(string? tipNombre)
+    {
+        if (string.IsNullOrWhiteSpace(tipNombre)) { return Array.Empty<SubcategoriaArchivoDto>(); }
+        var t = Tipologias.FirstOrDefault(x => x.Nombre == tipNombre);
+        return t?.Subcategorias ?? (IReadOnlyList<SubcategoriaArchivoDto>)Array.Empty<SubcategoriaArchivoDto>();
+    }
+
+    private async Task GuardarAsync()
+    {
+        if (Documento is null) { return; }
+        _error = null; _busy = true;
+        try
+        {
+            // Si la tipologia elegida no tiene subcategorias, no persistir una subcategoria vieja.
+            var subcat = SubcatsDe(_tip).Count > 0 ? _subcat : "";
+            await NotaSvc.ActualizarDocumentoEditableAsync(
+                Documento.Id, _tip, subcat, _obs, DocumentoArchivoUi.MediodiaBog(_fecha), Guid.Empty);
+            await OnGuardado.InvokeAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+}

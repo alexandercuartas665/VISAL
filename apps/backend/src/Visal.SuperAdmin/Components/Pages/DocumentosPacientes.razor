@@ -1,0 +1,438 @@
+@page "/documentos"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using Visal.Application.Tenancy
+@inject INotaMedicaService NotaSvc
+@inject ITipologiaArchivoService TipSvc
+@inject IJSRuntime JS
+
+@*
+    Modulo "Documentos" (debajo de Admision): consulta GLOBAL de todos los documentos anexos
+    de los pacientes del tenant, con la misma presentacion del tab Documentos de Admision
+    (lista / galeria, visor con notas, editar datos, enlazar a historia clinica) mas la
+    columna de paciente. Filtros por tipologia, subcategoria, paciente, texto, historia de
+    origen y rango de fechas. Paginado en servidor. Mismo permiso que Admision ("pacientes").
+*@
+
+<PageTitle>Documentos de pacientes - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Operacion Clinica</div>
+        <h1 class="ase-title">Documentos de pacientes</h1>
+    </div>
+    <div style="display:flex; gap:8px;">
+        <button class="btn btn-outline-secondary btn-sm" @onclick="BuscarAsync" disabled="@_busy" title="Volver a consultar">&#128260; Refrescar</button>
+    </div>
+</div>
+
+<div class="ase-card">
+    <div class="text-muted" style="font-size:12.5px;margin-bottom:10px;">
+        Todos los archivos anexos de los pacientes: los subidos en Admision, los documentos externos de las historias clinicas,
+        los adjuntos de notas medicas y las firmas capturadas por WhatsApp.
+    </div>
+
+    <div class="docg-filtros">
+        <div class="docg-f">
+            <label>Tipologia</label>
+            <select class="form-select form-select-sm" value="@_fTip" @onchange="OnTipologiaChangedAsync">
+                <option value="">(todas)</option>
+                <option value="@DocumentosGlobalFiltro.SinCategoria">(sin tipologia)</option>
+                @foreach (var t in _tipologiasFiltro)
+                {
+                    <option value="@t.Nombre">@t.Nombre@(t.Activo ? "" : " (inactiva)")</option>
+                }
+            </select>
+        </div>
+        <div class="docg-f">
+            <label>Subcategoria</label>
+            <select class="form-select form-select-sm" @bind="_fSubcat" @bind:after="BuscarDesdeInicioAsync" disabled="@(SubcatsFiltro().Count == 0)">
+                <option value="">(todas)</option>
+                @foreach (var s in SubcatsFiltro())
+                {
+                    <option value="@s.Nombre">@s.Nombre</option>
+                }
+            </select>
+        </div>
+        <div class="docg-f docg-f-wide">
+            <label>Paciente</label>
+            <input type="text" class="form-control form-control-sm" placeholder="Nombre o documento" @bind="_fPaciente" @bind:after="BuscarDesdeInicioAsync" />
+        </div>
+        <div class="docg-f docg-f-wide">
+            <label>Archivo / observacion</label>
+            <input type="text" class="form-control form-control-sm" placeholder="Texto en el nombre o la observacion" @bind="_fTexto" @bind:after="BuscarDesdeInicioAsync" />
+        </div>
+        <div class="docg-f">
+            <label>Historia</label>
+            <select class="form-select form-select-sm" @bind="_fHistoria" @bind:after="BuscarDesdeInicioAsync">
+                <option value="">(todas)</option>
+                <option value="con">Con historia</option>
+                <option value="sin">Sin historia (por enlazar)</option>
+            </select>
+        </div>
+        <div class="docg-f">
+            <label>Fecha por</label>
+            <select class="form-select form-select-sm" @bind="_fCampoFecha" @bind:after="BuscarDesdeInicioAsync">
+                <option value="subido">Fecha de carga</option>
+                <option value="doc">Fecha del documento</option>
+            </select>
+        </div>
+        <div class="docg-f">
+            <label>Desde</label>
+            <input type="date" class="form-control form-control-sm" @bind="_fDesde" @bind:after="BuscarDesdeInicioAsync" />
+        </div>
+        <div class="docg-f">
+            <label>Hasta</label>
+            <input type="date" class="form-control form-control-sm" @bind="_fHasta" @bind:after="BuscarDesdeInicioAsync" />
+        </div>
+        <div class="docg-f">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarAsync" title="Quitar todos los filtros">Limpiar</button>
+        </div>
+    </div>
+
+    <div class="docg-bar">
+        <div class="docg-total">
+            @if (_busy) { <em>Consultando...</em> }
+            else { <span><b>@_total.ToString("N0")</b> documento(s)</span> }
+            @if (_msg is not null) { <span class="hc-info-msg" style="margin-left:10px;">@_msg</span> }
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <div class="docg-pag">
+                <button class="btn btn-outline-secondary btn-sm" @onclick="() => IrAPaginaAsync(_pagina - 1)" disabled="@(_busy || _pagina <= 1)">&lsaquo; Anterior</button>
+                <span>Pagina @_pagina de @TotalPaginas</span>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="() => IrAPaginaAsync(_pagina + 1)" disabled="@(_busy || _pagina >= TotalPaginas)">Siguiente &rsaquo;</button>
+                <select class="form-select form-select-sm" style="width:auto;" @bind="_tamPagina" @bind:after="BuscarDesdeInicioAsync" title="Documentos por pagina">
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                </select>
+            </div>
+            <div class="pac-doc-toggle" role="group">
+                <button class="pac-doc-toggle-btn @(_vista == "lista" ? "active" : "")" @onclick="@(() => _vista = "lista")" title="Vista lista">&#9776; Lista</button>
+                <button class="pac-doc-toggle-btn @(_vista == "galeria" ? "active" : "")" @onclick="@(() => _vista = "galeria")" title="Vista galeria">&#9635; Galeria</button>
+            </div>
+        </div>
+    </div>
+
+    @if (_error is not null)
+    {
+        <div class="ase-alert">@_error</div>
+    }
+
+    @if (!_busy && _docs.Count == 0)
+    {
+        <div class="ase-empty">Ningun documento coincide con los filtros.</div>
+    }
+    else if (_vista == "galeria")
+    {
+        <div class="pac-doc-gallery">
+            @foreach (var d in _docs)
+            {
+                <div class="pac-doc-card" @onclick="() => _visorDoc = d">
+                    <div class="pac-doc-card-thumb">
+                        @if (DocumentoArchivoUi.EsImagen(d.TipoMime, d.NombreOriginal))
+                        {
+                            <img src="@d.RutaArchivo" alt="@d.NombreOriginal" loading="lazy" />
+                        }
+                        else
+                        {
+                            <span class="pac-doc-card-icon">@DocumentoArchivoUi.Icono(d.NombreOriginal)</span>
+                        }
+                    </div>
+                    <div class="pac-doc-card-body">
+                        <div class="docg-pac" title="@d.PacienteDocumento">@(d.PacienteNombre ?? "-")</div>
+                        <div class="pac-doc-cat-row">
+                            @if (!string.IsNullOrWhiteSpace(d.Categoria)) { <span class="pac-doc-cat">@d.Categoria</span> }
+                            else if (d.EsLibre) { <span class="pac-doc-cat pac-doc-cat-empty">Sin categoria</span> }
+                            @if (!string.IsNullOrWhiteSpace(d.Subcategoria)) { <span class="pac-doc-cat pac-doc-subcat">@d.Subcategoria</span> }
+                            @if (d.EsLibre)
+                            {
+                                <button class="btn btn-link btn-sm p-0" title="Editar datos del archivo"
+                                        @onclick="() => _docEdit = d" @onclick:stopPropagation="true">&#9998;</button>
+                            }
+                        </div>
+                        <div class="pac-doc-card-name" title="@d.NombreOriginal">@d.NombreOriginal</div>
+                        <div class="pac-doc-card-meta">@d.CreatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm") &middot; @DocumentoArchivoUi.Tamano(d.Tamano)</div>
+                        @if (d.FechaDocumento is DateTimeOffset fd)
+                        {
+                            <div class="pac-doc-card-meta">&#128197; @DocumentoArchivoUi.Dia(fd)</div>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(d.Anotaciones))
+                        {
+                            <div class="pac-doc-obs" title="Observacion">&#128221; @d.Anotaciones</div>
+                        }
+                        <div class="pac-doc-card-meta" @onclick:stopPropagation="true">
+                            @if (!string.IsNullOrWhiteSpace(d.CodigoHc))
+                            {
+                                <span class="pac-doc-hc" title="@DocumentoArchivoUi.TituloHc(d)">&#128203; @d.CodigoHc</span>
+                            }
+                            else if (d.EsLibre)
+                            {
+                                <button class="btn btn-link btn-sm p-0" style="font-size:11.5px;" title="Enlazar este archivo a una historia clinica del paciente"
+                                        @onclick="() => _docLink = d" @onclick:stopPropagation="true">&#128279; Enlazar a historia</button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="ase-table-wrap">
+            <table class="table table-sm pac-docs-tbl">
+                <thead>
+                    <tr>
+                        <th>Paciente</th>
+                        <th>Categoria</th>
+                        <th>Nombre del archivo</th>
+                        <th title="Historia clinica de la que viene el archivo">Historia</th>
+                        <th>Nota</th>
+                        <th>Fecha doc</th>
+                        <th>Subido</th>
+                        <th>Tamano</th>
+                        <th style="width:150px;">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var d in _docs)
+                    {
+                        <tr>
+                            <td>
+                                <div class="docg-pac">@(d.PacienteNombre ?? "-")</div>
+                                <div class="text-muted" style="font-size:11px;">@d.PacienteDocumento</div>
+                            </td>
+                            <td>
+                                <span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                                    @if (!string.IsNullOrWhiteSpace(d.Categoria)) { <span class="pac-doc-cat">@d.Categoria</span> }
+                                    else { <span class="text-muted">-</span> }
+                                    @if (!string.IsNullOrWhiteSpace(d.Subcategoria)) { <span class="pac-doc-cat pac-doc-subcat">@d.Subcategoria</span> }
+                                    @* Editable solo en documentos libres (no anexos de nota medica). *@
+                                    @if (d.EsLibre)
+                                    {
+                                        <button class="btn btn-link btn-sm p-0" title="Editar datos del archivo" @onclick="() => _docEdit = d">&#9998;</button>
+                                    }
+                                </span>
+                            </td>
+                            <td>
+                                <button class="btn btn-link p-0" style="text-align:left;" @onclick="() => _visorDoc = d" title="Abrir visor">@d.NombreOriginal</button>
+                                @if (!string.IsNullOrWhiteSpace(d.Anotaciones))
+                                {
+                                    <div class="text-muted" style="font-size:11px;" title="Observacion">&#128221; @d.Anotaciones</div>
+                                }
+                            </td>
+                            <td style="white-space:nowrap;">
+                                @if (!string.IsNullOrWhiteSpace(d.CodigoHc))
+                                {
+                                    <span class="pac-doc-hc" title="@DocumentoArchivoUi.TituloHc(d)">@d.CodigoHc</span>
+                                    @if (d.FechaAtencionHc is DateTimeOffset fah)
+                                    {
+                                        <div class="text-muted" style="font-size:11px;">Atencion @DocumentoArchivoUi.Dia(fah)</div>
+                                    }
+                                }
+                                else if (d.EsLibre)
+                                {
+                                    <button class="btn btn-sm pac-doc-hc-btn" title="Enlazar este archivo a una historia clinica del paciente"
+                                            @onclick="() => _docLink = d">&#128279; Enlazar</button>
+                                }
+                                else { <span class="text-muted">-</span> }
+                            </td>
+                            <td>
+                                @if (!string.IsNullOrWhiteSpace(d.CodigoNota)) { <span class="text-muted">@d.CodigoNota</span> }
+                                else if (d.NotaMedicaId is Guid nid) { <span class="text-muted">@nid.ToString("N")[..8]</span> }
+                                else { <span class="badge bg-info">Directo</span> }
+                            </td>
+                            <td>@(d.FechaDocumento is DateTimeOffset fdoc ? DocumentoArchivoUi.Dia(fdoc) : "-")</td>
+                            <td>
+                                @d.CreatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm")
+                                @if (!string.IsNullOrWhiteSpace(d.SubidoPor))
+                                {
+                                    <div class="text-muted" style="font-size:11px;">@d.SubidoPor</div>
+                                }
+                            </td>
+                            <td>@DocumentoArchivoUi.Tamano(d.Tamano)</td>
+                            <td style="white-space:nowrap;">
+                                <button class="btn btn-outline-secondary btn-sm" title="Abrir en visor" @onclick="() => _visorDoc = d">&#128065;</button>
+                                <a class="btn btn-outline-secondary btn-sm" href="@d.RutaArchivo" target="_blank" title="Abrir / descargar">&#128190;</a>
+                                @if (d.NotaMedicaId is null)
+                                {
+                                    <button class="btn btn-outline-danger btn-sm" @onclick="() => EliminarAsync(d)" disabled="@_busy"
+                                            title="Eliminar este archivo">&#128465;</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    @if (TotalPaginas > 1)
+    {
+        <div class="docg-pag" style="justify-content:flex-end;margin-top:10px;">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => IrAPaginaAsync(_pagina - 1)" disabled="@(_busy || _pagina <= 1)">&lsaquo; Anterior</button>
+            <span>Pagina @_pagina de @TotalPaginas</span>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => IrAPaginaAsync(_pagina + 1)" disabled="@(_busy || _pagina >= TotalPaginas)">Siguiente &rsaquo;</button>
+        </div>
+    }
+</div>
+
+<DocumentoVisorModal Documento="_visorDoc" OnCerrar="() => _visorDoc = null" />
+<DocumentoEditarModal Documento="_docEdit" Tipologias="_tipologiasEdit" OnCerrar="() => _docEdit = null" OnGuardado="OnEditadoAsync" />
+<DocumentoEnlazarHcModal Documento="_docLink" OnCerrar="() => _docLink = null" OnEnlazado="OnEnlazadoAsync" />
+
+<style>
+    .docg-filtros { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 12px; }
+    .docg-f label { font-size: 11px; font-weight: 600; color: #334155; margin-bottom: 3px; display: block; }
+    .docg-f select, .docg-f input { min-width: 140px; }
+    .docg-f-wide input { min-width: 200px; }
+    .docg-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+    .docg-total { font-size: 13px; color: #334155; }
+    .docg-pag { display: flex; gap: 8px; align-items: center; font-size: 12.5px; color: #475569; }
+    .docg-pac { font-weight: 600; color: #0f172a; font-size: 12px; }
+    .pac-docs-tbl { font-size: 12.5px; }
+    .pac-docs-tbl thead th { font-size: 11px; font-weight: 700; color: #475569; text-transform: uppercase; letter-spacing: .04em; background: #f1f5f9; }
+    .pac-doc-cat { display: inline-block; padding: 2px 8px; border-radius: 999px; background: #ecfdf5; color: #047857; font-size: 11px; font-weight: 700; }
+    .pac-doc-subcat { background: #eef2ff; color: #4338ca; }
+    .pac-doc-cat-empty { background: #f1f5f9; color: #64748b; }
+    .pac-doc-cat-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .pac-doc-obs { font-size: 11px; color: #334155; background: #f8fafc; border-left: 3px solid #cbd5e1; padding: 3px 6px; border-radius: 4px; margin-top: 4px; word-break: break-word; }
+    .pac-doc-hc { display: inline-block; font-size: 11.5px; font-weight: 700; color: #0f766e; background: #ccfbf1; border-radius: 999px; padding: 2px 8px; cursor: help; }
+    .pac-doc-hc-btn { font-size: 11.5px; padding: 1px 8px; color: #1d4ed8; border: 1px solid #93c5fd; background: #eff6ff; }
+    .pac-doc-hc-btn:hover { background: #dbeafe; color: #1e40af; }
+    .pac-doc-toggle { display: inline-flex; border: 1px solid #cbd5e1; border-radius: 6px; overflow: hidden; }
+    .pac-doc-toggle-btn { background: #fff; border: none; padding: 6px 12px; font-size: 12px; color: #475569; cursor: pointer; }
+    .pac-doc-toggle-btn.active { background: #1565c0; color: #fff; font-weight: 600; }
+    .pac-doc-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+    .pac-doc-card { background: #fff; border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; cursor: pointer; transition: all .15s; }
+    .pac-doc-card:hover { border-color: #1565c0; box-shadow: 0 4px 10px rgba(0,0,0,.06); transform: translateY(-1px); }
+    .pac-doc-card-thumb { height: 120px; background: #f1f5f9; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .pac-doc-card-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .pac-doc-card-icon { font-size: 44px; }
+    .pac-doc-card-body { padding: 8px 10px; }
+    .pac-doc-card-name { font-size: 12px; font-weight: 600; color: #0f172a; margin: 4px 0 2px; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .pac-doc-card-meta { font-size: 10.5px; color: #64748b; }
+</style>
+
+@code {
+    private List<DocumentoPacienteDto> _docs = new();
+    private int _total;
+    private int _pagina = 1;
+    private int _tamPagina = 50;
+    private bool _busy;
+    private string? _error, _msg;
+    private string _vista = "lista";
+
+    // Filtros
+    private string _fTip = "", _fSubcat = "", _fPaciente = "", _fTexto = "", _fHistoria = "", _fCampoFecha = "subido";
+    private DateOnly? _fDesde, _fHasta;
+
+    private List<TipologiaArchivoDto> _tipologiasFiltro = new();
+    private List<TipologiaArchivoDto> _tipologiasEdit = new();
+
+    // Modales compartidos (null = cerrado)
+    private DocumentoPacienteDto? _visorDoc, _docEdit, _docLink;
+
+    private int TotalPaginas => Math.Max(1, (int)Math.Ceiling(_total / (double)_tamPagina));
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            // Filtro: todas (incluye inactivas, pueden tener documentos historicos). Edicion: solo activas.
+            _tipologiasFiltro = (await TipSvc.ListAsync(soloActivos: false)).OrderBy(t => t.Nombre).ToList();
+            _tipologiasEdit = _tipologiasFiltro.Where(t => t.Activo).ToList();
+        }
+        catch { _tipologiasFiltro = new(); _tipologiasEdit = new(); }
+        await BuscarAsync();
+    }
+
+    private IReadOnlyList<SubcategoriaArchivoDto> SubcatsFiltro()
+    {
+        if (string.IsNullOrWhiteSpace(_fTip) || _fTip == DocumentosGlobalFiltro.SinCategoria) { return Array.Empty<SubcategoriaArchivoDto>(); }
+        var t = _tipologiasFiltro.FirstOrDefault(x => x.Nombre == _fTip);
+        return t?.Subcategorias ?? (IReadOnlyList<SubcategoriaArchivoDto>)Array.Empty<SubcategoriaArchivoDto>();
+    }
+
+    private async Task OnTipologiaChangedAsync(ChangeEventArgs e)
+    {
+        _fTip = e.Value?.ToString() ?? "";
+        _fSubcat = ""; // la subcategoria pertenece a la tipologia
+        await BuscarDesdeInicioAsync();
+    }
+
+    private async Task BuscarDesdeInicioAsync()
+    {
+        _pagina = 1;
+        await BuscarAsync();
+    }
+
+    private async Task IrAPaginaAsync(int p)
+    {
+        if (p < 1 || p > TotalPaginas) { return; }
+        _pagina = p;
+        await BuscarAsync();
+    }
+
+    private async Task BuscarAsync()
+    {
+        _busy = true; _error = null;
+        try
+        {
+            var r = await NotaSvc.ListarDocumentosGlobalAsync(new DocumentosGlobalFiltro(
+                Categoria: string.IsNullOrWhiteSpace(_fTip) ? null : _fTip,
+                Subcategoria: string.IsNullOrWhiteSpace(_fSubcat) ? null : _fSubcat,
+                Paciente: _fPaciente,
+                Texto: _fTexto,
+                Historia: string.IsNullOrWhiteSpace(_fHistoria) ? null : _fHistoria,
+                CampoFecha: _fCampoFecha,
+                Desde: _fDesde,
+                Hasta: _fHasta,
+                Pagina: _pagina,
+                TamanoPagina: _tamPagina));
+            _docs = r.Items.ToList();
+            _total = r.Total;
+            if (_pagina > TotalPaginas) { _pagina = TotalPaginas; }
+        }
+        catch (Exception ex) { _docs = new(); _total = 0; _error = "No se pudieron consultar los documentos: " + ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task LimpiarAsync()
+    {
+        _fTip = _fSubcat = _fPaciente = _fTexto = _fHistoria = "";
+        _fCampoFecha = "subido";
+        _fDesde = _fHasta = null;
+        _msg = null;
+        await BuscarDesdeInicioAsync();
+    }
+
+    private async Task OnEditadoAsync()
+    {
+        _docEdit = null;
+        _msg = "Datos del archivo actualizados.";
+        await BuscarAsync();
+    }
+
+    private async Task OnEnlazadoAsync(string codigoHc)
+    {
+        _msg = $"Archivo enlazado a {codigoHc}.";
+        _docLink = null;
+        await BuscarAsync();
+    }
+
+    private async Task EliminarAsync(DocumentoPacienteDto d)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm",
+                $"Eliminar el documento \"{d.NombreOriginal}\" del paciente {d.PacienteNombre}?")) { return; }
+        _busy = true; _error = null; _msg = null;
+        try
+        {
+            await NotaSvc.EliminarDocumentoAsync(d.Id, Guid.Empty);
+            _msg = "Documento eliminado.";
+        }
+        catch (Exception ex) { _error = "No se pudo eliminar: " + ex.Message; }
+        finally { _busy = false; }
+        await BuscarAsync();
+    }
+}

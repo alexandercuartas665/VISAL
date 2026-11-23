@@ -187,92 +187,12 @@
     }
     else
     {
-        <div class="ase-table-wrap">
-            <table class="table table-sm pac-docs-tbl">
-                <thead>
-                    <tr>
-                        <th>Paciente</th>
-                        <th>Categoria</th>
-                        <th>Nombre del archivo</th>
-                        <th title="Historia clinica de la que viene el archivo">Historia</th>
-                        <th>Nota</th>
-                        <th>Fecha doc</th>
-                        <th>Subido</th>
-                        <th>Tamano</th>
-                        <th style="width:150px;">Acciones</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @foreach (var d in _docs)
-                    {
-                        <tr>
-                            <td>
-                                <div class="docg-pac">@(d.PacienteNombre ?? "-")</div>
-                                <div class="text-muted" style="font-size:11px;">@d.PacienteDocumento</div>
-                            </td>
-                            <td>
-                                <span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                                    @if (!string.IsNullOrWhiteSpace(d.Categoria)) { <span class="pac-doc-cat">@d.Categoria</span> }
-                                    else { <span class="text-muted">-</span> }
-                                    @if (!string.IsNullOrWhiteSpace(d.Subcategoria)) { <span class="pac-doc-cat pac-doc-subcat">@d.Subcategoria</span> }
-                                    @* Editable solo en documentos libres (no anexos de nota medica). *@
-                                    @if (d.EsLibre)
-                                    {
-                                        <button class="btn btn-link btn-sm p-0" title="Editar datos del archivo" @onclick="() => _docEdit = d">&#9998;</button>
-                                    }
-                                </span>
-                            </td>
-                            <td>
-                                <button class="btn btn-link p-0" style="text-align:left;" @onclick="() => _visorDoc = d" title="Abrir visor">@d.NombreOriginal</button>
-                                @if (!string.IsNullOrWhiteSpace(d.Anotaciones))
-                                {
-                                    <div class="text-muted" style="font-size:11px;" title="Observacion">&#128221; @d.Anotaciones</div>
-                                }
-                            </td>
-                            <td style="white-space:nowrap;">
-                                @if (!string.IsNullOrWhiteSpace(d.CodigoHc))
-                                {
-                                    <span class="pac-doc-hc" title="@DocumentoArchivoUi.TituloHc(d)">@d.CodigoHc</span>
-                                    @if (d.FechaAtencionHc is DateTimeOffset fah)
-                                    {
-                                        <div class="text-muted" style="font-size:11px;">Atencion @DocumentoArchivoUi.Dia(fah)</div>
-                                    }
-                                }
-                                else if (d.EsLibre)
-                                {
-                                    <button class="btn btn-sm pac-doc-hc-btn" title="Enlazar este archivo a una historia clinica del paciente"
-                                            @onclick="() => _docLink = d">&#128279; Enlazar</button>
-                                }
-                                else { <span class="text-muted">-</span> }
-                            </td>
-                            <td>
-                                @if (!string.IsNullOrWhiteSpace(d.CodigoNota)) { <span class="text-muted">@d.CodigoNota</span> }
-                                else if (d.NotaMedicaId is Guid nid) { <span class="text-muted">@nid.ToString("N")[..8]</span> }
-                                else { <span class="badge bg-info">Directo</span> }
-                            </td>
-                            <td>@(d.FechaDocumento is DateTimeOffset fdoc ? DocumentoArchivoUi.Dia(fdoc) : "-")</td>
-                            <td>
-                                @d.CreatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm")
-                                @if (!string.IsNullOrWhiteSpace(d.SubidoPor))
-                                {
-                                    <div class="text-muted" style="font-size:11px;">@d.SubidoPor</div>
-                                }
-                            </td>
-                            <td>@DocumentoArchivoUi.Tamano(d.Tamano)</td>
-                            <td style="white-space:nowrap;">
-                                <button class="btn btn-outline-secondary btn-sm" title="Abrir en visor" @onclick="() => _visorDoc = d">&#128065;</button>
-                                <a class="btn btn-outline-secondary btn-sm" href="@d.RutaArchivo" target="_blank" title="Abrir / descargar">&#128190;</a>
-                                @if (d.NotaMedicaId is null)
-                                {
-                                    <button class="btn btn-outline-danger btn-sm" @onclick="() => EliminarAsync(d)" disabled="@_busy"
-                                            title="Eliminar este archivo">&#128465;</button>
-                                }
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
+        @* Tabla con columnas configurables (orden y visibilidad, guardado en el navegador). *@
+        <DocumentosTabla Docs="_docs" MostrarPaciente="true" StorageKey="visal.doccols.global"
+                         OcultasPorDefecto="@(new[] { "fechanota" })"
+                         EliminarDeshabilitado="_busy"
+                         OnVer="d => _visorDoc = d" OnEditar="d => _docEdit = d" OnEnlazar="d => _docLink = d"
+                         OnEliminar="EliminarAsync" />
     }
 
     @if (TotalPaginas > 1)

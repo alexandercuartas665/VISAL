@@ -1,0 +1,279 @@
+@using System.Text.Json
+@using Visal.Application.Tenancy
+@inject IJSRuntime JS
+
+@*
+    Tabla (vista Lista) de documentos anexos de pacientes, compartida por el tab Documentos de
+    Admision y el modulo global /documentos. Columnas CONFIGURABLES por el usuario: orden y
+    visibilidad desde el boton "Columnas"; la preferencia se guarda en el navegador
+    (localStorage, mismo mecanismo que los filtros de Snapshots y el menu) bajo StorageKey.
+*@
+
+<div class="dtab-bar">
+    <div class="dtab-cols-wrap">
+        <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => _panel = !_panel"
+                title="Elegir y ordenar las columnas de la tabla">&#9881; Columnas</button>
+        @if (_panel)
+        {
+            <div class="dtab-cols-backdrop" @onclick="() => _panel = false"></div>
+            <div class="dtab-cols-panel">
+                <div class="dtab-cols-h">
+                    <span>Columnas visibles y orden</span>
+                    <button type="button" class="btn btn-link btn-sm p-0" @onclick="RestablecerAsync">Restablecer</button>
+                </div>
+                @for (var i = 0; i < _cols.Count; i++)
+                {
+                    var idx = i;
+                    var c = _cols[idx];
+                    <div class="dtab-col-row @(c.Visible ? "" : "off")">
+                        <label>
+                            <input type="checkbox" checked="@c.Visible" @onchange="e => CambiarVisibleAsync(idx, e)" />
+                            @Titulo(c.Key)
+                        </label>
+                        <span class="dtab-col-arrows">
+                            <button type="button" class="dtab-arrow" title="Subir" disabled="@(idx == 0)" @onclick="() => MoverAsync(idx, -1)">&#9650;</button>
+                            <button type="button" class="dtab-arrow" title="Bajar" disabled="@(idx == _cols.Count - 1)" @onclick="() => MoverAsync(idx, 1)">&#9660;</button>
+                        </span>
+                    </div>
+                }
+                <div class="dtab-cols-nota">Se guarda en este navegador para tu usuario.</div>
+            </div>
+        }
+    </div>
+</div>
+
+<div class="ase-table-wrap">
+    <table class="table table-sm pac-docs-tbl">
+        <thead>
+            <tr>
+                @foreach (var c in Visibles())
+                {
+                    <th style="@(c.Key == "acciones" ? "width:150px;" : "")" title="@(c.Key == "historia" ? "Historia clinica de la que viene el archivo" : null)">@Titulo(c.Key)</th>
+                }
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var d in Docs)
+            {
+                <tr>
+                    @foreach (var c in Visibles())
+                    {
+                        @Celda(c.Key, d)
+                    }
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+<style>
+    .dtab-bar { display: flex; justify-content: flex-end; margin-bottom: 6px; }
+    .dtab-cols-wrap { position: relative; }
+    .dtab-cols-backdrop { position: fixed; inset: 0; z-index: 40; }
+    .dtab-cols-panel { position: absolute; right: 0; top: calc(100% + 4px); z-index: 41; width: 270px; background: #fff; border: 1px solid #cbd5e1; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.15); padding: 8px 10px; }
+    .dtab-cols-h { display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 700; color: #334155; margin-bottom: 6px; }
+    .dtab-col-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 4px; border-radius: 5px; font-size: 12.5px; }
+    .dtab-col-row:hover { background: #f1f5f9; }
+    .dtab-col-row.off label { color: #94a3b8; }
+    .dtab-col-row label { display: flex; gap: 6px; align-items: center; margin: 0; cursor: pointer; }
+    .dtab-col-arrows { display: inline-flex; gap: 2px; }
+    .dtab-arrow { border: 1px solid #cbd5e1; background: #fff; border-radius: 4px; font-size: 9px; line-height: 1; padding: 3px 5px; color: #475569; cursor: pointer; }
+    .dtab-arrow:disabled { opacity: .35; cursor: default; }
+    .dtab-cols-nota { font-size: 10.5px; color: #94a3b8; margin-top: 6px; }
+</style>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<DocumentoPacienteDto> Docs { get; set; } = Array.Empty<DocumentoPacienteDto>();
+    /// <summary>True en la consulta global: ofrece la columna Paciente.</summary>
+    [Parameter] public bool MostrarPaciente { get; set; }
+    /// <summary>Clave de localStorage para la preferencia de columnas de esta vista.</summary>
+    [Parameter, EditorRequired] public string StorageKey { get; set; } = "";
+    /// <summary>Columnas ocultas por defecto (antes de que el usuario configure).</summary>
+    [Parameter] public IReadOnlyCollection<string> OcultasPorDefecto { get; set; } = Array.Empty<string>();
+    [Parameter] public bool EliminarDeshabilitado { get; set; }
+    [Parameter] public EventCallback<DocumentoPacienteDto> OnVer { get; set; }
+    [Parameter] public EventCallback<DocumentoPacienteDto> OnEditar { get; set; }
+    [Parameter] public EventCallback<DocumentoPacienteDto> OnEnlazar { get; set; }
+    [Parameter] public EventCallback<DocumentoPacienteDto> OnEliminar { get; set; }
+
+    private sealed class ColCfg
+    {
+        public string Key { get; set; } = "";
+        public bool Visible { get; set; } = true;
+    }
+
+    // Orden por defecto de las columnas (la de Paciente solo existe en la vista global).
+    private static readonly (string Key, string Titulo)[] Catalogo =
+    {
+        ("paciente", "Paciente"),
+        ("categoria", "Categoria"),
+        ("nombre", "Nombre del archivo"),
+        ("historia", "Historia"),
+        ("nota", "Nota"),
+        ("fechanota", "Fecha nota"),
+        ("fechadoc", "Fecha doc"),
+        ("subido", "Subido"),
+        ("subidopor", "Subido por"),
+        ("tamano", "Tamano"),
+        ("acciones", "Acciones"),
+    };
+
+    private List<ColCfg> _cols = new();
+    private bool _panel;
+    private bool _cargado;
+
+    private static string Titulo(string key) => Catalogo.FirstOrDefault(c => c.Key == key).Titulo ?? key;
+
+    private IEnumerable<string> ClavesDisponibles() =>
+        Catalogo.Select(c => c.Key).Where(k => MostrarPaciente || k != "paciente");
+
+    private List<ColCfg> Defecto() =>
+        ClavesDisponibles().Select(k => new ColCfg { Key = k, Visible = !OcultasPorDefecto.Contains(k) }).ToList();
+
+    private IEnumerable<ColCfg> Visibles() => _cols.Where(c => c.Visible);
+
+    protected override void OnParametersSet()
+    {
+        if (_cols.Count == 0) { _cols = Defecto(); }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _cargado) { return; }
+        _cargado = true;
+        try
+        {
+            var json = await JS.InvokeAsync<string?>("localStorage.getItem", StorageKey);
+            if (string.IsNullOrWhiteSpace(json)) { return; }
+            var guardadas = JsonSerializer.Deserialize<List<ColCfg>>(json) ?? new();
+            var disponibles = ClavesDisponibles().ToList();
+            // Respeta el orden/visibilidad guardados; ignora claves que ya no existen y agrega
+            // al final las columnas nuevas (con su visibilidad por defecto).
+            var merged = guardadas.Where(g => disponibles.Contains(g.Key)).GroupBy(g => g.Key).Select(g => g.First()).ToList();
+            foreach (var k in disponibles.Where(k => merged.All(m => m.Key != k)))
+            {
+                merged.Add(new ColCfg { Key = k, Visible = !OcultasPorDefecto.Contains(k) });
+            }
+            _cols = merged;
+            StateHasChanged();
+        }
+        catch { /* localStorage no disponible o JSON corrupto: columnas por defecto */ }
+    }
+
+    private async Task GuardarAsync()
+    {
+        try { await JS.InvokeVoidAsync("localStorage.setItem", StorageKey, JsonSerializer.Serialize(_cols)); }
+        catch { /* sin localStorage: la preferencia vale solo para esta pantalla */ }
+    }
+
+    private async Task CambiarVisibleAsync(int idx, ChangeEventArgs e)
+    {
+        var visible = e.Value is bool b ? b : string.Equals(e.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+        // Al menos una columna visible.
+        if (!visible && _cols.Count(c => c.Visible) <= 1) { return; }
+        _cols[idx].Visible = visible;
+        await GuardarAsync();
+    }
+
+    private async Task MoverAsync(int idx, int delta)
+    {
+        var j = idx + delta;
+        if (j < 0 || j >= _cols.Count) { return; }
+        (_cols[idx], _cols[j]) = (_cols[j], _cols[idx]);
+        await GuardarAsync();
+    }
+
+    private async Task RestablecerAsync()
+    {
+        _cols = Defecto();
+        try { await JS.InvokeVoidAsync("localStorage.removeItem", StorageKey); } catch { }
+    }
+
+    private RenderFragment Celda(string key, DocumentoPacienteDto d) => __builder =>
+    {
+        switch (key)
+        {
+            case "paciente":
+                <td>
+                    <div style="font-weight:600;color:#0f172a;font-size:12px;">@(d.PacienteNombre ?? "-")</div>
+                    <div class="text-muted" style="font-size:11px;">@d.PacienteDocumento</div>
+                </td>
+                break;
+            case "categoria":
+                <td>
+                    <span style="display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                        @if (!string.IsNullOrWhiteSpace(d.Categoria)) { <span class="pac-doc-cat">@d.Categoria</span> }
+                        else { <span class="text-muted">-</span> }
+                        @if (!string.IsNullOrWhiteSpace(d.Subcategoria)) { <span class="pac-doc-cat pac-doc-subcat">@d.Subcategoria</span> }
+                        @* Editable solo en documentos libres (no anexos de nota medica). *@
+                        @if (d.EsLibre)
+                        {
+                            <button class="btn btn-link btn-sm p-0" title="Editar datos del archivo" @onclick="() => OnEditar.InvokeAsync(d)">&#9998;</button>
+                        }
+                    </span>
+                </td>
+                break;
+            case "nombre":
+                <td>
+                    <button class="btn btn-link p-0" style="text-align:left;" @onclick="() => OnVer.InvokeAsync(d)" title="Abrir visor">@d.NombreOriginal</button>
+                    @if (!string.IsNullOrWhiteSpace(d.Anotaciones))
+                    {
+                        <div class="text-muted" style="font-size:11px;" title="Observacion">&#128221; @d.Anotaciones</div>
+                    }
+                </td>
+                break;
+            case "historia":
+                <td style="white-space:nowrap;">
+                    @* HC de origen (directa o via la nota medica); si es suelto, se puede enlazar. *@
+                    @if (!string.IsNullOrWhiteSpace(d.CodigoHc))
+                    {
+                        <span class="pac-doc-hc" title="@DocumentoArchivoUi.TituloHc(d)">@d.CodigoHc</span>
+                        @if (d.FechaAtencionHc is DateTimeOffset fah)
+                        {
+                            <div class="text-muted" style="font-size:11px;">Atencion @DocumentoArchivoUi.Dia(fah)</div>
+                        }
+                    }
+                    else if (d.EsLibre)
+                    {
+                        <button class="btn btn-sm pac-doc-hc-btn" title="Enlazar este archivo a una historia clinica del paciente"
+                                @onclick="() => OnEnlazar.InvokeAsync(d)">&#128279; Enlazar</button>
+                    }
+                    else { <span class="text-muted">-</span> }
+                </td>
+                break;
+            case "nota":
+                <td>
+                    @if (!string.IsNullOrWhiteSpace(d.CodigoNota)) { <span class="text-muted">@d.CodigoNota</span> }
+                    else if (d.NotaMedicaId is Guid nid) { <span class="text-muted">@nid.ToString("N")[..8]</span> }
+                    else { <span class="badge bg-info">Directo</span> }
+                </td>
+                break;
+            case "fechanota":
+                <td>@(d.FechaNota?.ToString("dd/MM/yyyy") ?? "-")</td>
+                break;
+            case "fechadoc":
+                <td>@(d.FechaDocumento is DateTimeOffset fdoc ? DocumentoArchivoUi.Dia(fdoc) : "-")</td>
+                break;
+            case "subido":
+                <td>@d.CreatedAt.LocalDateTime.ToString("dd/MM/yyyy HH:mm")</td>
+                break;
+            case "subidopor":
+                <td>@(string.IsNullOrWhiteSpace(d.SubidoPor) ? "-" : d.SubidoPor)</td>
+                break;
+            case "tamano":
+                <td>@DocumentoArchivoUi.Tamano(d.Tamano)</td>
+                break;
+            case "acciones":
+                <td style="white-space:nowrap;">
+                    <button class="btn btn-outline-secondary btn-sm" title="Abrir en visor" @onclick="() => OnVer.InvokeAsync(d)">&#128065;</button>
+                    <a class="btn btn-outline-secondary btn-sm" href="@d.RutaArchivo" target="_blank" title="Abrir / descargar">&#128190;</a>
+                    @if (d.NotaMedicaId is null && OnEliminar.HasDelegate)
+                    {
+                        <button class="btn btn-outline-danger btn-sm" @onclick="() => OnEliminar.InvokeAsync(d)"
+                                disabled="@EliminarDeshabilitado" title="Eliminar este archivo">&#128465;</button>
+                    }
+                </td>
+                break;
+        }
+    };
+}

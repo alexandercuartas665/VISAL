@@ -605,10 +605,20 @@
                             <option value="@c">@c</option>
                         }
                     </select>
-                    <input class="form-control form-control-sm" style="width:180px;" placeholder="contiene..."
-                           @bind="_nfVal" @bind:event="oninput" @onkeyup="OnNuevoFiltroKey" />
+                    <select class="form-select form-select-sm" style="width:160px;" @bind="_nfOp" title="Operador del filtro">
+                        @foreach (var o in SnapshotFiltroOperador.Todos)
+                        {
+                            <option value="@o.Codigo">@o.Etiqueta</option>
+                        }
+                    </select>
+                    @if (!SnapshotFiltroOperador.SinValor(_nfOp))
+                    {
+                        <input class="form-control form-control-sm" style="width:180px;" placeholder="@PlaceholderFiltro()"
+                               @bind="_nfVal" @bind:event="oninput" @onkeyup="OnNuevoFiltroKey"
+                               title="Numeros: 0, 46800. Fechas: dd/mm/aaaa. Mayor/menor compara numeros y fechas." />
+                    }
                     <button class="btn btn-outline-primary btn-sm" @onclick="AgregarFiltro"
-                            disabled="@(string.IsNullOrWhiteSpace(_nfCol) || string.IsNullOrWhiteSpace(_nfVal))">+ Agregar filtro</button>
+                            disabled="@(string.IsNullOrWhiteSpace(_nfCol) || (!SnapshotFiltroOperador.SinValor(_nfOp) && string.IsNullOrWhiteSpace(_nfVal)))">+ Agregar filtro</button>
                     @if (_verFiltros.Count > 0)
                     {
                         <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarFiltros">Limpiar filtros (@_verFiltros.Count)</button>
@@ -622,7 +632,7 @@
                             var idx = i;
                             var f = _verFiltros[i];
                             <span style="display:inline-flex;align-items:center;gap:6px;background:#e0f2fe;color:#075985;border:1px solid #bae6fd;border-radius:12px;padding:2px 8px;font-size:12px;">
-                                <span><b>@f.Columna</b>: @f.Valor</span>
+                                <span><b>@f.Columna</b> <i>@SnapshotFiltroOperador.Etiqueta(f.Operador)</i>@(SnapshotFiltroOperador.SinValor(f.Operador) ? "" : " " + f.Valor)</span>
                                 <button type="button" title="Quitar filtro" @onclick="() => QuitarFiltro(idx)"
                                         style="border:none;background:transparent;color:#0369a1;cursor:pointer;font-size:14px;line-height:1;padding:0;">&times;</button>
                             </span>
@@ -1741,15 +1751,26 @@
     private string? _verColorFiltro;
     private string? _verObsFiltro;   // "__con__" = solo filas con observacion; null = todas.
 
-    // Filtros por columna apilables (cascada, AND). El operador siempre es "contiene".
+    // Filtros por columna apilables (cascada, AND), cada uno con su operador
+    // (contiene, igual, distinto, mayor/menor, vacio...; ver SnapshotFiltroOperador).
     private readonly List<FiltroColumna> _verFiltros = new();
     private string _nfCol = "";   // columna elegida para el nuevo filtro
+    private string _nfOp = SnapshotFiltroOperador.Contiene;   // operador del nuevo filtro
     private string _nfVal = "";   // valor del nuevo filtro
+
+    private string PlaceholderFiltro() => _nfOp switch
+    {
+        SnapshotFiltroOperador.Mayor or SnapshotFiltroOperador.Menor
+            or SnapshotFiltroOperador.MayorIgual or SnapshotFiltroOperador.MenorIgual => "numero o dd/mm/aaaa",
+        SnapshotFiltroOperador.Igual or SnapshotFiltroOperador.Distinto => "valor exacto",
+        _ => "texto...",
+    };
 
     private async Task AgregarFiltro()
     {
-        if (string.IsNullOrWhiteSpace(_nfCol) || string.IsNullOrWhiteSpace(_nfVal)) { return; }
-        _verFiltros.Add(new FiltroColumna(_nfCol, _nfVal.Trim()));
+        var sinValor = SnapshotFiltroOperador.SinValor(_nfOp);
+        if (string.IsNullOrWhiteSpace(_nfCol) || (!sinValor && string.IsNullOrWhiteSpace(_nfVal))) { return; }
+        _verFiltros.Add(new FiltroColumna(_nfCol, sinValor ? "" : _nfVal.Trim(), SnapshotFiltroOperador.Normalizar(_nfOp)));
         _nfVal = "";
         _verPagina = 1;
         await GuardarFiltrosVerAsync();
@@ -2034,7 +2055,8 @@
             if (dto.Filtros is not null)
             {
                 _verFiltros.AddRange(dto.Filtros.Where(f =>
-                    f is not null && !string.IsNullOrWhiteSpace(f.Columna) && !string.IsNullOrWhiteSpace(f.Valor)));
+                    f is not null && !string.IsNullOrWhiteSpace(f.Columna)
+                    && (!string.IsNullOrWhiteSpace(f.Valor) || SnapshotFiltroOperador.SinValor(f.Operador))));
             }
             _verColorFiltro = string.IsNullOrWhiteSpace(dto.Color) ? null : dto.Color;
             _verObsFiltro = string.IsNullOrWhiteSpace(dto.Obs) ? null : dto.Obs;

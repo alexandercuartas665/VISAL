@@ -82,9 +82,10 @@ public sealed record CompletarCodigosResultado(
     int FilasReparadas,
     int TotalFilas);
 
-/// <summary>Filtro por columna del detalle de un snapshot (contains, case-insensitive).
-/// Varios se combinan con AND (cascada). La columna debe existir en el catalogo del builder.</summary>
-public sealed record FiltroColumna(string Columna, string Valor);
+/// <summary>Filtro por columna del detalle de un snapshot. Varios se combinan con AND (cascada).
+/// La columna debe existir en el catalogo del builder. <paramref name="Operador"/> es uno de
+/// <see cref="SnapshotFiltroOperador"/> (null = "contiene", compatibilidad con filtros guardados).</summary>
+public sealed record FiltroColumna(string Columna, string Valor, string? Operador = null);
 
 /// <summary>Un criterio de orden de la vista "Ver" (columna + direccion).</summary>
 public sealed record SnapshotOrdenCrit(string Col, bool Desc);
@@ -146,7 +147,7 @@ public interface IFacturacionSnapshotService
     /// Devuelve una pagina de filas del snapshot. <c>ordenColumna</c> es opcional; si es
     /// null se ordena por <c>NumeroFila</c>. <c>buscar</c> hace ILIKE sobre <c>DatosJson::text</c>
     /// (texto libre global). <c>filtros</c> son filtros POR COLUMNA apilables (se combinan con
-    /// AND): cada uno hace <c>datos_json-&gt;&gt;columna ILIKE %valor%</c>. La columna se valida
+    /// AND): cada uno aplica su operador (SnapshotFiltroOperador) sobre <c>datos_json-&gt;&gt;columna</c>. La columna se valida
     /// contra el catalogo del builder (whitelist) para evitar inyeccion.
     /// Cada fila del resultado es un diccionario columna -&gt; valor.
     /// </summary>

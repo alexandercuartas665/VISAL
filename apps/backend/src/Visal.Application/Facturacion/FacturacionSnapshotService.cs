@@ -368,7 +368,8 @@ public sealed class FacturacionSnapshotService(
         // catalogo del builder (whitelist) para poder interpolarla sin riesgo de inyeccion;
         // los valores van parametrizados.
         var filtrosValidos = filtros?
-            .Where(f => f is not null && !string.IsNullOrWhiteSpace(f.Columna) && !string.IsNullOrWhiteSpace(f.Valor))
+            .Where(f => f is not null && !string.IsNullOrWhiteSpace(f.Columna)
+                        && (!string.IsNullOrWhiteSpace(f.Valor) || SnapshotFiltroOperador.SinValor(f.Operador)))
             .ToList() ?? new List<FiltroColumna>();
 
         IQueryable<FacturacionSnapshotFila> q;
@@ -385,8 +386,10 @@ public sealed class FacturacionSnapshotService(
             {
                 if (!colsValidas.Contains(f.Columna)) { continue; } // ignora columnas desconocidas
                 var col = f.Columna.Replace("'", "''");
-                sql.Append($" AND datos_json->>'{col}' ILIKE {{{vals.Count}}}");
-                vals.Add("%" + f.Valor.Trim() + "%");
+                // Operadores: contiene, no contiene, igual, distinto, empieza por, mayor/menor
+                // (numero o fecha), vacio / no vacio. Ver SnapshotFiltroOperador.
+                var cond = SnapshotFiltroOperador.ConstruirCondicion($"(datos_json->>'{col}')", f.Operador, f.Valor, vals);
+                if (cond is not null) { sql.Append(" AND ").Append(cond); }
             }
             q = db.FacturacionSnapshotFilas.FromSqlRaw(sql.ToString(), vals.ToArray()).AsNoTracking();
         }

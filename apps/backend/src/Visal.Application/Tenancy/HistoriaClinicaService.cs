@@ -701,6 +701,13 @@ public sealed class HistoriaClinicaService(
         {
             throw new InvalidOperationException("No se puede cerrar una historia inactiva.");
         }
+        // IMP-66: orden secuencial tambien al CERRAR (no solo al abrir). Tras una reapertura
+        // en bloque no se puede cerrar la sesion N con anteriores del mismo profesional abiertas.
+        if (e.Estado == HistoriaClinicaEstado.Abierta && atencionOrden is not null)
+        {
+            var bloqueoOrden = await atencionOrden.ValidarCierreAsync(e.Id, actor, ct);
+            if (bloqueoOrden is not null) { throw new CierreFueraDeOrdenException(bloqueoOrden.Motivo); }
+        }
         var estadoPrev = e.Estado;
         // Safety net al Cerrar: si el cliente mando JSON nuevo lo enriquecemos
         // con defaults; si no mando nada (Cerrar sin cambios), tambien
@@ -967,6 +974,23 @@ public sealed class HistoriaClinicaService(
             .OrderByDescending(h => h.FechaApertura)
             .Select(h => (Guid?)h.Id)
             .FirstOrDefaultAsync(ct);
+    }
+
+    public async Task<string?> MotivoBloqueoCierreAsync(Guid historiaClinicaId, Guid actor, CancellationToken ct = default)
+        => (await atencionOrden.ValidarCierreAsync(historiaClinicaId, actor, ct))?.Motivo;
+
+    public async Task<IReadOnlyList<Guid>> ListarHcIdsDeSesionAsync(Guid asignacionTurnoId, int sessionNo, CancellationToken ct = default)
+    {
+        if (asignacionTurnoId == Guid.Empty || sessionNo < 1) { return Array.Empty<Guid>(); }
+        using var rdb = dbFactory.Create();
+        var sesionIds = rdb.AsignacionTurnoSesiones.AsNoTracking()
+            .Where(s => s.AsignacionTurnoId == asignacionTurnoId && s.SessionNo == sessionNo)
+            .Select(s => s.Id);
+        return await rdb.AsignacionTurnoSesionHcs.AsNoTracking()
+            .Where(p => sesionIds.Contains(p.SesionId))
+            .Select(p => p.HistoriaClinicaId)
+            .Distinct()
+            .ToListAsync(ct);
     }
 
     public async Task<HistoriaClinicaDetailDto?> CopiarAsync(CopiarHistoriaRequest req, Guid actor, CancellationToken ct = default)

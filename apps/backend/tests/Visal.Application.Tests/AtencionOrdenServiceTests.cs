@@ -343,4 +343,55 @@ public sealed class AtencionOrdenServiceTests
 
         Assert.Null(bloqueo);
     }
+
+    // -- IMP-66: orden secuencial al CERRAR (caso reapertura en bloque) --
+
+    private static Guid LigarHc(VisalDbContext ctx, Guid sesionId)
+    {
+        var hcId = Guid.NewGuid();
+        ctx.AsignacionTurnoSesionHcs.Add(new AsignacionTurnoSesionHc { TenantId = Tenant, SesionId = sesionId, HistoriaClinicaId = hcId });
+        return hcId;
+    }
+
+    [Fact]
+    public async Task Cierre_Sesion9_ConSesiones7y8Abiertas_Bloquea()
+    {
+        var ctx = NewCtx();
+        // Sesiones 1..6 completadas; 7, 8 y 9 abiertas (reabiertas).
+        var (userId, sesionIds) = await SembrarAsync(ctx, TenantRole.Advisor, totalSesiones: 9, completadasHasta: 6);
+        var hc9 = LigarHc(ctx, sesionIds[8]);
+        await ctx.SaveChangesAsync();
+
+        var sut = new AtencionOrdenService(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }));
+        var bloqueo = await sut.ValidarCierreAsync(hc9, userId);
+
+        Assert.NotNull(bloqueo);
+        Assert.Equal(7, bloqueo!.SessionNoPendiente);
+        Assert.Equal("Debes cerrar la sesion 7 antes de cerrar la sesion 9.", bloqueo.Motivo);
+    }
+
+    [Fact]
+    public async Task Cierre_Sesion7_ConAnterioresCompletadas_Pasa()
+    {
+        var ctx = NewCtx();
+        var (userId, sesionIds) = await SembrarAsync(ctx, TenantRole.Advisor, totalSesiones: 9, completadasHasta: 6);
+        var hc7 = LigarHc(ctx, sesionIds[6]);
+        await ctx.SaveChangesAsync();
+
+        var sut = new AtencionOrdenService(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }));
+        Assert.Null(await sut.ValidarCierreAsync(hc7, userId));
+    }
+
+    [Fact]
+    public async Task Cierre_ConPermisoSaltarOrden_Pasa_y_HcSinSesion_Pasa()
+    {
+        var ctx = NewCtx();
+        var (userId, sesionIds) = await SembrarAsync(ctx, TenantRole.Advisor, totalSesiones: 9, completadasHasta: 6, conPermisoSaltarOrden: true);
+        var hc9 = LigarHc(ctx, sesionIds[8]);
+        await ctx.SaveChangesAsync();
+
+        var sut = new AtencionOrdenService(new TestDbContextFactory(ctx, new FakeTenantContext { TenantId = Tenant }));
+        Assert.Null(await sut.ValidarCierreAsync(hc9, userId));
+        Assert.Null(await sut.ValidarCierreAsync(Guid.NewGuid(), userId));
+    }
 }

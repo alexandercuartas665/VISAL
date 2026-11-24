@@ -18,6 +18,28 @@ public sealed class AtencionOrdenService(IApplicationDbContextFactory dbFactory)
         {
             return null;
         }
+        return await ValidarSecuenciaAsync(db, sesionId, "abrir", ct);
+    }
+
+    public async Task<AtencionOrdenBloqueo?> ValidarCierreAsync(Guid historiaClinicaId, Guid actorUserId, CancellationToken ct = default)
+    {
+        using var db = dbFactory.Create();
+        var sesionIds = await db.AsignacionTurnoSesionHcs.AsNoTracking()
+            .Where(p => p.HistoriaClinicaId == historiaClinicaId)
+            .Select(p => p.SesionId)
+            .ToListAsync(ct);
+        if (sesionIds.Count == 0) { return null; }
+        if (await UsuarioPuedeSaltarOrdenAsync(db, actorUserId, ct)) { return null; }
+        foreach (var sid in sesionIds)
+        {
+            var b = await ValidarSecuenciaAsync(db, sid, "cerrar", ct);
+            if (b is not null) { return b; }
+        }
+        return null;
+    }
+
+    private static async Task<AtencionOrdenBloqueo?> ValidarSecuenciaAsync(IApplicationDbContext db, Guid sesionId, string accion, CancellationToken ct)
+    {
 
         // Resolvemos el turno actual y su asignacion. sesionId es el Id del
         // pivote AsignacionTurnoSesion (una fila por turno individual desde
@@ -102,7 +124,7 @@ public sealed class AtencionOrdenService(IApplicationDbContextFactory dbFactory)
                     .FirstOrDefaultAsync(ct) ?? Guid.Empty;
 
                 return new AtencionOrdenBloqueo(
-                    $"Debes cerrar la sesion {posPendienteGlobal} antes de abrir la sesion {posGlobalActual}.",
+                    $"Debes cerrar la sesion {posPendienteGlobal} antes de {accion} la sesion {posGlobalActual}.",
                     posPendienteGlobal,
                     turnoActual.AsignacionId,
                     pivotePendiente);

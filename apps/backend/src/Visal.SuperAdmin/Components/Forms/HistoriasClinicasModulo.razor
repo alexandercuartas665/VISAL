@@ -205,6 +205,10 @@
                                 {
                                     <div class="hc-item-sesion">Sesion #@h.SesionNumero.Value</div>
                                 }
+                                @if (_hcIdsSesionActual.Contains(h.Id))
+                                {
+                                    <div class="hc-item-sesion-actual">Sesion seleccionada en Atencion</div>
+                                }
                             </div>
                             <div class="dropdown">
                                 <button class="btn btn-link btn-sm hc-item-menu" @onclick="(e) => ToggleMenu(h.Id, e)">&#8942;</button>
@@ -939,6 +943,8 @@
     .hc-item-asig { font-size: 11px; color: #64748b; margin-top: 2px; }
     .hc-item-asig-cod { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 600; color: #334155; background: #f1f5f9; padding: 0 5px; border-radius: 4px; }
     .hc-item-sesion { display: inline-block; margin-top: 3px; font-size: 10.5px; font-weight: 700; color: #1e40af; background: #dbeafe; padding: 1px 8px; border-radius: 999px; }
+    /* IMP-65: tarjeta de la sesion desde la que se abrio el modal en /atencion (va de primera). */
+    .hc-item-sesion-actual { display: inline-block; margin-top: 3px; margin-left: 4px; font-size: 10.5px; font-weight: 700; color: #92400e; background: #fef3c7; padding: 1px 8px; border-radius: 999px; }
     /* Navegador de asignaciones (boton, select, boton) para recorrer atencion por atencion. */
     .hc-asig-nav { display: flex; align-items: center; gap: 6px; width: 100%; flex-wrap: nowrap; }
     /* min-width:0 es CLAVE: sin el, el select no se encoge por sus opciones largas,
@@ -2149,6 +2155,20 @@
         if (AsignacionTurnoId is Guid atId && SessionNo is int sno && sno >= 1)
         {
             hcId = await HcSvc.BuscarAbiertaDeSesionAsync(atId, sno);
+            if (hcId is null)
+            {
+                // IMP-66: la sesion ya no tiene HC abierta (p.ej. sesion cerrada): cargar la HC
+                // de ESA sesion (en lectura) en vez de dejar el modal vacio, para que el
+                // usuario no pulse "Iniciar" pensando que no existe.
+                await MostrarHistorias();
+                var deSesion = _historias.FirstOrDefault(x => _hcIdsSesionActual.Contains(x.Id) && !EsInactiva(x));
+                if (deSesion is not null)
+                {
+                    await Seleccionar(deSesion);
+                    StateHasChanged();
+                }
+                return;
+            }
         }
         else
         {
@@ -2236,6 +2256,24 @@
         .ThenBy(x => x.SesionNumero ?? int.MaxValue)
         .ThenByDescending(x => x.Fecha)
         .ToList();
+        await FijarHcsDeSesionActualAsync();
+    }
+
+    /// <summary>IMP-65: si el modulo se abrio desde /atencion sobre una sesion concreta
+    /// (AsignacionTurnoId + SessionNo), la(s) tarjeta(s) de ESA sesion van de primeras en
+    /// "Historias del paciente" (el resto conserva el orden por numero de sesion).</summary>
+    private HashSet<Guid> _hcIdsSesionActual = new();
+
+    private static bool EsInactiva(HistoriaRow h) => string.Equals(h.Estado, "Inactiva", StringComparison.OrdinalIgnoreCase);
+
+    private async Task FijarHcsDeSesionActualAsync()
+    {
+        if (AsignacionTurnoId is not Guid atId || SessionNo is not int sno || sno < 1) { return; }
+        try { _hcIdsSesionActual = (await HcSvc.ListarHcIdsDeSesionAsync(atId, sno)).ToHashSet(); }
+        catch (Exception ex) { Log.LogWarning(ex, "No se pudieron resolver las HC de la sesion actual"); return; }
+        if (_hcIdsSesionActual.Count == 0) { return; }
+        // OrderBy es estable: dentro de cada grupo se respeta el orden previo.
+        _historias = _historias.OrderBy(x => _hcIdsSesionActual.Contains(x.Id) ? 0 : 1).ToList();
     }
 
     /// <summary>Indice de la asignacion actualmente filtrada dentro de
@@ -2699,6 +2737,29 @@
         // si existe. Asi al volver al paciente NO se duplican HCs y el doctor
         // sigue editando la que ya empezo. Solo aplica si el usuario es un
         // profesional (admins sin profesional_id siempre crean una nueva).
+        // IMP-66: en contexto de SESION (/atencion) solo cuenta la HC de ESA sesion. Antes se
+        // reanudaba cualquier HC abierta del profesional con el mismo formato, y desde una
+        // sesion ya cerrada (p.ej. la 5) el usuario terminaba editando la HC abierta de una
+        // sesion futura (la 7). Si la sesion ya tiene HC (abierta o cerrada) se muestra esa.
+        if (AsignacionTurnoId is Guid atIdIni && SessionNo is int snoIni && snoIni >= 1)
+        {
+            await MostrarHistorias();
+            var existenteSesion = _historias.FirstOrDefault(x => _hcIdsSesionActual.Contains(x.Id) && !EsInactiva(x));
+            if (existenteSesion is not null)
+            {
+                await Seleccionar(existenteSesion);
+                if (!string.Equals(existenteSesion.Estado, "Abierta", StringComparison.OrdinalIgnoreCase))
+                {
+                    await JS.InvokeVoidAsync("alert",
+                        $"Esta sesion ya tiene la historia {CodigoPublico.Hc(existenteSesion.HcConsecutivo)} ({existenteSesion.Estado}). "
+                        + "No se crea otra: se muestra la existente.");
+                }
+                return;
+            }
+            await AbrirModalRipsAsync(fid);
+            return;
+        }
+
         var miProf = await ResolverMiProfesionalIdAsync();
         if (miProf is Guid pidProf)
         {
@@ -2872,6 +2933,7 @@
                 SesionNumero = NumeroSesionMostrar
             };
             _historias.Insert(0, nueva);
+            if (AsignacionTurnoId is not null) { _hcIdsSesionActual.Add(nueva.Id); }
             _historiaSel = nueva;
             _hcEsDeOtroDoctor = false;
             _imprimirMsg = null;
@@ -3090,6 +3152,7 @@
                 RipsCausaNombre = copia.RipsCausaExternaNombre
             };
             _historias.Insert(0, fila);
+            _hcIdsSesionActual.Add(fila.Id);
             await Seleccionar(fila);
 
             // Correr el prefill del paciente + sistema + firmas SOBRE _valores que ya
@@ -3145,6 +3208,19 @@
 
     private async Task Cerrar()
     {
+        // IMP-66: orden secuencial al cerrar. Se valida ANTES de confirmar y de la auditoria IA
+        // (no se gastan tokens en una HC que no se va a poder cerrar).
+        if (_historiaSel is HistoriaRow hOrden)
+        {
+            string? motivoOrden = null;
+            try { motivoOrden = await HcSvc.MotivoBloqueoCierreAsync(hOrden.Id, await ResolverActorAsync()); }
+            catch (Exception exOrden) { Log.LogWarning(exOrden, "No se pudo validar el orden de sesiones al cerrar"); }
+            if (motivoOrden is not null)
+            {
+                await JS.InvokeVoidAsync("alert", motivoOrden + "\n\nLa historia sigue abierta y sin cambios de estado.");
+                return;
+            }
+        }
         // Confirmacion explicita: guardar definitivamente cierra la HC y solo un
         // administrador con permiso puede reabrirla. Advertimos al usuario para
         // evitar cierres accidentales.
@@ -3187,6 +3263,11 @@
                 try { AplicarEstadoSolicitud(await HcSvc.EvaluarControlFechaAsync(h.Id, await ResolverActorAsync())); }
                 catch { /* el modal abre igual */ }
                 AbrirTokenModal(ex.Message, cerrarTrasAutorizar: true);
+                return;
+            }
+            catch (Visal.Application.Tenancy.CierreFueraDeOrdenException ex)
+            {
+                await JS.InvokeVoidAsync("alert", ex.Message);
                 return;
             }
             h.Estado = "Cerrada";
@@ -3514,6 +3595,13 @@
             _audShow = false;
             try { AplicarEstadoSolicitud(await HcSvc.EvaluarControlFechaAsync(h.Id, actor)); } catch { }
             AbrirTokenModal(ex.Message, cerrarTrasAutorizar: true);
+            return;
+        }
+        catch (Visal.Application.Tenancy.CierreFueraDeOrdenException ex)
+        {
+            _audShow = false; _audFase = "";
+            await JS.InvokeVoidAsync("alert", ex.Message);
+            StateHasChanged();
             return;
         }
         h.Estado = "Cerrada";

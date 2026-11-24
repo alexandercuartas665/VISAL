@@ -264,6 +264,18 @@ public interface IHistoriaClinicaService
     Task<Guid?> BuscarAbiertaDeSesionAsync(Guid asignacionTurnoId, int sessionNo, CancellationToken ct = default);
 
     /// <summary>
+    /// Ids de TODAS las HC (cualquier estado) vinculadas a la sesion (AsignacionTurnoId +
+    /// SessionNo) desde la que se abrio el modal en /atencion. Sirve para fijar de primeras
+    /// en "Historias del paciente" la(s) tarjeta(s) de esa sesion (IMP-65). Vacio si la
+    /// sesion no existe o no tiene HC.
+    /// </summary>
+    Task<IReadOnlyList<Guid>> ListarHcIdsDeSesionAsync(Guid asignacionTurnoId, int sessionNo, CancellationToken ct = default);
+
+    /// <summary>IMP-66: motivo por el que la HC NO se puede cerrar por orden secuencial de
+    /// sesiones (null = puede cerrar). La UI lo consulta antes de la auditoria IA.</summary>
+    Task<string?> MotivoBloqueoCierreAsync(Guid historiaClinicaId, Guid actor, CancellationToken ct = default);
+
+    /// <summary>
     /// Duplica una HC existente: crea una nueva HC en estado Abierta, con el mismo
     /// FormDefinitionId y PacienteId, copiando el ValoresJson origen y todos los items
     /// clinicos (medicamentos, insumos, remisiones, incapacidades, certificaciones,

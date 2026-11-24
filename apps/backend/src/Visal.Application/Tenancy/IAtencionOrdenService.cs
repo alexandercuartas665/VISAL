@@ -25,4 +25,15 @@ public sealed record AtencionOrdenBloqueo(
 public interface IAtencionOrdenService
 {
     Task<AtencionOrdenBloqueo?> ValidarAperturaAsync(Guid sesionId, Guid actorUserId, CancellationToken ct = default);
+
+    /// <summary>
+    /// IMP-66: misma regla al CERRAR una HC ligada a una sesion. Evita que, tras una
+    /// reapertura en bloque, se cierre la sesion N con sesiones anteriores del mismo
+    /// profesional aun abiertas (la sesion N quedaria Completada fuera de orden).
+    /// Null = puede cerrar (o la HC no esta ligada a una sesion, o el actor tiene escape).
+    /// </summary>
+    Task<AtencionOrdenBloqueo?> ValidarCierreAsync(Guid historiaClinicaId, Guid actorUserId, CancellationToken ct = default);
 }
+
+/// <summary>El cierre de la HC se rechazo por orden secuencial de sesiones (IMP-66).</summary>
+public sealed class CierreFueraDeOrdenException(string message) : InvalidOperationException(message);

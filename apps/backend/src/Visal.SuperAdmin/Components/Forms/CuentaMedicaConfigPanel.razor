@@ -959,13 +959,15 @@ else
     private static bool PideTipologia(OrigenInformeItem o) => o
         is OrigenInformeItem.DocumentoHc
         or OrigenInformeItem.DocumentoPacienteLibre
+        or OrigenInformeItem.DocumentoSinHistoria
         or OrigenInformeItem.DocumentoNota;
 
     private static string LabelOrigen(OrigenInformeItem o) => o switch
     {
         OrigenInformeItem.HistoriaClinicaPdf => "Historia clinica (PDF)",
         OrigenInformeItem.DocumentoHc => "Documento de HC",
-        OrigenInformeItem.DocumentoPacienteLibre => "Documento libre del paciente",
+        OrigenInformeItem.DocumentoPacienteLibre => "Documento del paciente (con o sin historia)",
+        OrigenInformeItem.DocumentoSinHistoria => "Documento libre del paciente (sin historia)",
         OrigenInformeItem.DocumentoNota => "Adjunto de nota",
         OrigenInformeItem.FirmaPaciente => "Firma del paciente",
         OrigenInformeItem.AutorizacionAsignacion => "Autorizacion (asignacion)",

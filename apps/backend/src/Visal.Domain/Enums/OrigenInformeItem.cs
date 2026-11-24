@@ -34,4 +34,10 @@ public enum OrigenInformeItem
     /// concreto se guarda en <c>AseguradoraInformeContenido.FormularioTipo</c>. El
     /// generador (ola posterior) adjunta los formularios de ese tipo de cada HC.</summary>
     FormularioPorTipo = 9,
+    /// <summary>IMP-67: documento LIBRE del paciente, SIN historia ni nota (cedula, carne,
+    /// certificado de afiliacion...). A diferencia de <see cref="DocumentoPacienteLibre"/>
+    /// (que trae cualquier adjunto del paciente, con o sin HC), aqui solo cuentan los sueltos;
+    /// va UNO (el mas reciente de la tipologia) y, en "un archivo por autorizacion", se
+    /// repite en el PDF de cada autorizacion.</summary>
+    DocumentoSinHistoria = 10,
 }

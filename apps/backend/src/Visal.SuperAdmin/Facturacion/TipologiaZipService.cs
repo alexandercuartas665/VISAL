@@ -1059,7 +1059,11 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     && ConFormTipo.TryGetValue(ft, out var set) && set.Contains(pid)) ||
                 (EsOrigenDocExterno(c.Origen)
                     && DocsExternos.TryGetValue(pid, out var dl)
-                    && dl.Any(d => DocExternoCoincide(c.Origen, c.TipologiaNombre, d.Cat, d.Hc, d.Nota))));
+                    && dl.Any(d => DocExternoCoincide(c.Origen, c.TipologiaNombre, d.Cat, d.Hc, d.Nota)
+                                   // IMP-67: en "un archivo por autorizacion" el ZIP solo incluye los
+                                   // anexos atados a una HC (salvo DocumentoSinHistoria, que se repite
+                                   // en cada autorizacion): el contador debe cuadrar con eso.
+                                   && (!a.UnoPorAutorizacion || d.Hc || c.Origen == OrigenInformeItem.DocumentoSinHistoria))));
     }
 
     /// <summary>
@@ -1277,10 +1281,12 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     break;
                 case OrigenInformeItem.DocumentoHc:
                 case OrigenInformeItem.DocumentoPacienteLibre:
+                case OrigenInformeItem.DocumentoSinHistoria:
                 case OrigenInformeItem.DocumentoNota:
                     foreach (var d in await CargarDocumentosExternosAsync(db, pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct, membrete: archivo.MembreteHcCup, rotuloPorCup: archivo.RotuloSeparadorCup, hcSnapshot: hcSnapshot))
                     {
-                        partes.Add(new PartePlan(d.Bytes, -1, Cup: d.Cup, CupNombre: d.CupNombre, Etiqueta: "[ANEXO]"));
+                        partes.Add(new PartePlan(d.Bytes, -1, Cup: d.Cup, CupNombre: d.CupNombre,
+                            Etiqueta: c.Origen == OrigenInformeItem.DocumentoSinHistoria ? EtqDocLibre : "[ANEXO]"));
                     }
                     break;
                 default:
@@ -1638,11 +1644,13 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     break;
                 case OrigenInformeItem.DocumentoHc:
                 case OrigenInformeItem.DocumentoPacienteLibre:
+                case OrigenInformeItem.DocumentoSinHistoria:
                 case OrigenInformeItem.DocumentoNota:
                     foreach (var d in await CargarDocumentosExternosAsync(
                         db, pacienteId, c.Origen, c.TipologiaNombre, c.SoloUltimo, ct, codigo, hcAut, archivo.MembreteHcCup, archivo.RotuloSeparadorCup, hcSnapshot))
                     {
-                        partes.Add(new PartePlan(d.Bytes, -1, Cup: d.Cup, CupNombre: d.CupNombre, Etiqueta: "[ANEXO]"));
+                        partes.Add(new PartePlan(d.Bytes, -1, Cup: d.Cup, CupNombre: d.CupNombre,
+                            Etiqueta: c.Origen == OrigenInformeItem.DocumentoSinHistoria ? EtqDocLibre : "[ANEXO]"));
                     }
                     break;
                 default:
@@ -1650,8 +1658,15 @@ public sealed class TipologiaZipService : ITipologiaZipService
             }
         }
         InsertarFormTipoUnificado(partes, formTipoUrls, ftInsertIdx, allUrls, archivo);
+        // IMP-67: el documento libre (cedula, carne...) acompana a la autorizacion pero no la
+        // justifica: si la autorizacion no tiene NADA mas, se trata como vacia (no se genera un
+        // PDF con solo la cedula, que esconderia el faltante).
+        if (partes.Count > 0 && partes.All(p => p.Etiqueta == EtqDocLibre)) { partes.Clear(); }
         return partes;
     }
+
+    /// <summary>Etiqueta de las partes que vienen de <see cref="OrigenInformeItem.DocumentoSinHistoria"/>.</summary>
+    private const string EtqDocLibre = "[DOC LIBRE]";
 
     /// <summary>Origenes de documentos externos (DocumentoHc / DocumentoPacienteLibre /
     /// DocumentoNota): recupera los adjuntos del paciente en <c>nota_medica_documentos</c>
@@ -1674,8 +1689,11 @@ public sealed class TipologiaZipService : ITipologiaZipService
         {
             OrigenInformeItem.DocumentoHc => q.Where(d => d.HistoriaClinicaId != null),
             OrigenInformeItem.DocumentoNota => q.Where(d => d.NotaMedicaId != null),
+            // IMP-67: solo los sueltos (sin HC ni nota): cedula, carne, certificado...
+            OrigenInformeItem.DocumentoSinHistoria => q.Where(d => d.HistoriaClinicaId == null && d.NotaMedicaId == null),
             _ => q,
         };
+        var sinHistoria = origen == OrigenInformeItem.DocumentoSinHistoria;
 
         // Filtro por tipologia (la categoria del documento). Si no se eligio, cualquiera cuenta.
         if (!string.IsNullOrWhiteSpace(tipologiaNombre))
@@ -1692,7 +1710,9 @@ public sealed class TipologiaZipService : ITipologiaZipService
         // Modo "un archivo por autorizacion": solo los adjuntos atados a una HC cuya
         // asignacion pertenece a ESTA autorizacion. Los adjuntos libres (sin HC) no se
         // pueden atribuir a una autorizacion, asi que se omiten en el split.
-        if (filtroAutorizacion is string fa && hcAut is not null)
+        // IMP-67: salvo DocumentoSinHistoria (cedula, carne...), que se repite en el PDF de cada
+        // autorizacion en vez de descartarse.
+        if (filtroAutorizacion is string fa && hcAut is not null && !sinHistoria)
         {
             rows = rows.Where(r => r.HistoriaClinicaId is Guid hid
                                    && hcAut.TryGetValue(hid, out var set) && set.Contains(fa)).ToList();
@@ -1708,7 +1728,8 @@ public sealed class TipologiaZipService : ITipologiaZipService
         if (rows.Count == 0) { return new(); }
 
         // SoloUltimo = el mas reciente; si no, todos en orden cronologico ascendente.
-        var seleccion = (soloUltimo ? rows.Take(1) : rows.AsEnumerable().Reverse()).ToList();
+        // DocumentoSinHistoria: siempre UNO (el mas reciente de la tipologia), aunque haya varios.
+        var seleccion = (soloUltimo || sinHistoria ? rows.Take(1) : rows.AsEnumerable().Reverse()).ToList();
 
         // Resuelve HC-xxxxxx + CUP + servicio de la historia de la que cuelga cada anexo (una sola
         // consulta) si hace falta: para estampar el membrete (membrete) y/o para ordenar por CUP
@@ -1859,6 +1880,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
     private static bool EsOrigenDocExterno(OrigenInformeItem o) =>
         o is OrigenInformeItem.DocumentoHc
             or OrigenInformeItem.DocumentoPacienteLibre
+            or OrigenInformeItem.DocumentoSinHistoria
             or OrigenInformeItem.DocumentoNota;
 
     /// <summary>True si la ruta apunta a un tipo renderable (PDF o imagen). Otros tipos
@@ -1880,6 +1902,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
         {
             OrigenInformeItem.DocumentoHc => tieneHc,
             OrigenInformeItem.DocumentoNota => tieneNota,
+            OrigenInformeItem.DocumentoSinHistoria => !tieneHc && !tieneNota,
             _ => true, // DocumentoPacienteLibre: cualquier documento del paciente
         };
         if (!ambitoOk) { return false; }

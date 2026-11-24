@@ -251,6 +251,7 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
     private static bool PideTipologia(OrigenInformeItem o) => o
         is OrigenInformeItem.DocumentoHc
         or OrigenInformeItem.DocumentoPacienteLibre
+        or OrigenInformeItem.DocumentoSinHistoria
         or OrigenInformeItem.DocumentoNota;
 
     public async Task<bool> EliminarItemAsync(

@@ -18,9 +18,11 @@ namespace Visal.Application.Facturacion.Selectors;
 /// Contrato v3:
 /// - Unidad base: <see cref="HistoriaClinica"/> con Estado = Cerrada.
 /// - Filtro fecha: <c>fecha_cierre</c> en [FechaInicio, FechaFin].
-/// - Filtro EPS: el paciente pertenece a la aseguradora filtrada por alguno
-///   de sus contratos en <c>paciente_contratos</c>. Si el paciente no tiene
-///   ningun contrato de esa EPS, se descarta.
+/// - Filtro EPS (IMP-69): MANDA LA ASIGNACION de la HC (cadena de sesiones). Solo se
+///   factura a la EPS con la que se presto el servicio: si la asignacion es de otra EPS
+///   la HC se descarta aunque el paciente tambien tenga contrato con la filtrada, y el
+///   contrato es el de la asignacion. Sin asignacion (o sin EPS determinable) se usa la
+///   regla historica: alguno de los contratos del paciente en <c>paciente_contratos</c>.
 /// - Filtro sucursal: <c>Paciente.SedeAtencionId</c> debe estar en la lista;
 ///   lista vacia = todas.
 /// - Gate HC-revisada-por-sede: si la sede exige revision (Sucursal.
@@ -167,18 +169,47 @@ public sealed class RelacionFacturasSelector(IApplicationDbContextFactory dbFact
             hcsRevisadasSet = revisadas.ToHashSet();
         }
 
-        // 5) Prefiltro: HC valida (paciente conocido) + aseguradora del paciente
-        //    coincide + sucursal filtrada + gate revision.
+        // 4.b) Asignacion REAL por HC via la cadena de sesiones (mapeo EXACTO, igual que el
+        //      modulo Ordenes): HC -> pivote -> sesion -> turno -> asignacion. Es la FUENTE DE
+        //      VERDAD de la EPS/contrato con que se presto el servicio (IMP-69) y de
+        //      lote/servicio/autorizacion/valor; la heuristica por fecha (paso 7) queda solo
+        //      como fallback para las HCs sin cadena.
+        var hcIdsPeriodo = hcs.Where(h => pacientePorId.ContainsKey(h.PacienteId)).Select(h => h.Id).Distinct().ToList();
+        var asignacionPorHc = hcIdsPeriodo.Count == 0
+            ? new Dictionary<Guid, Asignacion>()
+            : (await (
+                from pv in db.AsignacionTurnoSesionHcs.AsNoTracking()
+                where hcIdsPeriodo.Contains(pv.HistoriaClinicaId)
+                join se in db.AsignacionTurnoSesiones.AsNoTracking() on pv.SesionId equals se.Id
+                join t in db.AsignacionTurnos.AsNoTracking() on se.AsignacionTurnoId equals t.Id
+                join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+                select new { pv.HistoriaClinicaId, Asig = a })
+                .ToListAsync(ct))
+                .GroupBy(x => x.HistoriaClinicaId)
+                .ToDictionary(g => g.Key, g => g.First().Asig);
+
+        // Contratos de ESTA aseguradora por codigo (para ubicar el contrato de la asignacion).
+        var contratoPorCodigo = new Dictionary<string, ContratoAseguradora>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in contratos.OrderBy(c => c.CreatedAt))
+        {
+            var cod = (c.CodigoContrato ?? "").Trim();
+            if (cod.Length > 0) { contratoPorCodigo.TryAdd(cod, c); }
+        }
+        var nombreAseguradoraNorm = NormalizarParaBusqueda(aseguradora.Nombre);
+
+        // 5) Prefiltro: HC valida (paciente conocido) + EPS/contrato de la asignacion (o del
+        //    paciente si no hay asignacion) coincide + sucursal filtrada + gate revision.
         var hechosPrefiltrados = new List<(HistoriaClinica Hc, Paciente Paciente, ContratoAseguradora Contrato, Sucursal? Sucursal)>();
         foreach (var hc in hcs)
         {
             if (!pacientePorId.TryGetValue(hc.PacienteId, out var paciente)) { continue; }
 
-            // Aseguradora del paciente: alguno de sus contratos (orden 1..N)
-            // debe apuntar a la aseguradora filtrada. Preferimos el orden mas
-            // bajo si multiples matchean. Sin match = no facturable a esta EPS.
-            var contratoIdPaciente = ResolverContratoDelPaciente(paciente.Id, pacContratosOrdenados, contratoIdsSet);
-            if (contratoIdPaciente is not Guid cid || !contratoPorId.TryGetValue(cid, out var contrato)) { continue; }
+            // EPS y contrato: manda la ASIGNACION con que se presto el servicio (IMP-69). No se
+            // le factura a una EPS un servicio que no se presto con su contrato.
+            var contratoId = ResolverContratoDeLaHc(
+                asignacionPorHc.GetValueOrDefault(hc.Id), nombreAseguradoraNorm, contratoPorCodigo,
+                paciente.Id, pacContratosOrdenados, contratoIdsSet);
+            if (contratoId is not Guid cid || !contratoPorId.TryGetValue(cid, out var contrato)) { continue; }
 
             // Sucursal del paciente.
             Sucursal? sucursal = null;
@@ -248,19 +279,8 @@ public sealed class RelacionFacturasSelector(IApplicationDbContextFactory dbFact
         //        HCs sin cadena. Antes se usaba solo la heuristica, que elegia mal
         //        cuando el paciente tenia varias asignaciones (bug: tomaba el lote mas
         //        cercano en fecha, no el que realmente ejecuto la HC).
+        //        (Se cargo en el paso 4.b: tambien decide la EPS/contrato de la HC.)
         var hcIdsPrefil = hechosPrefiltrados.Select(x => x.Hc.Id).Distinct().ToList();
-        var asignacionPorHc = hcIdsPrefil.Count == 0
-            ? new Dictionary<Guid, Asignacion>()
-            : (await (
-                from pv in db.AsignacionTurnoSesionHcs.AsNoTracking()
-                where hcIdsPrefil.Contains(pv.HistoriaClinicaId)
-                join se in db.AsignacionTurnoSesiones.AsNoTracking() on pv.SesionId equals se.Id
-                join t in db.AsignacionTurnos.AsNoTracking() on se.AsignacionTurnoId equals t.Id
-                join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
-                select new { pv.HistoriaClinicaId, Asig = a })
-                .ToListAsync(ct))
-                .GroupBy(x => x.HistoriaClinicaId)
-                .ToDictionary(g => g.Key, g => g.First().Asig);
 
         // 6.b.3) Cantidad de archivos "Lista de firmas" por HC (conteo POR HISTORIA, no por
         //        autorizacion). Son los adjuntos en nota_medica_documentos cuya categoria
@@ -702,6 +722,48 @@ public sealed class RelacionFacturasSelector(IApplicationDbContextFactory dbFact
         }
 
         return ordenado;
+    }
+
+    /// <summary>
+    /// IMP-69: contrato con que se factura la HC a la aseguradora filtrada, o null si la HC no
+    /// es facturable a esa EPS. Manda la ASIGNACION de la HC:
+    /// - EPS de la asignacion por su nombre (dato denormalizado, 100% resoluble en prod); si no
+    ///   trae nombre, por su codigo de contrato. Si es OTRA EPS -> null.
+    /// - Contrato: el de la asignacion si su codigo existe en esta EPS (y debe pasar el filtro de
+    ///   contratos del snapshot); si el codigo no resuelve (p.ej. "subsidiado"), el contrato del
+    ///   paciente con esta EPS.
+    /// - Sin asignacion o sin EPS determinable: regla historica (contrato del paciente).
+    /// </summary>
+    internal static Guid? ResolverContratoDeLaHc(
+        Asignacion? asig,
+        string nombreAseguradoraNorm,
+        IReadOnlyDictionary<string, ContratoAseguradora> contratoPorCodigo,
+        Guid pacienteId,
+        IReadOnlyDictionary<Guid, List<Guid>> pacContratosOrdenados,
+        HashSet<Guid> contratoIdsPermitidos)
+    {
+        if (asig is null)
+        {
+            return ResolverContratoDelPaciente(pacienteId, pacContratosOrdenados, contratoIdsPermitidos);
+        }
+        var codigo = (asig.ContratoCodigo ?? "").Trim();
+        var contratoAsig = codigo.Length > 0 && contratoPorCodigo.TryGetValue(codigo, out var c) ? c : null;
+        var nombreAsig = NormalizarParaBusqueda(asig.AseguradoraNombre);
+        if (nombreAsig.Length > 0)
+        {
+            if (!string.Equals(nombreAsig, nombreAseguradoraNorm, StringComparison.Ordinal)) { return null; }
+        }
+        else if (contratoAsig is null)
+        {
+            // Asignacion sin EPS determinable: regla historica.
+            return ResolverContratoDelPaciente(pacienteId, pacContratosOrdenados, contratoIdsPermitidos);
+        }
+        if (contratoAsig is not null)
+        {
+            // El servicio se presto con ESTE contrato: si el snapshot filtra otros, no entra.
+            return contratoIdsPermitidos.Contains(contratoAsig.Id) ? contratoAsig.Id : null;
+        }
+        return ResolverContratoDelPaciente(pacienteId, pacContratosOrdenados, contratoIdsPermitidos);
     }
 
     /// <summary>

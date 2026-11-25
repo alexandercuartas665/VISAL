@@ -262,6 +262,105 @@ public sealed class RelacionFacturasSelectorV3Tests
         Assert.Equal(s.ContratoId, hechos[0].Contrato.Id);
     }
 
+    // ---- IMP-69: la EPS/contrato los define la ASIGNACION de la HC, no los contratos del paciente ----
+
+    /// <summary>Liga la HC a una asignacion (cadena pivote -> sesion -> turno -> asignacion).</summary>
+    private static async Task LigarAsignacionAsync(Setup s, Guid hcId, Guid pacienteId, string? aseguradoraNombre, string contratoCodigo)
+    {
+        var asig = new Asignacion
+        {
+            TenantId = TenantId, LoteId = Guid.NewGuid(), PacienteId = pacienteId,
+            Sucursal = "CALI", ServicioId = "SV1", NombreServicio = "CONSULTA", TipoServicio = "CONSULTA",
+            Cantidad = 1, ContratoCodigo = contratoCodigo, AseguradoraNombre = aseguradoraNombre,
+            MesVigencia = 7, FechaInicio = new DateOnly(2026, 7, 1), Estado = AsignacionEstado.Asignado,
+        };
+        var turno = new AsignacionTurno { TenantId = TenantId, AsignacionId = asig.Id, ProfesionalId = s.ProfesionalId, Cantidad = 1 };
+        var ses = new AsignacionTurnoSesion { TenantId = TenantId, AsignacionTurnoId = turno.Id, SessionNo = 1, FechaAtencion = new DateOnly(2026, 7, 15) };
+        s.Ctx.Asignaciones.Add(asig);
+        s.Ctx.AsignacionTurnos.Add(turno);
+        s.Ctx.AsignacionTurnoSesiones.Add(ses);
+        s.Ctx.AsignacionTurnoSesionHcs.Add(new AsignacionTurnoSesionHc { TenantId = TenantId, SesionId = ses.Id, HistoriaClinicaId = hcId });
+        await s.Ctx.SaveChangesAsync();
+    }
+
+    /// <summary>Paciente con contrato en la EPS del setup (orden 1) y en una segunda EPS (orden 2).</summary>
+    private static async Task<(Guid PacienteId, Guid Eps2Id, Guid Contrato2Id)> PacienteConDosEpsAsync(Setup s)
+    {
+        var eps2 = new Aseguradora { Id = Guid.NewGuid(), TenantId = TenantId, Codigo = "EPS-2", Nombre = "PREPAGADA DOS", Nit = "900000002" };
+        var c2 = new ContratoAseguradora { Id = Guid.NewGuid(), TenantId = TenantId, AseguradoraId = eps2.Id, CodigoContrato = "PRE-002", Estado = "Activo" };
+        s.Ctx.Aseguradoras.Add(eps2);
+        s.Ctx.ContratosAseguradora.Add(c2);
+        await s.Ctx.SaveChangesAsync();
+        var pid = await SembrarPacienteAsync(s, s.ContratoId, s.SucursalId, doc: "DOS");
+        s.Ctx.PacienteContratos.Add(new PacienteContrato { Id = Guid.NewGuid(), TenantId = TenantId, PacienteId = pid, ContratoAseguradoraId = c2.Id, Orden = 2 });
+        await s.Ctx.SaveChangesAsync();
+        return (pid, eps2.Id, c2.Id);
+    }
+
+    [Fact]
+    public async Task HC_de_asignacion_de_otra_EPS_no_cae_en_la_EPS_del_paciente()
+    {
+        var s = await SembrarBaseAsync();
+        var (pid, eps2, c2) = await PacienteConDosEpsAsync(s);
+        // Atendida con la asignacion de EPS TEST (como HC-014260 con ALIANSALUD).
+        var hcEps1 = await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 7, 15, 10, 0, 0, TimeSpan.Zero));
+        await LigarAsignacionAsync(s, hcEps1, pid, "EPS TEST", "CON-001");
+        // Atendida con la asignacion de la prepagada.
+        var hcEps2 = await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 7, 16, 10, 0, 0, TimeSpan.Zero));
+        await LigarAsignacionAsync(s, hcEps2, pid, "PREPAGADA DOS", "PRE-002");
+
+        var sel = new RelacionFacturasSelector(new TestDbContextFactory(s.Ctx, new FakeTenantContext { TenantId = TenantId }));
+        var deEps2 = await sel.SelectAsync(new RelacionFacturasFiltros(eps2, null, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31)));
+        var h2 = Assert.Single(deEps2);
+        Assert.Equal(hcEps2, h2.Hc.Id);
+        Assert.Equal(c2, h2.Contrato.Id);
+
+        var deEps1 = await sel.SelectAsync(Filtros(s, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31)));
+        var h1 = Assert.Single(deEps1);
+        Assert.Equal(hcEps1, h1.Hc.Id);
+        Assert.Equal(s.ContratoId, h1.Contrato.Id);
+    }
+
+    [Fact]
+    public async Task Contrato_es_el_de_la_asignacion_y_el_filtro_de_contrato_lo_respeta()
+    {
+        var s = await SembrarBaseAsync();
+        var contrato2 = new ContratoAseguradora { Id = Guid.NewGuid(), TenantId = TenantId, AseguradoraId = s.AseguradoraId, CodigoContrato = "CON-002", Estado = "Activo" };
+        s.Ctx.ContratosAseguradora.Add(contrato2);
+        await s.Ctx.SaveChangesAsync();
+        // Paciente con CON-001 (orden 1) pero atendido con la asignacion de CON-002.
+        var pid = await SembrarPacienteAsync(s, s.ContratoId, s.SucursalId, doc: "K");
+        var hc = await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 7, 15, 10, 0, 0, TimeSpan.Zero));
+        await LigarAsignacionAsync(s, hc, pid, "eps test", " CON-002 ");
+
+        var sel = new RelacionFacturasSelector(new TestDbContextFactory(s.Ctx, new FakeTenantContext { TenantId = TenantId }));
+        var todos = await sel.SelectAsync(Filtros(s, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31)));
+        Assert.Equal(contrato2.Id, Assert.Single(todos).Contrato.Id);
+
+        // Snapshot filtrado por CON-001: el servicio NO se presto con ese contrato -> fuera.
+        var soloC1 = await sel.SelectAsync(new RelacionFacturasFiltros(
+            s.AseguradoraId, null, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31), null, false, new[] { s.ContratoId }));
+        Assert.Empty(soloC1);
+    }
+
+    [Fact]
+    public async Task Codigo_de_contrato_no_resoluble_usa_el_contrato_del_paciente_si_la_EPS_coincide()
+    {
+        var s = await SembrarBaseAsync();
+        var pid = await SembrarPacienteAsync(s, s.ContratoId, s.SucursalId, doc: "F");
+        // Como FAMISANAR: la asignacion guarda "subsidiado" en vez del codigo del contrato.
+        var hc = await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 7, 15, 10, 0, 0, TimeSpan.Zero));
+        await LigarAsignacionAsync(s, hc, pid, "EPS TEST", "subsidiado");
+        // Asignacion SIN nombre de EPS y codigo no resoluble -> regla historica (paciente).
+        var hc2 = await SembrarHcCerradaAsync(s, pid, new DateTimeOffset(2026, 7, 16, 10, 0, 0, TimeSpan.Zero));
+        await LigarAsignacionAsync(s, hc2, pid, null, "X");
+
+        var sel = new RelacionFacturasSelector(new TestDbContextFactory(s.Ctx, new FakeTenantContext { TenantId = TenantId }));
+        var hechos = await sel.SelectAsync(Filtros(s, new DateOnly(2026, 7, 1), new DateOnly(2026, 7, 31)));
+        Assert.Equal(2, hechos.Count);
+        Assert.All(hechos, h => Assert.Equal(s.ContratoId, h.Contrato.Id));
+    }
+
     [Fact]
     public async Task Filtro_contrato_vacio_no_acota()
     {

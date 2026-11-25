@@ -1149,6 +1149,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.ResueltoPorNombre).HasMaxLength(200);
             b.Property(x => x.Respuesta).HasColumnType("text");
             b.Property(x => x.Estado).HasConversion<int>();
+            b.Property(x => x.Tipo).HasConversion<int>();
             b.HasIndex(x => new { x.TenantId, x.Estado, x.CreatedAt });
             b.HasIndex(x => new { x.TenantId, x.HistoriaClinicaId });
         });

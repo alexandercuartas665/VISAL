@@ -10,6 +10,16 @@ public enum AutorizacionSolicitudEstado
     Rechazada = 2,
 }
 
+/// <summary>Que control origino la solicitud.</summary>
+public enum AutorizacionSolicitudTipo
+{
+    /// <summary>La fecha de atencion se sale del patron de cierre del tipo de servicio.</summary>
+    FechaAtencion = 0,
+    /// <summary>El auditor IA (modo bloqueante) rechazo la historia el maximo de intentos (IMP-68):
+    /// al aprobarse, el profesional puede cerrar la HC pese al rechazo.</summary>
+    CierreAuditoriaIa = 1,
+}
+
 /// <summary>
 /// Solicitud que hace el PROFESIONAL cuando su historia clinica se sale del patron de
 /// cierre del tipo de servicio: en vez de pedirle un token por telefono al coordinador,
@@ -22,6 +32,9 @@ public class AutorizacionSolicitud : TenantEntity
 {
     public Guid HistoriaClinicaId { get; set; }
     public Guid? AsignacionId { get; set; }
+
+    /// <summary>Control que origino la solicitud (fecha de atencion / auditoria IA bloqueante).</summary>
+    public AutorizacionSolicitudTipo Tipo { get; set; } = AutorizacionSolicitudTipo.FechaAtencion;
 
     /// <summary>Fecha de atencion de la HC al momento de solicitar (lo que se autoriza).</summary>
     public DateTimeOffset FechaAtencion { get; set; }

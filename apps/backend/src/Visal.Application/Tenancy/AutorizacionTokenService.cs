@@ -105,7 +105,7 @@ public sealed class AutorizacionTokenService(
                 pac?.NombreCompleto, pac is null ? null : $"{pac.TipoDocumento} {pac.NumeroDocumento}",
                 asg?.NombreServicio, asg?.TipoServicio,
                 r.FechaAtencion, r.Detalle, r.ConceptoNombre, r.Motivo,
-                r.ResueltoEn, r.ResueltoPorNombre, r.Respuesta);
+                r.ResueltoEn, r.ResueltoPorNombre, r.Respuesta, r.Tipo);
         }).ToList();
     }
 
@@ -133,6 +133,22 @@ public sealed class AutorizacionTokenService(
         var now = clock.GetUtcNow();
         var obs = string.IsNullOrWhiteSpace(observacion) ? "Aprobada desde solicitud del profesional." : observacion.Trim();
         var nombre = string.IsNullOrWhiteSpace(actorNombre) ? null : actorNombre.Trim();
+        if (sol.Tipo == AutorizacionSolicitudTipo.CierreAuditoriaIa)
+        {
+            // Cierre pese al rechazo del auditor IA (IMP-68): no toca la fecha de la HC ni crea token;
+            // la propia solicitud aprobada habilita el cierre de esa HC.
+            sol.Estado = AutorizacionSolicitudEstado.Aprobada;
+            sol.ResueltoEn = now;
+            sol.ResueltoPorUserId = actor;
+            sol.ResueltoPorNombre = nombre;
+            sol.Respuesta = string.IsNullOrWhiteSpace(observacion) ? null : observacion.Trim();
+            audit.Write(db, actor, "autorizacion-solicitud.aprobar", nameof(AutorizacionSolicitud), sol.Id,
+                previousValue: new { estado = "Pendiente" },
+                newValue: new { estado = "Aprobada", tipo = "CierreAuditoriaIa", hcId = sol.HistoriaClinicaId, observacion = sol.Respuesta },
+                tenantId: tid);
+            await db.SaveChangesAsync(ct);
+            return new UsarTokenResult(true, null);
+        }
         // Token "usado" al instante: deja la aprobacion en el MISMO historial que los tokens
         // (quien autorizo, quien lo uso, HC/asignacion, motivo).
         var token = new AutorizacionToken

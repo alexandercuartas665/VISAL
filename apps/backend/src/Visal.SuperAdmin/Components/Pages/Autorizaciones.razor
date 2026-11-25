@@ -100,6 +100,14 @@ else
                                     </td>
                                     <td>@r.FechaAtencion.ToOffset(TimeSpan.FromHours(-5)).ToString("dd/MM/yyyy HH:mm")</td>
                                     <td>
+                                        @if (r.Tipo == AutorizacionSolicitudTipo.CierreAuditoriaIa)
+                                        {
+                                            <div><span class="badge" style="background:#fde68a;color:#78350f;">Cierre pese a rechazo del auditor IA</span></div>
+                                        }
+                                        else
+                                        {
+                                            <div><span class="badge" style="background:#e0f2fe;color:#075985;">Fecha de atenci&oacute;n fuera del patr&oacute;n</span></div>
+                                        }
                                         @if (!string.IsNullOrWhiteSpace(r.ConceptoNombre)) { <div><b>@r.ConceptoNombre</b></div> }
                                         <div>@r.Motivo</div>
                                         @if (!string.IsNullOrWhiteSpace(r.Detalle)) { <small class="text-muted">@r.Detalle</small> }

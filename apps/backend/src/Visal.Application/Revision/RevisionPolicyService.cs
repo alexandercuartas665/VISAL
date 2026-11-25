@@ -95,6 +95,12 @@ public sealed class RevisionPolicyService : IRevisionPolicyService
         {
             throw new ArgumentException("El tiempo maximo de la auditoria al cerrar debe estar entre 30 y 300 segundos.", nameof(policy));
         }
+        if (policy.AuditoriaIaBloqueo is { } bloqueo
+            && bloqueo.Values.Any(n => n < MinIntentosBloqueo || n > MaxIntentosBloqueo))
+        {
+            throw new ArgumentException(
+                $"El maximo de intentos de la auditoria bloqueante debe estar entre {MinIntentosBloqueo} y {MaxIntentosBloqueo}.", nameof(policy));
+        }
 
         using var db = _dbFactory.Create();
         var row = await db.RevisionPolicies.FirstOrDefaultAsync(ct);
@@ -125,6 +131,8 @@ public sealed class RevisionPolicyService : IRevisionPolicyService
             .Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t.Trim().ToUpperInvariant())
             .Distinct().ToList();
         row.AuditoriaIaTiposServicioJson = tipos.Count == 0 ? null : System.Text.Json.JsonSerializer.Serialize(tipos);
+        var bloqueoNorm = NormalizarBloqueo(policy.AuditoriaIaBloqueo);
+        row.AuditoriaIaBloqueoJson = bloqueoNorm.Count == 0 ? null : System.Text.Json.JsonSerializer.Serialize(bloqueoNorm);
         row.UpdatedAt = DateTimeOffset.UtcNow;
         row.UpdatedBy = actor;
         await db.SaveChangesAsync(ct);
@@ -150,7 +158,35 @@ public sealed class RevisionPolicyService : IRevisionPolicyService
         r.AuditoriaIaAlCerrar,
         LeerFormatos(r.AuditoriaIaFormatosJson),
         r.AuditoriaIaTimeoutSeg,
-        LeerFormatos(r.AuditoriaIaTiposServicioJson));
+        LeerFormatos(r.AuditoriaIaTiposServicioJson),
+        LeerBloqueo(r.AuditoriaIaBloqueoJson));
+
+    /// <summary>Rango permitido del maximo de intentos (rechazos del agente) en modo bloqueante.</summary>
+    public const int MinIntentosBloqueo = 1;
+    public const int MaxIntentosBloqueo = 10;
+
+    /// <summary>Claves en MAYUSCULA sin espacios; valores acotados al rango permitido.</summary>
+    internal static Dictionary<string, int> NormalizarBloqueo(IReadOnlyDictionary<string, int>? bloqueo)
+    {
+        var r = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        if (bloqueo is null) { return r; }
+        foreach (var (k, v) in bloqueo)
+        {
+            if (string.IsNullOrWhiteSpace(k)) { continue; }
+            r[k.Trim().ToUpperInvariant()] = Math.Clamp(v, MinIntentosBloqueo, MaxIntentosBloqueo);
+        }
+        return r;
+    }
+
+    private static IReadOnlyDictionary<string, int> LeerBloqueo(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) { return new Dictionary<string, int>(); }
+        try
+        {
+            return NormalizarBloqueo(System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, int>>(json));
+        }
+        catch (System.Text.Json.JsonException) { return new Dictionary<string, int>(); }
+    }
 
     private static IReadOnlyList<string> LeerFormatos(string? json)
     {

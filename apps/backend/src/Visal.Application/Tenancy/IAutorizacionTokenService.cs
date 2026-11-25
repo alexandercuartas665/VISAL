@@ -46,7 +46,8 @@ public sealed record AutorizacionSolicitudDto(
     string Motivo,
     DateTimeOffset? ResueltoEn,
     string? ResueltoPorNombre,
-    string? Respuesta);
+    string? Respuesta,
+    AutorizacionSolicitudTipo Tipo = AutorizacionSolicitudTipo.FechaAtencion);
 
 /// <summary>Resultado de validar/consumir un token.</summary>
 public sealed record UsarTokenResult(bool Ok, string? Mensaje, Guid? TokenId = null);

@@ -1189,6 +1189,9 @@
     .aud-sug-h { display:flex; justify-content:space-between; align-items:center; background:#eef2ff; padding:6px 10px; font-size:12.5px; }
     .aud-sug-t { padding:8px 10px; font-size:12.5px; white-space:pre-wrap; color:#1e293b; }
     .aud-copy { border:1px solid #a5b4fc; background:#fff; color:#3730a3; border-radius:6px; font-size:11.5px; padding:2px 8px; cursor:pointer; }
+    .aud-coord { background:#fef2f2; border:1px solid #fecaca; color:#7f1d1d; border-radius:6px; padding:8px 10px; font-size:12.5px; margin-bottom:10px; }
+    .aud-lbl { display:block; font-size:12px; font-weight:600; color:#334155; margin:10px 0 4px; }
+    .aud-sol-txt { width:100%; min-height:90px; font-size:12.5px; border:1px solid #cbd5e1; border-radius:6px; padding:6px 8px; }
     .aud-foot { display:flex; justify-content:flex-end; gap:8px; padding:12px 22px; border-top:1px solid #e2e8f0; background:#f8fafc; }
     .aud-fb { margin-top:14px; padding-top:10px; border-top:1px dashed #cbd5e1; text-align:left; }
     .aud-fb-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:12.5px; color:#475569; }
@@ -1250,14 +1253,28 @@
         else if (_audFase == "rechazada" && _audRes is not null)
         {
             var esRech = _audRes.Resultado == Visal.Domain.Entities.RevisionResultado.Rechazado;
+            var bloqueado = esRech && _audBloq is not null;
             <div class="aud-head @(esRech ? "aud-head-bad" : "aud-head-warn")">
                 <div class="aud-ic">@(esRech ? "⚠" : "❓")</div>
                 <div>
-                    <div class="aud-title">@(esRech ? "El auditor IA rechazaría esta historia" : "El auditor IA no pudo aprobar esta historia")</div>
-                    <div class="aud-sub">Confianza @((_audRes.Confianza * 100m).ToString("0"))%. Revisa los hallazgos; puedes corregir o cerrar de todas formas.</div>
+                    <div class="aud-title">@(bloqueado ? "El auditor IA rechaz\u00f3 esta historia" : esRech ? "El auditor IA rechazar\u00eda esta historia" : "El auditor IA no pudo aprobar esta historia")</div>
+                    @if (bloqueado)
+                    {
+                        <div class="aud-sub">Confianza @((_audRes.Confianza * 100m).ToString("0"))%. Debes corregir los hallazgos para poder cerrarla.
+                            <b>Intento @_audBloq!.Rechazos de @_audBloq.MaxIntentos.</b>
+                            @(_audBloq.Agotado ? "Agotaste los intentos: para cerrarla debes pedir autorizaci\u00f3n." : "")</div>
+                    }
+                    else
+                    {
+                        <div class="aud-sub">Confianza @((_audRes.Confianza * 100m).ToString("0"))%. Revisa los hallazgos; puedes corregir o cerrar de todas formas.</div>
+                    }
                 </div>
             </div>
             <div class="aud-body">
+                @if (bloqueado && _audBloq!.SolicitudEstado == "Rechazada" && !string.IsNullOrWhiteSpace(_audBloq.SolicitudRespuesta))
+                {
+                    <div class="aud-coord">El coordinador rechaz&oacute; la solicitud anterior: <i>@_audBloq.SolicitudRespuesta</i></div>
+                }
                 @if (!string.IsNullOrWhiteSpace(_audRes.Nota)) { <div class="aud-nota">@_audRes.Nota</div> }
                 @if (_audRes.Hallazgos.Count > 0)
                 {
@@ -1285,9 +1302,85 @@
             </div>
             <div class="aud-foot">
                 <button class="btn btn-outline-secondary btn-sm" disabled="@_audCerrando" @onclick="VolverACorregirAsync">&#9998; Volver a corregir</button>
-                <button class="btn btn-warning btn-sm" disabled="@_audCerrando" @onclick="CerrarDeTodasFormasAsync">
-                    @(_audCerrando ? "Cerrando..." : "Cerrar de todas formas")
-                </button>
+                @if (!bloqueado)
+                {
+                    <button class="btn btn-warning btn-sm" disabled="@_audCerrando" @onclick="CerrarDeTodasFormasAsync">
+                        @(_audCerrando ? "Cerrando..." : "Cerrar de todas formas")
+                    </button>
+                }
+                else if (_audBloq!.Agotado)
+                {
+                    <button class="btn btn-warning btn-sm" @onclick="IrASolicitudIaAsync">&#128274; Solicitar autorizaci&oacute;n para cerrar</button>
+                }
+            </div>
+        }
+        else if (_audFase == "bloqueo" && _audBloq is not null)
+        {
+            <div class="aud-head aud-head-bad">
+                <div class="aud-ic">&#128274;</div>
+                <div>
+                    <div class="aud-title">Para cerrar esta historia necesitas autorizaci&oacute;n</div>
+                    <div class="aud-sub">El auditor IA la rechaz&oacute; @_audBloq.Rechazos vez/veces (m&aacute;ximo @_audBloq.MaxIntentos intentos en modo bloqueante).</div>
+                </div>
+            </div>
+            <div class="aud-body">
+                @if (_audBloq.Pendiente)
+                {
+                    <div class="aud-nota">&#9203; Solicitud enviada@(_audBloq.SolicitudEn is DateTimeOffset se ? " el " + se.ToOffset(TimeSpan.FromHours(-5)).ToString("dd/MM/yyyy HH:mm") : "")
+                        y pendiente de aprobaci&oacute;n en el m&oacute;dulo Autorizaciones. Cuando la aprueben, pulsa de nuevo
+                        <b>Guardar definitivamente</b> (o &quot;Verificar&quot; aqu&iacute;) y la historia se cerrar&aacute;.</div>
+                }
+                else if (_audBloq.Agotado)
+                {
+                    @if (_audBloq.SolicitudEstado == "Rechazada" && !string.IsNullOrWhiteSpace(_audBloq.SolicitudRespuesta))
+                    {
+                        <div class="aud-coord">El coordinador rechaz&oacute; la solicitud anterior: <i>@_audBloq.SolicitudRespuesta</i></div>
+                    }
+                    <div class="aud-sug-help">La solicitud llega al coordinador en Autorizaciones &rarr; Solicitudes. Explica por qu&eacute; la historia
+                        debe cerrarse as&iacute; (por ejemplo, si el auditor se equivoca en un hallazgo).</div>
+                    <label class="aud-lbl">Concepto</label>
+                    <select class="form-select form-select-sm" @bind="_audSolConcepto">
+                        <option value="">(sin concepto)</option>
+                        @foreach (var c in _solConceptos)
+                        {
+                            <option value="@c.Nombre">@c.Nombre</option>
+                        }
+                    </select>
+                    <label class="aud-lbl">Motivo</label>
+                    <textarea class="aud-sol-txt" maxlength="2000" @bind="_audSolMotivo" @bind:event="oninput"
+                              placeholder="@AudSolPlaceholder"></textarea>
+                }
+                else
+                {
+                    @if (_audBloq.SolicitudEstado == "Rechazada")
+                    {
+                        <div class="aud-coord">El coordinador rechaz&oacute; la solicitud: <i>@(_audBloq.SolicitudRespuesta ?? "(sin observaci\u00f3n)")</i></div>
+                    }
+                    <div class="aud-nota">Tienes @_audBloq.Restantes intento(s) nuevo(s) con el auditor IA: corrige la historia y vuelve a pulsar
+                        <b>Guardar definitivamente</b>.</div>
+                }
+                @if (_audSolError is not null) { <div class="aud-fb-err" style="margin-top:8px;">@_audSolError</div> }
+                @if (_audSolOk is not null) { <div class="aud-fb-ok" style="margin-top:8px;">@_audSolOk</div> }
+            </div>
+            <div class="aud-foot">
+                @if (_audBloq.Pendiente)
+                {
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarVentanaBloqueoIa">Cerrar ventana</button>
+                    <button class="btn btn-primary btn-sm" disabled="@_audSolBusy" @onclick="VerificarSolicitudIaAsync">
+                        @(_audSolBusy ? "Verificando..." : "Verificar si ya la aprobaron")
+                    </button>
+                }
+                else if (_audBloq.Agotado)
+                {
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarVentanaBloqueoIa">&#9998; Volver a la historia</button>
+                    <button class="btn btn-warning btn-sm" disabled="@(_audSolBusy || string.IsNullOrWhiteSpace(_audSolMotivo))" @onclick="EnviarSolicitudIaAsync">
+                        @(_audSolBusy ? "Enviando..." : "Enviar solicitud")
+                    </button>
+                }
+                else
+                {
+                    <button class="btn btn-primary btn-sm" @onclick="CerrarVentanaBloqueoIa">&#9998; Volver a corregir</button>
+                }
             </div>
         }
         else if (_audFase == "sinresultado")
@@ -3248,6 +3341,15 @@
             catch (Exception exCfg) { Log.LogWarning(exCfg, "No se pudo leer la config de auditoria IA al cerrar"); }
             if (audCfg is not null)
             {
+                // IMP-68: modo BLOQUEANTE por tipo de servicio (null = informativo / exento).
+                _audBloq = null;
+                try { _audBloq = await PreIaSvc.EstadoBloqueoIaAsync(h.Id, await ResolverActorAsync()); }
+                catch (Exception exB) { Log.LogWarning(exB, "No se pudo leer el estado del bloqueo de la auditoria IA"); }
+                if (_audBloq is { } bq)
+                {
+                    if (bq.Autorizada) { await CerrarAutorizadoIaAsync(h); return; }
+                    if (bq.Pendiente || bq.Agotado) { await AbrirBloqueoIaAsync(h); return; }
+                }
                 await AuditarYCerrarAsync(h, audCfg);
                 return;
             }
@@ -3420,7 +3522,8 @@
         var valoresJson = SerializeValores(_valores);
 
         // Reuso: mismo texto ya auditado (p.ej. volvio de autorizar el token de fecha).
-        if (_audReuso is { } prev && prev.HcId == h.Id && prev.Valores == valoresJson)
+        if (_audReuso is { } prev && prev.HcId == h.Id && prev.Valores == valoresJson
+            && !(_audBloq is not null && prev.Res.Resultado == Visal.Domain.Entities.RevisionResultado.Rechazado))
         {
             _audHc = h; _audRes = prev.Res;
             await CerrarYRegistrarAsync(prev.PeseRechazo);
@@ -3507,8 +3610,107 @@
             if (_audShow && _audCerradaOk && ReferenceEquals(_audRes, res)) { await CerrarModalAuditoriaAsync(); }
             return;
         }
+        if (_audBloq is not null && res.Resultado == Visal.Domain.Entities.RevisionResultado.Rechazado)
+        {
+            // El log de este rechazo ya quedo guardado: el estado lo cuenta como intento.
+            var antes = _audBloq;
+            try { _audBloq = await PreIaSvc.EstadoBloqueoIaAsync(h.Id, actor) ?? antes; }
+            catch (Exception exB) { Log.LogWarning(exB, "No se pudo refrescar el bloqueo de la auditoria IA"); }
+            if (res.LogId is null || ReferenceEquals(_audBloq, antes))
+            {
+                _audBloq = antes with { Rechazos = antes.Rechazos + 1 };
+            }
+        }
         _audFase = "rechazada";
         StateHasChanged();
+    }
+
+    // ---- Auditoria IA bloqueante (IMP-68) ----
+    private Visal.Application.Revision.Ia.BloqueoIaEstado? _audBloq;
+    private string _audSolMotivo = "", _audSolConcepto = "";
+    private string? _audSolError, _audSolOk;
+    private bool _audSolBusy;
+    private const string AudSolPlaceholder = "Ej.: el hallazgo sobre la medicaci\u00f3n no aplica porque...";
+
+    private async Task AbrirBloqueoIaAsync(HistoriaRow h)
+    {
+        // Lo escrito no se pierde: se persiste antes de mostrar la ventana.
+        try { await HcSvc.GuardarValoresAsync(h.Id, SerializeValores(_valores), Guid.Empty); }
+        catch (Exception ex) { Log.LogWarning(ex, "No se pudieron guardar los valores (bloqueo IA)"); }
+        _audHc = h; _audRes = null; _audMsg = null;
+        _audSolError = null; _audSolOk = null;
+        _audFase = "bloqueo"; _audShow = true;
+        await CargarConceptosSolicitudAsync();
+        StateHasChanged();
+    }
+
+    private async Task IrASolicitudIaAsync()
+    {
+        await GuardarFeedbackPendienteAsync();
+        if (_audHc is HistoriaRow h && _audRes is not null)
+        {
+            try { await PreIaSvc.RegistrarIntentoCierreAsync(h.Id, _audRes, await ResolverActorAsync()); }
+            catch { /* metricas best-effort */ }
+        }
+        _audReuso = null; _audRes = null;
+        _audSolError = null; _audSolOk = null;
+        _audFase = "bloqueo";
+        await CargarConceptosSolicitudAsync();
+    }
+
+    private void CerrarVentanaBloqueoIa()
+    {
+        _audShow = false; _audFase = "";
+        _audSolError = null; _audSolOk = null;
+    }
+
+    private async Task EnviarSolicitudIaAsync()
+    {
+        _audSolError = null; _audSolOk = null;
+        if (_audHc is not HistoriaRow h) { return; }
+        if (string.IsNullOrWhiteSpace(_audSolMotivo)) { _audSolError = "Escribe el motivo de la solicitud."; return; }
+        _audSolBusy = true;
+        try
+        {
+            var actor = await ResolverActorAsync();
+            var (ok, msg) = await PreIaSvc.SolicitarAutorizacionCierreIaAsync(
+                h.Id, _audSolMotivo, _audSolConcepto, await ResolverActorNombreAsync(), actor);
+            if (!ok) { _audSolError = msg ?? "No se pudo enviar la solicitud."; return; }
+            _audSolMotivo = ""; _audSolConcepto = "";
+            _audBloq = await PreIaSvc.EstadoBloqueoIaAsync(h.Id, actor);
+            if (_audBloq is null) { _audShow = false; _audFase = ""; return; }
+            _audSolOk = msg ?? "Solicitud enviada al coordinador.";
+        }
+        catch (Exception ex) { _audSolError = ex.Message; }
+        finally { _audSolBusy = false; }
+    }
+
+    private async Task VerificarSolicitudIaAsync()
+    {
+        _audSolError = null; _audSolOk = null;
+        if (_audHc is not HistoriaRow h) { return; }
+        _audSolBusy = true;
+        try
+        {
+            _audBloq = await PreIaSvc.EstadoBloqueoIaAsync(h.Id, await ResolverActorAsync());
+            if (_audBloq is null || _audBloq.Autorizada)
+            {
+                _audSolBusy = false;
+                await CerrarAutorizadoIaAsync(h);
+                return;
+            }
+            if (_audBloq.Pendiente) { _audSolOk = "Todav\u00eda est\u00e1 pendiente de aprobaci\u00f3n."; }
+        }
+        catch (Exception ex) { _audSolError = ex.Message; }
+        finally { _audSolBusy = false; }
+    }
+
+    /// <summary>El coordinador aprobo el cierre pese al rechazo del auditor IA: se cierra sin volver
+    /// a auditar (la pre-revision de Ordenes Clinicas sigue la politica).</summary>
+    private async Task CerrarAutorizadoIaAsync(HistoriaRow h)
+    {
+        _audHc = h;
+        await CerrarSinAuditoriaAsync(Visal.Application.Tenancy.PreRevisionAlCerrar.SegunPolitica);
     }
 
     private async Task TickAuditoriaAsync(CancellationToken ct)
@@ -3540,6 +3742,7 @@
 
     private async Task CerrarDeTodasFormasAsync()
     {
+        if (_audBloq is not null && _audRes?.Resultado == Visal.Domain.Entities.RevisionResultado.Rechazado) { return; }
         await GuardarFeedbackPendienteAsync();
         if (_audReuso is { } r) { _audReuso = (r.HcId, r.Valores, r.Res, true); }
         await CerrarYRegistrarAsync(peseRechazo: true);

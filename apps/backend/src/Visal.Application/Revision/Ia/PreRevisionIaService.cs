@@ -270,26 +270,144 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         }
         if (policy.AuditoriaIaTiposServicio is { Count: > 0 } tipos)
         {
-            // Tipo de servicio de la asignacion que origino la HC (cadena pivote -> sesion -> turno ->
-            // asignacion). HC sin asignacion (creada por fuera de Coordinacion) no se audita.
-            // Plural/singular tolerante: asignaciones legacy "TERAPIAS"/"CONSULTAS".
+            // Tipo de servicio de la asignacion que origino la HC. HC sin asignacion (creada por
+            // fuera de Coordinacion) no se audita.
             using var db = _dbFactory.Create();
-            var tiposHc = await (
-                from pv in db.AsignacionTurnoSesionHcs.AsNoTracking()
-                where pv.HistoriaClinicaId == historiaClinicaId
-                join se in db.AsignacionTurnoSesiones.AsNoTracking() on pv.SesionId equals se.Id
-                join t in db.AsignacionTurnos.AsNoTracking() on se.AsignacionTurnoId equals t.Id
-                join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
-                select a.TipoServicio)
-                .Distinct()
-                .ToListAsync(ct);
-            if (!tiposHc.Any(th => !string.IsNullOrWhiteSpace(th)
-                                   && tipos.Any(tp => Visal.Application.Tenancy.AsignacionService.TiposCoinciden(th.Trim(), tp))))
+            var tiposHc = await TiposServicioDeHcAsync(db, historiaClinicaId, ct);
+            if (!tiposHc.Any(th => tipos.Any(tp => AsignacionService.TiposCoinciden(th, tp))))
             {
                 return null;
             }
         }
         return new AuditoriaCierreConfig(Math.Clamp(policy.AuditoriaIaTimeoutSeg, 30, 300));
+    }
+
+    /// <summary>Tipos de servicio de la(s) asignacion(es) que originaron la HC (cadena pivote ->
+    /// sesion -> turno -> asignacion), sin vacios. Plural/singular se resuelve al comparar
+    /// (asignaciones legacy "TERAPIAS"/"CONSULTAS").</summary>
+    private static async Task<List<string>> TiposServicioDeHcAsync(IApplicationDbContext db, Guid hcId, CancellationToken ct)
+    {
+        var tipos = await (
+            from pv in db.AsignacionTurnoSesionHcs.AsNoTracking()
+            where pv.HistoriaClinicaId == hcId
+            join se in db.AsignacionTurnoSesiones.AsNoTracking() on pv.SesionId equals se.Id
+            join t in db.AsignacionTurnos.AsNoTracking() on se.AsignacionTurnoId equals t.Id
+            join a in db.Asignaciones.AsNoTracking() on t.AsignacionId equals a.Id
+            select a.TipoServicio)
+            .Distinct()
+            .ToListAsync(ct);
+        return tipos.Where(t => !string.IsNullOrWhiteSpace(t)).Select(t => t!.Trim()).ToList();
+    }
+
+    public async Task<BloqueoIaEstado?> EstadoBloqueoIaAsync(Guid historiaClinicaId, Guid actor, CancellationToken ct = default)
+    {
+        var policy = await _policy.GetAsync(ct);
+        if (!policy.AuditoriaIaAlCerrar || policy.AuditoriaIaBloqueo is not { Count: > 0 } bloqueo) { return null; }
+        if (await ConfigAuditoriaAlCerrarAsync(historiaClinicaId, ct) is null) { return null; }
+
+        using var db = _dbFactory.Create();
+        var tiposHc = await TiposServicioDeHcAsync(db, historiaClinicaId, ct);
+        var maximos = bloqueo
+            .Where(b => tiposHc.Any(th => AsignacionService.TiposCoinciden(th, b.Key)))
+            .Select(b => b.Value)
+            .ToList();
+        if (maximos.Count == 0) { return null; }
+        // Coordinadores (y Owner/Admin) no responden al bloqueo: les sale informativo.
+        if (await PermisosUsuario.TieneAsync(db, actor, PermisosUsuario.SinControlCierre, ct)) { return null; }
+
+        // Inicio de la ronda: la ultima reapertura de la HC y, despues, la ultima solicitud que el
+        // coordinador rechazo (el profesional corrige con intentos nuevos).
+        var reabiertaEn = await db.SuperAdminAuditLogs.AsNoTracking()
+            .Where(l => l.EntityId == historiaClinicaId && l.ActionName == "historia-clinica.reabrir")
+            .MaxAsync(l => (DateTimeOffset?)l.CreatedAt, ct);
+        var sols = await db.AutorizacionSolicitudes.AsNoTracking()
+            .Where(s => s.HistoriaClinicaId == historiaClinicaId
+                        && s.Tipo == AutorizacionSolicitudTipo.CierreAuditoriaIa
+                        && (reabiertaEn == null || s.CreatedAt > reabiertaEn))
+            .OrderByDescending(s => s.CreatedAt)
+            .Select(s => new { s.Estado, s.Respuesta, s.CreatedAt, s.ResueltoEn })
+            .ToListAsync(ct);
+        var desde = reabiertaEn;
+        var ultRechazo = sols.Where(s => s.Estado == AutorizacionSolicitudEstado.Rechazada)
+            .Select(s => (DateTimeOffset?)(s.ResueltoEn ?? s.CreatedAt)).Max();
+        if (ultRechazo is not null && (desde is null || ultRechazo > desde)) { desde = ultRechazo; }
+
+        var rechazos = await db.RevisionAgenteLogs.AsNoTracking()
+            .CountAsync(l => l.HistoriaClinicaId == historiaClinicaId && l.Ok
+                             && l.Resultado == nameof(RevisionResultado.Rechazado)
+                             && (desde == null || l.CreatedAt > desde), ct);
+        var ult = sols.FirstOrDefault();
+        string? estado = ult?.Estado switch
+        {
+            AutorizacionSolicitudEstado.Pendiente => "Pendiente",
+            AutorizacionSolicitudEstado.Aprobada => "Aprobada",
+            AutorizacionSolicitudEstado.Rechazada => "Rechazada",
+            _ => null,
+        };
+        return new BloqueoIaEstado(maximos.Min(), rechazos, estado,
+            estado == "Rechazada" ? ult!.Respuesta : null, ult?.CreatedAt);
+    }
+
+    public async Task<(bool Ok, string? Mensaje)> SolicitarAutorizacionCierreIaAsync(
+        Guid historiaClinicaId, string motivo, string? conceptoNombre, string? actorNombre, Guid actor, CancellationToken ct = default)
+    {
+        var mot = (motivo ?? "").Trim();
+        if (mot.Length == 0) { return (false, "Escribe el motivo de la solicitud."); }
+        var est = await EstadoBloqueoIaAsync(historiaClinicaId, actor, ct);
+        if (est is null) { return (true, "La historia ya no requiere autorizacion para cerrarse."); }
+        if (est.Autorizada) { return (true, "La solicitud ya fue aprobada: puedes cerrar la historia."); }
+        if (est.Pendiente) { return (true, "Ya hay una solicitud pendiente para esta historia."); }
+        if (!est.Agotado)
+        {
+            return (false, $"Aun tienes {est.Restantes} intento(s) con el auditor IA antes de pedir autorizacion.");
+        }
+
+        using var db = _dbFactory.Create();
+        var hc = await db.HistoriasClinicas.AsNoTracking()
+            .Where(h => h.Id == historiaClinicaId)
+            .Select(h => new { h.TenantId, h.FechaAtencion })
+            .FirstOrDefaultAsync(ct);
+        if (hc is null) { return (false, "Historia clinica no encontrada."); }
+        var asignacionId = await (
+            from pv in db.AsignacionTurnoSesionHcs.AsNoTracking()
+            where pv.HistoriaClinicaId == historiaClinicaId
+            join se in db.AsignacionTurnoSesiones.AsNoTracking() on pv.SesionId equals se.Id
+            join t in db.AsignacionTurnos.AsNoTracking() on se.AsignacionTurnoId equals t.Id
+            select (Guid?)t.AsignacionId)
+            .FirstOrDefaultAsync(ct);
+        var ultNota = await db.RevisionAgenteLogs.AsNoTracking()
+            .Where(l => l.HistoriaClinicaId == historiaClinicaId && l.Ok && l.Resultado == nameof(RevisionResultado.Rechazado))
+            .OrderByDescending(l => l.CreatedAt)
+            .Select(l => l.Nota)
+            .FirstOrDefaultAsync(ct);
+        var detalle = $"El auditor IA rechazo la historia {est.Rechazos} vez/veces (maximo {est.MaxIntentos} intentos).";
+        if (!string.IsNullOrWhiteSpace(ultNota))
+        {
+            var n = ultNota.Trim();
+            detalle += " Ultimo concepto: " + (n.Length > 600 ? n[..600] + "..." : n);
+        }
+        var sol = new AutorizacionSolicitud
+        {
+            TenantId = hc.TenantId,
+            HistoriaClinicaId = historiaClinicaId,
+            AsignacionId = asignacionId,
+            Tipo = AutorizacionSolicitudTipo.CierreAuditoriaIa,
+            CreatedAt = DateTimeOffset.UtcNow,
+            FechaAtencion = hc.FechaAtencion ?? DateTimeOffset.UtcNow,
+            Detalle = detalle,
+            ConceptoNombre = string.IsNullOrWhiteSpace(conceptoNombre) ? null : conceptoNombre.Trim(),
+            Motivo = mot,
+            SolicitadoPorUserId = actor,
+            SolicitadoPorNombre = string.IsNullOrWhiteSpace(actorNombre) ? null : actorNombre.Trim(),
+            Estado = AutorizacionSolicitudEstado.Pendiente,
+        };
+        db.AutorizacionSolicitudes.Add(sol);
+        _audit?.Write(db, actor, "autorizacion-solicitud.crear", nameof(AutorizacionSolicitud), sol.Id,
+            previousValue: null,
+            newValue: new { hcId = historiaClinicaId, tipo = "CierreAuditoriaIa", est.Rechazos, est.MaxIntentos, sol.ConceptoNombre, motivo = mot },
+            tenantId: hc.TenantId);
+        await db.SaveChangesAsync(ct);
+        return (true, null);
     }
 
     public async Task<PreRevisionIaResult> RegistrarAuditoriaCierreAsync(

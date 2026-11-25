@@ -59,6 +59,23 @@ public sealed record AuditoriaIaResultado(
 /// <summary>Configuracion efectiva de la auditoria al cerrar para una HC (null = no aplica).</summary>
 public sealed record AuditoriaCierreConfig(int TimeoutSeg);
 
+/// <summary>Estado del modo BLOQUEANTE de la auditoria al cerrar para una HC y un usuario (IMP-68).
+/// <see cref="Rechazos"/> cuenta los rechazos del agente desde el ultimo reinicio (reapertura de la HC
+/// o solicitud rechazada por el coordinador). <see cref="SolicitudEstado"/>: Pendiente / Aprobada /
+/// Rechazada (la ultima solicitud de cierre por auditoria IA) o null.</summary>
+public sealed record BloqueoIaEstado(
+    int MaxIntentos,
+    int Rechazos,
+    string? SolicitudEstado = null,
+    string? SolicitudRespuesta = null,
+    DateTimeOffset? SolicitudEn = null)
+{
+    public bool Agotado => Rechazos >= MaxIntentos;
+    public int Restantes => Math.Max(0, MaxIntentos - Rechazos);
+    public bool Autorizada => SolicitudEstado == "Aprobada";
+    public bool Pendiente => SolicitudEstado == "Pendiente";
+}
+
 /// <summary>
 /// Orquestador del agente REVISOR CLINICO IA. Carga contexto via
 /// <see cref="IRevisionMcpToolsService"/>, arma el prompt, llama al AI Provider
@@ -95,6 +112,16 @@ public interface IPreRevisionIaService
     /// <summary>Si la auditoria al cerrar aplica a esta HC (politica encendida + formato incluido),
     /// devuelve su configuracion; si no, null.</summary>
     Task<AuditoriaCierreConfig?> ConfigAuditoriaAlCerrarAsync(Guid historiaClinicaId, CancellationToken ct = default);
+
+    /// <summary>Modo bloqueante (IMP-68): null = la auditoria al cerrar de esta HC es informativa
+    /// (no aplica, su tipo de servicio no es bloqueante, o el usuario esta exento con el permiso
+    /// "historias.sin-control-cierre"). Si no es null, un rechazo del agente impide cerrar.</summary>
+    Task<BloqueoIaEstado?> EstadoBloqueoIaAsync(Guid historiaClinicaId, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Agotados los intentos, el profesional pide en /autorizaciones permiso para cerrar la
+    /// HC pese al rechazo del auditor IA. Devuelve (ok, mensaje): mensaje informativo si ok.</summary>
+    Task<(bool Ok, string? Mensaje)> SolicitarAutorizacionCierreIaAsync(
+        Guid historiaClinicaId, string motivo, string? conceptoNombre, string? actorNombre, Guid actor, CancellationToken ct = default);
 
     /// <summary>Tras cerrar la HC: abre/reusa su ciclo de revision y registra el MISMO resultado
     /// auditado (veredicto + log + sugerencias + adopcion automatica), sin llamar al proveedor.</summary>

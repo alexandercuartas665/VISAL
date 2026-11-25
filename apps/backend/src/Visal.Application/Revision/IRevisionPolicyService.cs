@@ -19,7 +19,8 @@ public sealed record RevisionPolicyDto(
     bool AuditoriaIaAlCerrar = false,
     IReadOnlyList<string>? AuditoriaIaFormatos = null,
     int AuditoriaIaTimeoutSeg = 180,
-    IReadOnlyList<string>? AuditoriaIaTiposServicio = null);
+    IReadOnlyList<string>? AuditoriaIaTiposServicio = null,
+    IReadOnlyDictionary<string, int>? AuditoriaIaBloqueo = null);
 
 /// <summary>
 /// Acceso a la <see cref="RevisionPolicy"/> singleton por tenant. Cuando no hay

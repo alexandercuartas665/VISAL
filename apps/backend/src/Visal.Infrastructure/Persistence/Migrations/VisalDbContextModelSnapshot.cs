@@ -2032,6 +2032,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
 
+                    b.Property<int>("Tipo")
+                        .HasColumnType("integer")
+                        .HasColumnName("tipo");
+
                     b.Property<Guid?>("TokenId")
                         .HasColumnType("uuid")
                         .HasColumnName("token_id");
@@ -9890,6 +9894,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.Property<bool>("AuditoriaIaAlCerrar")
                         .HasColumnType("boolean")
                         .HasColumnName("auditoria_ia_al_cerrar");
+
+                    b.Property<string>("AuditoriaIaBloqueoJson")
+                        .HasColumnType("text")
+                        .HasColumnName("auditoria_ia_bloqueo_json");
 
                     b.Property<string>("AuditoriaIaFormatosJson")
                         .HasColumnType("text")

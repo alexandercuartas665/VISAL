@@ -237,7 +237,9 @@ else if (_policy is not null)
                     Antes de cerrar, el agente de revisión audita la historia y le muestra el resultado al profesional.
                     Si la <strong>aprueba</strong>, la historia se cierra sola; si la <strong>rechaza</strong>, muestra los hallazgos y
                     el texto sugerido, y el profesional elige <em>volver a corregir</em> o <em>cerrar de todas formas</em>.
-                    Es informativo: nunca bloquea el cierre. El resultado queda en Órdenes Clínicas sin volver a procesarlo.
+                    Por tipo de servicio se elige el modo: <strong>informativo</strong> (nunca bloquea el cierre) o
+                    <strong>bloqueante</strong> (si la rechaza, el profesional debe corregir; al agotar los intentos debe pedir
+                    autorizaci&oacute;n en el m&oacute;dulo Autorizaciones). El resultado queda en &Oacute;rdenes Cl&iacute;nicas sin volver a procesarlo.
                 </p>
                 <p class="rp-help">
                     Costo aproximado: ~US$0,025 por historia auditada (cada intento de cierre se audita). La aprobación
@@ -272,22 +274,57 @@ else if (_policy is not null)
                     </div>
                     <small class="rp-help-sm">Ninguno marcado = se auditan todos los formatos. Marca algunos para un piloto.</small>
                 </div>
-                <div class="rp-field">
-                    <label>Tipos de servicio que se auditan (@(_tiposSel.Count == 0 ? "todos" : _tiposSel.Count.ToString()))</label>
-                    <div class="rp-fmt-list">
-                        @foreach (var t in TiposServicio)
-                        {
-                            var marcadoT = _tiposSel.Contains(t);
-                            <label class="rp-fmt">
-                                <input type="checkbox" checked="@marcadoT" disabled="@(!_policy.AuditoriaIaAlCerrar)"
-                                       @onchange="e => ToggleTipo(t, e.Value is bool b && b)" />
-                                <span>@t</span>
-                            </label>
-                        }
-                    </div>
+                <div class="rp-field rp-field-full">
+                    <label>Tipos de servicio que se auditan (@(_tiposSel.Count == 0 ? "todos" : _tiposSel.Count.ToString())) y modo de cada uno</label>
+                    <table class="rp-tipos">
+                        <thead>
+                            <tr><th>Tipo de servicio</th><th>Modo</th><th>M&aacute;ximo de intentos</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var t in TiposServicio)
+                            {
+                                var marcadoT = _tiposSel.Contains(t);
+                                var auditado = _policy.AuditoriaIaAlCerrar && (_tiposSel.Count == 0 || marcadoT);
+                                var bloq = _bloqueo.TryGetValue(t, out var maxT);
+                                <tr class="@(auditado ? "" : "rp-tipo-off")">
+                                    <td>
+                                        <label class="rp-fmt">
+                                            <input type="checkbox" checked="@marcadoT" disabled="@(!_policy.AuditoriaIaAlCerrar)"
+                                                   @onchange="e => ToggleTipo(t, e.Value is bool b && b)" />
+                                            <span>@t</span>
+                                        </label>
+                                    </td>
+                                    <td>
+                                        <select class="form-select form-select-sm" disabled="@(!auditado)"
+                                                value="@(bloq ? "B" : "I")" @onchange="e => CambiarModo(t, e.Value as string)">
+                                            <option value="I">Informativo</option>
+                                            <option value="B">Bloqueante</option>
+                                        </select>
+                                    </td>
+                                    <td>
+                                        @if (bloq)
+                                        {
+                                            <input type="number" class="form-control form-control-sm rp-int" min="1" max="10"
+                                                   disabled="@(!auditado)" value="@maxT"
+                                                   @onchange="e => CambiarIntentos(t, e.Value as string)" />
+                                        }
+                                        else
+                                        {
+                                            <span class="rp-help-sm">&mdash;</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
                     <small class="rp-help-sm">Tipo de la asignaci&oacute;n con que se coordin&oacute; la historia. Ninguno marcado = todos.
                         Con alguno marcado, las historias creadas por fuera de Coordinaci&oacute;n (sin asignaci&oacute;n) no se auditan.
                         Si tambi&eacute;n hay formatos marcados, la historia debe cumplir ambos.</small>
+                    <small class="rp-help-sm"><b>Bloqueante:</b> si el auditor rechaza, la historia NO se cierra; el profesional corrige y
+                        vuelve a intentar. Al llegar al m&aacute;ximo de rechazos debe pedir autorizaci&oacute;n (m&oacute;dulo Autorizaciones,
+                        tab Solicitudes); si el coordinador la rechaza, recibe una nueva ronda de intentos. Si la IA no responde a tiempo
+                        o falla, la historia se cierra igual. Quien tiene el permiso <i>historias.sin-control-cierre</i> (coordinadores,
+                        Owner/Admin) lo ve en modo informativo.</small>
                 </div>
             </div>
         </div>
@@ -317,6 +354,13 @@ else if (_policy is not null)
     .rp-field input[type=checkbox] { margin-right:6px; }
     .rp-actions { display:flex; justify-content:flex-end; padding:14px 0; }
     .rp-fmt-list { max-height:220px; overflow-y:auto; border:1px solid #e5e7eb; border-radius:6px; padding:6px 8px; margin-top:6px; }
+    .rp-field-full { grid-column:1 / -1; }
+    .rp-tipos { width:100%; max-width:640px; border-collapse:collapse; margin:6px 0 8px; font-size:12px; }
+    .rp-tipos th { text-align:left; font-weight:600; color:#475569; padding:4px 8px; border-bottom:1px solid #e5e7eb; }
+    .rp-tipos td { padding:4px 8px; border-bottom:1px solid #f1f5f9; vertical-align:middle; }
+    .rp-tipos select { max-width:160px; }
+    .rp-int { max-width:90px; }
+    .rp-tipo-off td { opacity:.55; }
     .rp-fmt { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:400 !important; color:#334155; padding:2px 0; margin:0; }
 </style>
 
@@ -402,6 +446,7 @@ else if (_policy is not null)
             };
             _formatosSel = new HashSet<string>(dto.AuditoriaIaFormatos ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
             _tiposSel = new HashSet<string>(dto.AuditoriaIaTiposServicio ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            _bloqueo = new Dictionary<string, int>(dto.AuditoriaIaBloqueo ?? new Dictionary<string, int>(), StringComparer.OrdinalIgnoreCase);
             try
             {
                 // Formatos clinicos activos (sin las ordenes ni escalas/consentimientos).
@@ -435,6 +480,20 @@ else if (_policy is not null)
         if (marcado) { _tiposSel.Add(tipo); } else { _tiposSel.Remove(tipo); }
     }
 
+    // Tipos en modo BLOQUEANTE -> maximo de intentos (rechazos del auditor antes de pedir autorizacion).
+    private Dictionary<string, int> _bloqueo = new(StringComparer.OrdinalIgnoreCase);
+    private const int IntentosDefault = 3;
+
+    private void CambiarModo(string tipo, string? modo)
+    {
+        if (modo == "B") { _bloqueo.TryAdd(tipo, IntentosDefault); } else { _bloqueo.Remove(tipo); }
+    }
+
+    private void CambiarIntentos(string tipo, string? valor)
+    {
+        if (int.TryParse(valor, out var n)) { _bloqueo[tipo] = Math.Clamp(n, 1, 10); }
+    }
+
     private async Task GuardarAsync()
     {
         if (_policy is null) { return; }
@@ -458,7 +517,10 @@ else if (_policy is not null)
                 _policy.AuditoriaIaAlCerrar,
                 _formatosSel.ToList(),
                 _policy.AuditoriaIaTimeoutSeg,
-                _tiposSel.ToList());
+                _tiposSel.ToList(),
+                // Solo cuentan los tipos que efectivamente se auditan (ninguno marcado = todos).
+                _bloqueo.Where(b => _tiposSel.Count == 0 || _tiposSel.Contains(b.Key))
+                        .ToDictionary(b => b.Key, b => b.Value, StringComparer.OrdinalIgnoreCase));
             await Svc.SaveAsync(dto, _actorId);
             _msg = "Politica guardada. Aplica en el proximo cierre de HC.";
         }

@@ -102,4 +102,10 @@ public class RevisionPolicy : TenantEntity
     /// INSUMOS) cuyas HC se auditan al cerrar. Null/vacio = todos. Con lista, una HC sin asignacion
     /// (creada por fuera de Coordinacion) NO se audita. Se combina (Y) con la lista de formatos.</summary>
     public string? AuditoriaIaTiposServicioJson { get; set; }
+
+    /// <summary>JSON objeto {TIPO: maxIntentos} con los tipos de servicio cuya auditoria al cerrar es
+    /// BLOQUEANTE (IMP-68): si el agente rechaza, el profesional debe corregir; al agotar maxIntentos
+    /// rechazos debe pedir autorizacion en /autorizaciones. Tipos ausentes = modo informativo.
+    /// Null/vacio = todo informativo (comportamiento historico).</summary>
+    public string? AuditoriaIaBloqueoJson { get; set; }
 }

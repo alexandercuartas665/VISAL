@@ -38,6 +38,7 @@ public sealed class PreRevisionIaServiceTests
         public required Guid RevisionId { get; init; }
         public required Guid AgenteId { get; init; }
         public Guid HcId { get; init; }
+        public DbContextOptions<VisalDbContext> Opts { get; init; } = null!;
     }
 
     // Ola 4c: AiUsageService ahora abre contexto corto via IApplicationDbContextFactory.
@@ -166,7 +167,7 @@ public sealed class PreRevisionIaServiceTests
         var aiClient = new FakeAiClient(aiResponse);
         var svc = new PreRevisionIaService(new SingleStoreDbContextFactory(opts, tenant), aiClient, usage, protector, tools, revisionSvc, policy);
 
-        return new Fixture { Db = db, Svc = svc, AiClient = aiClient, RevisionId = revId, AgenteId = agenteId, HcId = hc.Id };
+        return new Fixture { Db = db, Svc = svc, AiClient = aiClient, RevisionId = revId, AgenteId = agenteId, HcId = hc.Id, Opts = opts };
     }
 
     private static AiChatResult OkResponse(string body, int inTokens = 120, int outTokens = 40)
@@ -549,6 +550,194 @@ public sealed class PreRevisionIaServiceTests
         Assert.True(leida.AuditoriaIaAlCerrar);
         Assert.Equal(new[] { "PP-FO-84" }, leida.AuditoriaIaFormatos);
         Assert.Equal(new[] { "ENFERMERIA" }, leida.AuditoriaIaTiposServicio);
+    }
+
+    // ---- IMP-68: auditoria al cerrar en modo BLOQUEANTE por tipo de servicio ----
+
+    private static RevisionPolicy PolBloqueo(string bloqueoJson, string? tiposJson = null) => new()
+    {
+        AuditoriaIaAlCerrar = true,
+        AuditoriaIaTiposServicioJson = tiposJson,
+        AuditoriaIaBloqueoJson = bloqueoJson,
+    };
+
+    /// <summary>Hace que <see cref="Actor"/> sea un profesional del tenant (rol operativo), con o sin
+    /// el permiso de exencion "historias.sin-control-cierre".</summary>
+    private static async Task SembrarActorAsync(Fixture fx, Guid tenantId, bool exento = false)
+    {
+        var rol = new Rol { TenantId = tenantId, Nombre = "Profesional" };
+        fx.Db.Roles.Add(rol);
+        if (exento)
+        {
+            fx.Db.RolPermisos.Add(new RolPermiso
+            {
+                TenantId = tenantId, RolId = rol.Id, Modulo = PermisosUsuario.SinControlCierre,
+                Ver = true, Crear = false, Editar = false, Eliminar = false,
+            });
+        }
+        fx.Db.TenantUsers.Add(new TenantUser
+        {
+            TenantId = tenantId, PlatformUserId = Actor, Email = "prof@test",
+            TenantRole = TenantRole.Advisor, RolId = rol.Id,
+        });
+        await fx.Db.SaveChangesAsync();
+    }
+
+    private static async Task SembrarLogAsync(Fixture fx, Guid tenantId, string resultado, DateTimeOffset en)
+    {
+        fx.Db.RevisionAgenteLogs.Add(new RevisionAgenteLog
+        {
+            TenantId = tenantId, HistoriaClinicaId = fx.HcId, AgenteCodigo = "REVISOR",
+            Ok = true, Resultado = resultado, Confianza = 0.8m, Nota = "Falta el plan.", CreatedAt = en,
+        });
+        await fx.Db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task EstadoBloqueo_solo_aplica_a_tipos_bloqueantes_y_no_a_exentos()
+    {
+        // Tipo informativo (ENFERMERIA no esta en el bloqueo) -> null.
+        var enf = await BuildAsync(TenantA, OkResponse("{}"), crearRevision: false, estadoHc: HistoriaClinicaEstado.Abierta,
+            politica: PolBloqueo("{\"TERAPIA\":2}"));
+        await VincularAsignacionAsync(enf, "ENFERMERIA");
+        await SembrarActorAsync(enf, TenantA);
+        Assert.Null(await enf.Svc.EstadoBloqueoIaAsync(enf.HcId, Actor));
+
+        // TERAPIAS (plural legacy) con TERAPIA bloqueante -> bloquea con su maximo.
+        var ter = await BuildAsync(TenantA, OkResponse("{}"), crearRevision: false, estadoHc: HistoriaClinicaEstado.Abierta,
+            politica: PolBloqueo("{\"TERAPIA\":2}"));
+        await VincularAsignacionAsync(ter, "TERAPIAS");
+        await SembrarActorAsync(ter, TenantA);
+        var est = await ter.Svc.EstadoBloqueoIaAsync(ter.HcId, Actor);
+        Assert.NotNull(est);
+        Assert.Equal(2, est!.MaxIntentos);
+        Assert.Equal(0, est.Rechazos);
+        Assert.False(est.Agotado);
+
+        // Coordinador con permiso de exencion -> informativo.
+        var coord = await BuildAsync(TenantA, OkResponse("{}"), crearRevision: false, estadoHc: HistoriaClinicaEstado.Abierta,
+            politica: PolBloqueo("{\"TERAPIA\":2}"));
+        await VincularAsignacionAsync(coord, "TERAPIA");
+        await SembrarActorAsync(coord, TenantA, exento: true);
+        Assert.Null(await coord.Svc.EstadoBloqueoIaAsync(coord.HcId, Actor));
+
+        // Auditoria al cerrar apagada -> nunca bloquea.
+        var off = await BuildAsync(TenantA, OkResponse("{}"), crearRevision: false, estadoHc: HistoriaClinicaEstado.Abierta,
+            politica: new RevisionPolicy { AuditoriaIaAlCerrar = false, AuditoriaIaBloqueoJson = "{\"TERAPIA\":2}" });
+        await VincularAsignacionAsync(off, "TERAPIA");
+        await SembrarActorAsync(off, TenantA);
+        Assert.Null(await off.Svc.EstadoBloqueoIaAsync(off.HcId, Actor));
+    }
+
+    [Fact]
+    public async Task EstadoBloqueo_cuenta_rechazos_y_la_solicitud_reinicia_la_ronda_al_rechazarse()
+    {
+        var fx = await BuildAsync(TenantA, OkResponse("{}"), crearRevision: false, estadoHc: HistoriaClinicaEstado.Abierta,
+            politica: PolBloqueo("{\"ENFERMERIA\":2}"));
+        await VincularAsignacionAsync(fx, "ENFERMERIA");
+        await SembrarActorAsync(fx, TenantA);
+        var t0 = DateTimeOffset.UtcNow.AddHours(-3);
+
+        // 1 rechazo + 1 aprobado: aun quedan intentos -> no puede pedir autorizacion.
+        await SembrarLogAsync(fx, TenantA, "Rechazado", t0);
+        await SembrarLogAsync(fx, TenantA, "Aprobado", t0.AddMinutes(1));
+        var est = await fx.Svc.EstadoBloqueoIaAsync(fx.HcId, Actor);
+        Assert.Equal(1, est!.Rechazos);
+        var (okAntes, _) = await fx.Svc.SolicitarAutorizacionCierreIaAsync(fx.HcId, "porque si", null, "PROF", Actor);
+        Assert.False(okAntes);
+
+        // 2o rechazo: agotado -> pide autorizacion (una sola, aunque insista).
+        await SembrarLogAsync(fx, TenantA, "Rechazado", t0.AddMinutes(2));
+        est = await fx.Svc.EstadoBloqueoIaAsync(fx.HcId, Actor);
+        Assert.True(est!.Agotado);
+        var (ok, msg) = await fx.Svc.SolicitarAutorizacionCierreIaAsync(fx.HcId, "El hallazgo no aplica", "Otro", "PROF", Actor);
+        Assert.True(ok, msg);
+        var (ok2, msg2) = await fx.Svc.SolicitarAutorizacionCierreIaAsync(fx.HcId, "otra vez", null, "PROF", Actor);
+        Assert.True(ok2);
+        Assert.Contains("pendiente", msg2);
+        var sol = await fx.Db.AutorizacionSolicitudes.AsNoTracking().SingleAsync();
+        Assert.Equal(AutorizacionSolicitudTipo.CierreAuditoriaIa, sol.Tipo);
+        Assert.Contains("2 vez", sol.Detalle);
+        Assert.True((await fx.Svc.EstadoBloqueoIaAsync(fx.HcId, Actor))!.Pendiente);
+
+        // El coordinador la rechaza -> ronda nueva: 0 rechazos y ve la respuesta.
+        var tracked = await fx.Db.AutorizacionSolicitudes.SingleAsync();
+        tracked.Estado = AutorizacionSolicitudEstado.Rechazada;
+        tracked.Respuesta = "Corrige el plan";
+        tracked.ResueltoEn = DateTimeOffset.UtcNow;
+        await fx.Db.SaveChangesAsync();
+        est = await fx.Svc.EstadoBloqueoIaAsync(fx.HcId, Actor);
+        Assert.Equal(0, est!.Rechazos);
+        Assert.Equal("Rechazada", est.SolicitudEstado);
+        Assert.Equal("Corrige el plan", est.SolicitudRespuesta);
+        Assert.False(est.Agotado);
+
+        // Nuevo rechazo despues de la respuesta cuenta en la ronda nueva.
+        await SembrarLogAsync(fx, TenantA, "Rechazado", DateTimeOffset.UtcNow.AddMinutes(1));
+        Assert.Equal(1, (await fx.Svc.EstadoBloqueoIaAsync(fx.HcId, Actor))!.Rechazos);
+    }
+
+    [Fact]
+    public async Task SolicitudCierreIa_aprobada_autoriza_sin_tocar_la_fecha_ni_crear_token()
+    {
+        var fx = await BuildAsync(TenantA, OkResponse("{}"), crearRevision: false, estadoHc: HistoriaClinicaEstado.Abierta,
+            politica: PolBloqueo("{\"ENFERMERIA\":1}"));
+        await VincularAsignacionAsync(fx, "ENFERMERIA");
+        await SembrarActorAsync(fx, TenantA);
+        await SembrarLogAsync(fx, TenantA, "Rechazado", DateTimeOffset.UtcNow.AddMinutes(-5));
+        var (ok, msg) = await fx.Svc.SolicitarAutorizacionCierreIaAsync(fx.HcId, "Necesito cerrar", null, "PROF", Actor);
+        Assert.True(ok, msg);
+        var solId = (await fx.Db.AutorizacionSolicitudes.AsNoTracking().SingleAsync()).Id;
+
+        // El aprobador es Owner (permiso implicito de autorizaciones).
+        var aprobador = Guid.NewGuid();
+        fx.Db.TenantUsers.Add(new TenantUser { TenantId = TenantA, PlatformUserId = aprobador, Email = "coord@test", TenantRole = TenantRole.Owner });
+        await fx.Db.SaveChangesAsync();
+        var tenant = new FakeTenantContext { TenantId = TenantA, UserId = aprobador };
+        var autSvc = new AutorizacionTokenService(new SingleStoreDbContextFactory(fx.Opts, tenant), tenant,
+            new NoopAuditImp68(), new FakeTimeProvider(FixedNow));
+        var r = await autSvc.AprobarSolicitudAsync(solId, null, "COORD", aprobador);
+        Assert.True(r.Ok, r.Mensaje);
+
+        Assert.True((await fx.Svc.EstadoBloqueoIaAsync(fx.HcId, Actor))!.Autorizada);
+        Assert.Empty(await fx.Db.AutorizacionTokens.AsNoTracking().ToListAsync());
+        var hc = await fx.Db.HistoriasClinicas.AsNoTracking().SingleAsync(h => h.Id == fx.HcId);
+        Assert.Null(hc.AutorizacionFechaTokenId);
+    }
+
+    private sealed class NoopAuditImp68 : IAuditWriter
+    {
+        public void Write(Guid actorUserId, string actionName, string entityName, Guid? entityId,
+            object? previousValue, object? newValue, Guid? tenantId = null, string? reason = null,
+            AuditActorType actorType = AuditActorType.Human) { }
+        public void Write(IApplicationDbContext db, Guid actorUserId, string actionName, string entityName, Guid? entityId,
+            object? previousValue, object? newValue, Guid? tenantId = null, string? reason = null,
+            AuditActorType actorType = AuditActorType.Human) { }
+    }
+
+    [Fact]
+    public async Task Politica_guarda_bloqueo_normalizado_y_valida_intentos()
+    {
+        var opts = new DbContextOptionsBuilder<VisalDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options;
+        var tenant = new FakeTenantContext { TenantId = TenantA, UserId = Actor };
+        var svc = new RevisionPolicyService(new SingleStoreDbContextFactory(opts, tenant), tenant,
+            new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()));
+        var def = await svc.GetAsync();
+        Assert.True(def.AuditoriaIaBloqueo is null or { Count: 0 });
+
+        await Assert.ThrowsAsync<ArgumentException>(() =>
+            svc.SaveAsync(def with { AuditoriaIaBloqueo = new Dictionary<string, int> { ["TERAPIA"] = 0 } }, Actor));
+
+        await svc.SaveAsync(def with
+        {
+            AuditoriaIaAlCerrar = true,
+            AuditoriaIaBloqueo = new Dictionary<string, int> { [" terapia "] = 3, ["ENFERMERIA"] = 1 },
+        }, Actor);
+        var leida = await new RevisionPolicyService(new SingleStoreDbContextFactory(opts, tenant), tenant,
+            new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions())).GetAsync();
+        Assert.Equal(3, leida.AuditoriaIaBloqueo!["TERAPIA"]);
+        Assert.Equal(1, leida.AuditoriaIaBloqueo["enfermeria"]);
+        Assert.Equal(2, leida.AuditoriaIaBloqueo.Count);
     }
 
     // ---- Fakes ----

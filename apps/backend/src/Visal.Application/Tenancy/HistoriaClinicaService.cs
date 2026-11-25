@@ -1491,7 +1491,7 @@ public sealed class HistoriaClinicaService(
 
         // Ultima solicitud del profesional para ESTA fecha (pendiente / rechazada).
         var sol = await db.AutorizacionSolicitudes.AsNoTracking()
-            .Where(s => s.HistoriaClinicaId == e.Id && s.FechaAtencion == fecha)
+            .Where(s => s.HistoriaClinicaId == e.Id && s.FechaAtencion == fecha && s.Tipo == AutorizacionSolicitudTipo.FechaAtencion)
             .OrderByDescending(s => s.CreatedAt)
             .Select(s => new { s.Estado, s.Respuesta, s.CreatedAt })
             .FirstOrDefaultAsync(ct);

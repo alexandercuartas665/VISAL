@@ -30,6 +30,10 @@ public class AutorizacionToken : TenantEntity
     /// <summary>Observacion/justificacion que captura el usuario de autorizacion al generarlo.</summary>
     public string Observacion { get; set; } = null!;
 
+    /// <summary>IMP-71: observacion enriquecida (HTML saneado, imagenes embebidas). Null si es texto
+    /// plano; <see cref="Observacion"/> guarda siempre el texto equivalente. La ve quien usa el token.</summary>
+    public string? ObservacionHtml { get; set; }
+
     /// <summary>Nombre del usuario de autorizacion que lo genero (CreatedAt/CreatedBy guardan fecha/id).</summary>
     public string? GeneradoPorNombre { get; set; }
 

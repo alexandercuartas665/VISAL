@@ -1493,7 +1493,7 @@ public sealed class HistoriaClinicaService(
         var sol = await db.AutorizacionSolicitudes.AsNoTracking()
             .Where(s => s.HistoriaClinicaId == e.Id && s.FechaAtencion == fecha && s.Tipo == AutorizacionSolicitudTipo.FechaAtencion)
             .OrderByDescending(s => s.CreatedAt)
-            .Select(s => new { s.Estado, s.Respuesta, s.CreatedAt })
+            .Select(s => new { s.Estado, s.Respuesta, s.RespuestaHtml, s.CreatedAt })
             .FirstOrDefaultAsync(ct);
         string? solEstado = sol?.Estado switch
         {
@@ -1502,7 +1502,8 @@ public sealed class HistoriaClinicaService(
             _ => null,
         };
         return new ControlFechaAtencionDto(true, unidad, detalle, asignacionId, fecha,
-            solEstado, solEstado == "Rechazada" ? sol!.Respuesta : null, solEstado is null ? null : sol!.CreatedAt);
+            solEstado, solEstado == "Rechazada" ? sol!.Respuesta : null, solEstado is null ? null : sol!.CreatedAt,
+            solEstado == "Rechazada" ? sol!.RespuestaHtml : null);
     }
 
     /// <summary>Codigos de catalogo candidatos para el tipo de una asignacion: el exacto y, si

@@ -42,8 +42,10 @@ public sealed class AutorizacionTokenService(
     public async Task<string> GenerarAsync(string? conceptoNombre, string observacion, string? generadoPorNombre, Guid actor, CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { throw new InvalidOperationException("Sin tenant activo."); }
-        var obs = (observacion ?? "").Trim();
-        if (obs.Length == 0) { throw new InvalidOperationException("La observacion es obligatoria."); }
+        // IMP-71: la observacion puede venir del editor enriquecido (HTML + imagenes).
+        var rica = ObservacionRica.Normalizar(observacion);
+        if (rica.Vacia) { throw new InvalidOperationException("La observacion es obligatoria."); }
+        var obs = ObservacionRica.TextoOMarcador(rica);
 
         using var db = dbFactory.Create();
         var token = new AutorizacionToken
@@ -52,6 +54,7 @@ public sealed class AutorizacionTokenService(
             Codigo = await GenerarCodigoUnicoAsync(db, ct),
             ConceptoNombre = string.IsNullOrWhiteSpace(conceptoNombre) ? null : conceptoNombre.Trim(),
             Observacion = obs,
+            ObservacionHtml = rica.Html,
             GeneradoPorNombre = string.IsNullOrWhiteSpace(generadoPorNombre) ? null : generadoPorNombre.Trim(),
             ExpiresAt = clock.GetUtcNow().Add(Vigencia),
             Estado = AutorizacionTokenEstado.Activo,
@@ -59,7 +62,7 @@ public sealed class AutorizacionTokenService(
         db.AutorizacionTokens.Add(token);
         audit.Write(db, actor, "autorizacion-token.generar", nameof(AutorizacionToken), token.Id,
             previousValue: null,
-            newValue: new { token.Codigo, token.ConceptoNombre, token.Observacion, token.ExpiresAt },
+            newValue: new { token.Codigo, token.ConceptoNombre, token.Observacion, imagenes = rica.Imagenes, token.ExpiresAt },
             tenantId: tid);
         await db.SaveChangesAsync(ct);
         return token.Codigo;
@@ -72,10 +75,17 @@ public sealed class AutorizacionTokenService(
         using var db = dbFactory.Create();
         var q = db.AutorizacionSolicitudes.AsNoTracking();
         if (soloPendientes) { q = q.Where(s => s.Estado == AutorizacionSolicitudEstado.Pendiente); }
+        // Proyeccion: el HTML de la respuesta (IMP-71, puede traer imagenes) NO se trae en el listado.
         var rows = await q
             .OrderBy(s => s.Estado == AutorizacionSolicitudEstado.Pendiente ? 0 : 1)
             .ThenByDescending(s => s.CreatedAt)
             .Take(max)
+            .Select(s => new
+            {
+                s.Id, s.Estado, s.CreatedAt, s.SolicitadoPorNombre, s.HistoriaClinicaId, s.AsignacionId,
+                s.FechaAtencion, s.Detalle, s.ConceptoNombre, s.Motivo, s.ResueltoEn, s.ResueltoPorNombre,
+                s.Respuesta, s.Tipo, Rica = s.RespuestaHtml != null,
+            })
             .ToListAsync(ct);
         if (rows.Count == 0) { return Array.Empty<AutorizacionSolicitudDto>(); }
 
@@ -105,7 +115,7 @@ public sealed class AutorizacionTokenService(
                 pac?.NombreCompleto, pac is null ? null : $"{pac.TipoDocumento} {pac.NumeroDocumento}",
                 asg?.NombreServicio, asg?.TipoServicio,
                 r.FechaAtencion, r.Detalle, r.ConceptoNombre, r.Motivo,
-                r.ResueltoEn, r.ResueltoPorNombre, r.Respuesta, r.Tipo);
+                r.ResueltoEn, r.ResueltoPorNombre, r.Respuesta, r.Tipo, r.Rica);
         }).ToList();
     }
 
@@ -130,8 +140,12 @@ public sealed class AutorizacionTokenService(
         var hc = await db.HistoriasClinicas.FirstOrDefaultAsync(h => h.Id == sol.HistoriaClinicaId, ct);
         if (hc is null) { return new UsarTokenResult(false, "La historia clinica ya no existe."); }
 
+        ObservacionRicaResultado rica;
+        try { rica = ObservacionRica.Normalizar(observacion); }
+        catch (InvalidOperationException ex) { return new UsarTokenResult(false, ex.Message); }
         var now = clock.GetUtcNow();
-        var obs = string.IsNullOrWhiteSpace(observacion) ? "Aprobada desde solicitud del profesional." : observacion.Trim();
+        var respuesta = rica.Vacia ? null : ObservacionRica.TextoOMarcador(rica);
+        var obs = respuesta ?? "Aprobada desde solicitud del profesional.";
         var nombre = string.IsNullOrWhiteSpace(actorNombre) ? null : actorNombre.Trim();
         if (sol.Tipo == AutorizacionSolicitudTipo.CierreAuditoriaIa)
         {
@@ -141,10 +155,11 @@ public sealed class AutorizacionTokenService(
             sol.ResueltoEn = now;
             sol.ResueltoPorUserId = actor;
             sol.ResueltoPorNombre = nombre;
-            sol.Respuesta = string.IsNullOrWhiteSpace(observacion) ? null : observacion.Trim();
+            sol.Respuesta = respuesta;
+            sol.RespuestaHtml = rica.Html;
             audit.Write(db, actor, "autorizacion-solicitud.aprobar", nameof(AutorizacionSolicitud), sol.Id,
                 previousValue: new { estado = "Pendiente" },
-                newValue: new { estado = "Aprobada", tipo = "CierreAuditoriaIa", hcId = sol.HistoriaClinicaId, observacion = sol.Respuesta },
+                newValue: new { estado = "Aprobada", tipo = "CierreAuditoriaIa", hcId = sol.HistoriaClinicaId, observacion = sol.Respuesta, imagenes = rica.Imagenes },
                 tenantId: tid);
             await db.SaveChangesAsync(ct);
             return new UsarTokenResult(true, null);
@@ -157,6 +172,7 @@ public sealed class AutorizacionTokenService(
             Codigo = await GenerarCodigoUnicoAsync(db, ct),
             ConceptoNombre = sol.ConceptoNombre,
             Observacion = obs,
+            ObservacionHtml = rica.Html,
             GeneradoPorNombre = nombre,
             ExpiresAt = now,
             Estado = AutorizacionTokenEstado.Usado,
@@ -177,11 +193,12 @@ public sealed class AutorizacionTokenService(
         sol.ResueltoEn = now;
         sol.ResueltoPorUserId = actor;
         sol.ResueltoPorNombre = nombre;
-        sol.Respuesta = string.IsNullOrWhiteSpace(observacion) ? null : observacion.Trim();
+        sol.Respuesta = respuesta;
+        sol.RespuestaHtml = rica.Html;
         sol.TokenId = token.Id;
         audit.Write(db, actor, "autorizacion-solicitud.aprobar", nameof(AutorizacionSolicitud), sol.Id,
             previousValue: new { estado = "Pendiente" },
-            newValue: new { estado = "Aprobada", hcId = sol.HistoriaClinicaId, sol.FechaAtencion, tokenId = token.Id, observacion = sol.Respuesta },
+            newValue: new { estado = "Aprobada", hcId = sol.HistoriaClinicaId, sol.FechaAtencion, tokenId = token.Id, observacion = sol.Respuesta, imagenes = rica.Imagenes },
             tenantId: tid);
         await db.SaveChangesAsync(ct); // solicitud + token + HC atomico
         return new UsarTokenResult(true, null, token.Id);
@@ -190,8 +207,11 @@ public sealed class AutorizacionTokenService(
     public async Task<UsarTokenResult> RechazarSolicitudAsync(Guid solicitudId, string observacion, string? actorNombre, Guid actor, CancellationToken ct = default)
     {
         if (tenant.TenantId is not Guid tid) { return new UsarTokenResult(false, "Sin tenant activo."); }
-        var obs = (observacion ?? "").Trim();
-        if (obs.Length == 0) { return new UsarTokenResult(false, "Escribe el motivo del rechazo."); }
+        ObservacionRicaResultado rica;
+        try { rica = ObservacionRica.Normalizar(observacion); }
+        catch (InvalidOperationException ex) { return new UsarTokenResult(false, ex.Message); }
+        if (rica.Vacia) { return new UsarTokenResult(false, "Escribe el motivo del rechazo."); }
+        var obs = ObservacionRica.TextoOMarcador(rica);
         using var db = dbFactory.Create();
         if (!await PermisosUsuario.TieneAsync(db, actor, PermisosUsuario.Autorizaciones, ct))
         {
@@ -205,9 +225,10 @@ public sealed class AutorizacionTokenService(
         sol.ResueltoPorUserId = actor;
         sol.ResueltoPorNombre = string.IsNullOrWhiteSpace(actorNombre) ? null : actorNombre.Trim();
         sol.Respuesta = obs;
+        sol.RespuestaHtml = rica.Html;
         audit.Write(db, actor, "autorizacion-solicitud.rechazar", nameof(AutorizacionSolicitud), sol.Id,
             previousValue: new { estado = "Pendiente" },
-            newValue: new { estado = "Rechazada", hcId = sol.HistoriaClinicaId, observacion = obs },
+            newValue: new { estado = "Rechazada", hcId = sol.HistoriaClinicaId, observacion = obs, imagenes = rica.Imagenes },
             tenantId: tid);
         await db.SaveChangesAsync(ct);
         return new UsarTokenResult(true, null);
@@ -291,9 +312,16 @@ public sealed class AutorizacionTokenService(
     {
         using var db = dbFactory.Create();
         var now = clock.GetUtcNow();
+        // Proyeccion: el HTML de la observacion (IMP-71, puede traer imagenes) NO se trae en el listado.
         var rows = await db.AutorizacionTokens.AsNoTracking()
             .OrderByDescending(t => t.CreatedAt)
             .Take(max)
+            .Select(t => new
+            {
+                t.Id, t.Codigo, t.ConceptoNombre, t.Observacion, t.GeneradoPorNombre, t.CreatedAt, t.ExpiresAt,
+                t.Estado, t.UsadoEn, t.UsadoPorNombre, t.HistoriaClinicaId, t.AsignacionId, t.MotivoUso,
+                Rica = t.ObservacionHtml != null,
+            })
             .ToListAsync(ct);
 
         // Consecutivos legibles (HC-xxxxx / AS-xxxxx) para la tabla de uso.
@@ -316,7 +344,49 @@ public sealed class AutorizacionTokenService(
             r.HistoriaClinicaId is Guid hid && hcCons.TryGetValue(hid, out var hc) ? hc : (long?)null,
             r.AsignacionId,
             r.AsignacionId is Guid aid && asigCons.TryGetValue(aid, out var ac) ? ac : (long?)null,
-            r.MotivoUso)).ToList();
+            r.MotivoUso, r.Rica)).ToList();
+    }
+
+    // -- IMP-71: observaciones enriquecidas --------------------------------------
+
+    public async Task<string?> ObtenerObservacionHtmlAsync(Guid id, bool esToken, CancellationToken ct = default)
+    {
+        using var db = dbFactory.Create();
+        return esToken
+            ? await db.AutorizacionTokens.AsNoTracking().Where(t => t.Id == id).Select(t => t.ObservacionHtml).FirstOrDefaultAsync(ct)
+            : await db.AutorizacionSolicitudes.AsNoTracking().Where(s => s.Id == id).Select(s => s.RespuestaHtml).FirstOrDefaultAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<ObservacionAutorizacionDto>> ListarObservacionesDeHcAsync(Guid historiaClinicaId, CancellationToken ct = default)
+    {
+        using var db = dbFactory.Create();
+        // Solicitudes resueltas con observacion del autorizador.
+        var sols = await db.AutorizacionSolicitudes.AsNoTracking()
+            .Where(s => s.HistoriaClinicaId == historiaClinicaId
+                        && s.Estado != AutorizacionSolicitudEstado.Pendiente
+                        && (s.Respuesta != null || s.RespuestaHtml != null))
+            .Select(s => new { s.Id, s.Estado, s.ConceptoNombre, s.Respuesta, s.RespuestaHtml, s.ResueltoPorNombre, s.ResueltoEn, s.CreatedAt, s.TokenId })
+            .ToListAsync(ct);
+        // Tokens que el profesional uso en esta HC (los que nacen de aprobar una solicitud ya salen
+        // como la solicitud: se excluyen para no duplicar).
+        var tokensDeSolicitud = await db.AutorizacionSolicitudes.AsNoTracking()
+            .Where(s => s.HistoriaClinicaId == historiaClinicaId && s.TokenId != null)
+            .Select(s => s.TokenId!.Value)
+            .ToListAsync(ct);
+        var toks = await db.AutorizacionTokens.AsNoTracking()
+            .Where(t => t.HistoriaClinicaId == historiaClinicaId && t.Estado == AutorizacionTokenEstado.Usado
+                        && !tokensDeSolicitud.Contains(t.Id))
+            .Select(t => new { t.Id, t.ConceptoNombre, t.Observacion, t.ObservacionHtml, t.GeneradoPorNombre, t.UsadoEn, t.CreatedAt })
+            .ToListAsync(ct);
+
+        var lista = new List<ObservacionAutorizacionDto>();
+        lista.AddRange(sols.Select(s => new ObservacionAutorizacionDto(
+            s.Id, "Solicitud", s.Estado == AutorizacionSolicitudEstado.Aprobada ? "Aprobada" : "Rechazada",
+            s.ConceptoNombre, s.Respuesta, s.RespuestaHtml, s.ResueltoPorNombre, s.ResueltoEn ?? s.CreatedAt)));
+        lista.AddRange(toks.Select(t => new ObservacionAutorizacionDto(
+            t.Id, "Token", "Usado", t.ConceptoNombre, t.Observacion, t.ObservacionHtml, t.GeneradoPorNombre,
+            t.UsadoEn ?? t.CreatedAt)));
+        return lista.OrderByDescending(x => x.En).ToList();
     }
 
     public async Task<UsarTokenResult> ValidarYMarcarUsoAsync(

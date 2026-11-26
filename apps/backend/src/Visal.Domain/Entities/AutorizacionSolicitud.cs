@@ -57,8 +57,13 @@ public class AutorizacionSolicitud : TenantEntity
     public Guid? ResueltoPorUserId { get; set; }
     public string? ResueltoPorNombre { get; set; }
 
-    /// <summary>Observacion del autorizador (obligatoria al rechazar).</summary>
+    /// <summary>Observacion del autorizador (obligatoria al rechazar). Texto plano; si la escribio
+    /// con el editor enriquecido es el texto equivalente de <see cref="RespuestaHtml"/>.</summary>
     public string? Respuesta { get; set; }
+
+    /// <summary>IMP-71: observacion enriquecida del autorizador (HTML saneado, imagenes embebidas).
+    /// Null si no la escribio o si es texto plano. La ve el profesional en la historia clinica.</summary>
+    public string? RespuestaHtml { get; set; }
 
     /// <summary>Token "usado" que se registro al aprobar (historial unico de autorizaciones).</summary>
     public Guid? TokenId { get; set; }

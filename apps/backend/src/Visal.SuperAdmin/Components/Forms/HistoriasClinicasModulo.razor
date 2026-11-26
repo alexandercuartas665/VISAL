@@ -311,6 +311,10 @@
                         <button type="button" class="hc-sol-aviso hc-sol-@_solAvisoTipo" title="Ver la solicitud de autorizacion" @onclick="AbrirModalSolicitudAsync">@_solAviso</button>
                     }
                 }
+                @if (_historiaSel is not null && _obsAut.Count > 0)
+                {
+                    <button type="button" class="hc-sol-aviso hc-sol-obs" title="Observaciones que dejo el coordinador al autorizar" @onclick="AbrirObsAut">&#128172; Observaci&oacute;n del coordinador@(_obsAut.Count > 1 ? $" ({_obsAut.Count})" : "")</button>
+                }
                 @* Identificador corto de la HC (N interno). Ayuda al usuario a saber
                    que historia esta viendo/creando; coincide con el "N" que sale en
                    las impresiones (primeros 8 del GUID). El ID completo va en el
@@ -1145,6 +1149,19 @@
     .tk-alt { margin-top: 12px; border-top: 1px dashed #e2e8f0; padding-top: 8px; font-size: 13px; }
     .tk-alt summary { cursor: pointer; color: #64748b; font-size: 12px; }
     .hc-sol-aviso { border: 1px solid; border-radius: 999px; padding: 2px 10px; font-size: 12px; cursor: pointer; white-space: nowrap; }
+    .hc-sol-obs { background: #eef2ff; color: #3730a3; border-color: #c7d2fe; margin-left: 6px; }
+    .obsaut-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.55); z-index: 3100; }
+    .obsaut-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); width: min(760px, 94vw); max-height: 88vh;
+        background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.3); z-index: 3101; display: flex; flex-direction: column; }
+    .obsaut-modal .tk-body { overflow: auto; }
+    .obsaut-intro { background: #ecfdf5; border: 1px solid #a7f3d0; color: #065f46; border-radius: 8px; padding: 8px 10px; margin-bottom: 10px; font-size: 13px; }
+    .obsaut-item { border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; }
+    .obsaut-nueva { border-color: #6366f1; box-shadow: 0 0 0 2px #e0e7ff; }
+    .obsaut-meta { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; font-size: 13px; }
+    .obs-rica { font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+    .obs-rica img { max-width: 100%; height: auto; border-radius: 6px; border: 1px solid #e2e8f0; margin: 4px 0; }
+    .obs-rica p { margin: 0 0 6px; }
+    .obs-inline { display: block; background: #fff; border-radius: 6px; padding: 6px 8px; margin-top: 4px; max-height: 260px; overflow: auto; color: #0f172a; }
     .hc-sol-pend { background: #eff6ff; border-color: #bfdbfe; color: #1e3a8a; }
     .hc-sol-rech { background: #fef2f2; border-color: #fecaca; color: #991b1b; }
     /* ===== Auditoria IA al cerrar ===== */
@@ -1273,7 +1290,7 @@
             <div class="aud-body">
                 @if (bloqueado && _audBloq!.SolicitudEstado == "Rechazada" && !string.IsNullOrWhiteSpace(_audBloq.SolicitudRespuesta))
                 {
-                    <div class="aud-coord">El coordinador rechaz&oacute; la solicitud anterior: <i>@_audBloq.SolicitudRespuesta</i></div>
+                    <div class="aud-coord">El coordinador rechaz&oacute; la solicitud anterior: @ObsInline(_audBloq.SolicitudRespuestaHtml, _audBloq.SolicitudRespuesta, "")</div>
                 }
                 @if (!string.IsNullOrWhiteSpace(_audRes.Nota)) { <div class="aud-nota">@_audRes.Nota</div> }
                 @if (_audRes.Hallazgos.Count > 0)
@@ -1334,7 +1351,7 @@
                 {
                     @if (_audBloq.SolicitudEstado == "Rechazada" && !string.IsNullOrWhiteSpace(_audBloq.SolicitudRespuesta))
                     {
-                        <div class="aud-coord">El coordinador rechaz&oacute; la solicitud anterior: <i>@_audBloq.SolicitudRespuesta</i></div>
+                        <div class="aud-coord">El coordinador rechaz&oacute; la solicitud anterior: @ObsInline(_audBloq.SolicitudRespuestaHtml, _audBloq.SolicitudRespuesta, "")</div>
                     }
                     <div class="aud-sug-help">La solicitud llega al coordinador en Autorizaciones &rarr; Solicitudes. Explica por qu&eacute; la historia
                         debe cerrarse as&iacute; (por ejemplo, si el auditor se equivoca en un hallazgo).</div>
@@ -1354,7 +1371,7 @@
                 {
                     @if (_audBloq.SolicitudEstado == "Rechazada")
                     {
-                        <div class="aud-coord">El coordinador rechaz&oacute; la solicitud: <i>@(_audBloq.SolicitudRespuesta ?? "(sin observaci\u00f3n)")</i></div>
+                        <div class="aud-coord">El coordinador rechaz&oacute; la solicitud: @ObsInline(_audBloq.SolicitudRespuestaHtml, _audBloq.SolicitudRespuesta, "(sin observaci\u00f3n)")</div>
                     }
                     <div class="aud-nota">Tienes @_audBloq.Restantes intento(s) nuevo(s) con el auditor IA: corrige la historia y vuelve a pulsar
                         <b>Guardar definitivamente</b>.</div>
@@ -1421,7 +1438,7 @@
             {
                 @if (_solEstado == "Rechazada")
                 {
-                    <div class="tk-sol-rech">&#10060; Tu solicitud anterior fue rechazada: @(_solRespuesta ?? "sin observacion"). Puedes enviar una nueva.</div>
+                    <div class="tk-sol-rech">&#10060; Tu solicitud anterior fue rechazada: @ObsInline(_solRespuestaHtml, _solRespuesta, "sin observacion") Puedes enviar una nueva.</div>
                 }
                 <div class="tk-f">
                     <label>Pedir autorizacion al coordinador</label>
@@ -1469,8 +1486,97 @@
     </div>
 }
 
+@if (_obsAutModal)
+{
+    <div class="obsaut-backdrop"></div>
+    <div class="obsaut-modal">
+        <div class="tk-h">
+            <span>&#128172;</span>
+            <h3>Observaci&oacute;n del coordinador</h3>
+        </div>
+        <div class="tk-body">
+            @if (_obsAutContinuar is not null)
+            {
+                <div class="obsaut-intro">Tu autorizaci&oacute;n fue aprobada. Lee la observaci&oacute;n que te dejaron antes de continuar.</div>
+            }
+            @foreach (var o in _obsAut)
+            {
+                <div class="obsaut-item @(_obsAutResaltar.Contains(o.Id) ? "obsaut-nueva" : "")">
+                    <div class="obsaut-meta">
+                        <span class="badge @(o.Estado == "Rechazada" ? "bg-danger" : "bg-success")">@(o.Origen == "Token" ? "Token usado" : "Solicitud " + o.Estado.ToLowerInvariant())</span>
+                        <b>@(o.AutorNombre ?? "Coordinador")</b>
+                        <small class="text-muted">@o.En.ToOffset(TimeSpan.FromHours(-5)).ToString("dd/MM/yyyy HH:mm")</small>
+                        @if (!string.IsNullOrWhiteSpace(o.Concepto)) { <small class="text-muted">&middot; @o.Concepto</small> }
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(o.Html))
+                    {
+                        <div class="obs-rica">@((MarkupString)o.Html)</div>
+                    }
+                    else
+                    {
+                        <div style="white-space:pre-wrap;">@o.Texto</div>
+                    }
+                </div>
+            }
+        </div>
+        <div class="tk-foot">
+            <button class="btn btn-primary btn-sm" @onclick="ContinuarObsAutAsync">@(_obsAutContinuar is not null ? "Entendido, continuar" : "Cerrar")</button>
+        </div>
+    </div>
+}
+
 @code {
     [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    // -- IMP-71: observaciones del coordinador (texto enriquecido + imagenes) -----
+    private IReadOnlyList<ObservacionAutorizacionDto> _obsAut = Array.Empty<ObservacionAutorizacionDto>();
+    private readonly HashSet<Guid> _obsAutVistas = new();
+    private HashSet<Guid> _obsAutResaltar = new();
+    private bool _obsAutModal;
+    private Func<Task>? _obsAutContinuar;
+    private string? _solRespuestaHtml;
+
+    /// <summary>Observacion del coordinador en linea (rechazos): HTML saneado o texto.</summary>
+    private static RenderFragment ObsInline(string? html, string? texto, string vacio) =>
+        @<span>@if (!string.IsNullOrWhiteSpace(html)) { <div class="obs-rica obs-inline">@((MarkupString)html)</div> } else { <i>@(string.IsNullOrWhiteSpace(texto) ? vacio : texto)</i> }</span>;
+
+    private async Task CargarObsAutAsync(Guid hcId)
+    {
+        try { _obsAut = await AutTokenSvc.ListarObservacionesDeHcAsync(hcId); }
+        catch (Exception ex) { Log.LogWarning(ex, "No se pudieron leer las observaciones de autorizacion"); _obsAut = Array.Empty<ObservacionAutorizacionDto>(); }
+    }
+
+    /// <summary>Si el coordinador dejo observaciones al APROBAR (o en el token usado) que el profesional
+    /// aun no ha visto en esta sesion, las muestra y devuelve true. <paramref name="continuar"/> corre
+    /// al pulsar "Entendido, continuar" (p. ej. el cierre de la HC).</summary>
+    private async Task<bool> MostrarObsNuevasAsync(Guid hcId, Func<Task>? continuar)
+    {
+        await CargarObsAutAsync(hcId);
+        var nuevas = _obsAut.Where(o => o.Estado != "Rechazada" && !_obsAutVistas.Contains(o.Id)).Select(o => o.Id).ToList();
+        if (nuevas.Count == 0) { return false; }
+        foreach (var id in nuevas) { _obsAutVistas.Add(id); }
+        _obsAutResaltar = nuevas.ToHashSet();
+        _obsAutContinuar = continuar;
+        _obsAutModal = true;
+        await InvokeAsync(StateHasChanged);
+        return true;
+    }
+
+    private void AbrirObsAut()
+    {
+        foreach (var o in _obsAut) { _obsAutVistas.Add(o.Id); }
+        _obsAutResaltar = new();
+        _obsAutContinuar = null;
+        _obsAutModal = true;
+    }
+
+    private async Task ContinuarObsAutAsync()
+    {
+        _obsAutModal = false;
+        var c = _obsAutContinuar;
+        _obsAutContinuar = null;
+        if (c is not null) { await c(); }
+    }
 
     // ── Control de fecha de atencion: estado del modal de token ──────────────────
     private bool _tokenModalOpen;
@@ -1938,7 +2044,10 @@
         try
         {
             var ctrl = await HcSvc.EvaluarControlFechaAsync(hcId, await ResolverActorAsync());
+            var estabaPendiente = _solEstado == "Pendiente";
             AplicarEstadoSolicitud(ctrl);
+            // IMP-71: la aprobaron mientras diligenciaba -> mostrar la observacion del coordinador.
+            if (estabaPendiente && !ctrl.RequiereToken && !_obsAutModal) { await MostrarObsNuevasAsync(hcId, null); }
             // Con una solicitud ya enviada (pendiente) no se re-abre el modal en cada guardado:
             // basta el aviso junto al autoguardado.
             if (ctrl.RequiereToken && !_tokenModalOpen && ctrl.SolicitudEstado != "Pendiente")
@@ -1965,11 +2074,12 @@
     {
         if (!ctrl.RequiereToken)
         {
-            _solEstado = null; _solRespuesta = null; _solEn = null; _solAviso = null;
+            _solEstado = null; _solRespuesta = null; _solRespuestaHtml = null; _solEn = null; _solAviso = null;
             return;
         }
         _solEstado = ctrl.SolicitudEstado;
         _solRespuesta = ctrl.SolicitudRespuesta;
+        _solRespuestaHtml = ctrl.SolicitudRespuestaHtml;
         _solEn = ctrl.SolicitudEn;
         (_solAviso, _solAvisoTipo) = ctrl.SolicitudEstado switch
         {
@@ -2052,6 +2162,7 @@
             }
             _tokenModalOpen = false;
             if (_cerrarTrasAutorizar) { _cerrarTrasAutorizar = false; await Cerrar(); }
+            else { await MostrarObsNuevasAsync(h.Id, null); }
         }
         catch (Exception ex) { _tokenError = ex.Message; }
         finally { _tokenBusy = false; }
@@ -2086,8 +2197,10 @@
             if (!res.Ok) { _tokenError = res.Mensaje ?? "Token invalido."; return; }
             _tokenModalOpen = false;
             _solEstado = null; _solAviso = null;
-            // Reintentar el cierre FUERA del lock (Cerrar gestiona su propio flujo).
+            // Reintentar el cierre FUERA del lock (Cerrar gestiona su propio flujo; muestra antes la
+            // observacion del token - IMP-71).
             if (_cerrarTrasAutorizar) { _cerrarTrasAutorizar = false; await Cerrar(); }
+            else { await MostrarObsNuevasAsync(h.Id, null); }
         }
         catch (Exception ex) { _tokenError = ex.Message; }
         finally { _tokenBusy = false; }
@@ -2430,6 +2543,7 @@
         _autosaveCts?.Cancel();
         _saveStatus = "limpio";
         _solAviso = null; _solEstado = null;
+        _obsAut = Array.Empty<ObservacionAutorizacionDto>();
         _ultimoGuardado = null;
         _saveTitle = null;
         // Envolver TODO el Seleccionar en el lock del DbContext: hace ~15 queries
@@ -2509,6 +2623,8 @@
         _solAviso = null; _solEstado = null;
         _ultimoGuardado = null;
         _saveTitle = "Los cambios se guardan automaticamente cada 2 segundos.";
+        // IMP-71: observaciones del coordinador sobre esta HC (chip junto al autoguardado).
+        await CargarObsAutAsync(h.Id);
         // Refrescar los badges de todas las pestanas para la nueva HC. Cada conteo
         // toca el DbContext compartido del circuito; si otro flujo (panel WhatsApp,
         // chat IA, o un subcomponente hijo re-inicializandose) lo esta usando en ese
@@ -3314,6 +3430,9 @@
                 return;
             }
         }
+        // IMP-71: si el coordinador aprobo con una observacion que aun no ha visto, mostrarla primero
+        // ("Entendido, continuar" vuelve a entrar aqui y sigue con el cierre).
+        if (_historiaSel is HistoriaRow hObs && await MostrarObsNuevasAsync(hObs.Id, Cerrar)) { return; }
         // Confirmacion explicita: guardar definitivamente cierra la HC y solo un
         // administrador con permiso puede reabrirla. Advertimos al usuario para
         // evitar cierres accidentales.
@@ -3696,6 +3815,7 @@
             if (_audBloq is null || _audBloq.Autorizada)
             {
                 _audSolBusy = false;
+                if (_audBloq is not null && await MostrarObsNuevasAsync(h.Id, () => CerrarAutorizadoIaAsync(h))) { return; }
                 await CerrarAutorizadoIaAsync(h);
                 return;
             }

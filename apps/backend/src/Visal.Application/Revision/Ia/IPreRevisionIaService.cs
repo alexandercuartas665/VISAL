@@ -68,7 +68,8 @@ public sealed record BloqueoIaEstado(
     int Rechazos,
     string? SolicitudEstado = null,
     string? SolicitudRespuesta = null,
-    DateTimeOffset? SolicitudEn = null)
+    DateTimeOffset? SolicitudEn = null,
+    string? SolicitudRespuestaHtml = null)   // IMP-71: observacion enriquecida del coordinador
 {
     public bool Agotado => Rechazos >= MaxIntentos;
     public int Restantes => Math.Max(0, MaxIntentos - Rechazos);

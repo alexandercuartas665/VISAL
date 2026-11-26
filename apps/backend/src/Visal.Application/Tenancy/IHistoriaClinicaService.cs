@@ -8,9 +8,11 @@ namespace Visal.Application.Tenancy;
 /// para ESTA fecha: null (ninguna), "Pendiente" o "Rechazada" (las aprobadas ya autorizan la HC).</param>
 /// <param name="SolicitudRespuesta">Observacion del autorizador cuando la rechazo.</param>
 /// <param name="SolicitudEn">Momento en que se envio la solicitud.</param>
+/// <param name="SolicitudRespuestaHtml">IMP-71: version enriquecida (HTML saneado) de la observacion.</param>
 public sealed record ControlFechaAtencionDto(
     bool RequiereToken, string? Unidad, string? Detalle, Guid? AsignacionId, DateTimeOffset? FechaAtencion,
-    string? SolicitudEstado = null, string? SolicitudRespuesta = null, DateTimeOffset? SolicitudEn = null);
+    string? SolicitudEstado = null, string? SolicitudRespuesta = null, DateTimeOffset? SolicitudEn = null,
+    string? SolicitudRespuestaHtml = null);
 
 /// <summary>Resultado de intentar autorizar una fecha con un token.</summary>
 public sealed record AutorizarFechaResult(bool Ok, string? Mensaje);

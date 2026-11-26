@@ -1132,6 +1132,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.Codigo).HasMaxLength(6).IsRequired();
             b.Property(x => x.ConceptoNombre).HasMaxLength(200);
             b.Property(x => x.Observacion).HasColumnType("text").IsRequired();
+            b.Property(x => x.ObservacionHtml).HasColumnType("text");
             b.Property(x => x.GeneradoPorNombre).HasMaxLength(200);
             b.Property(x => x.UsadoPorNombre).HasMaxLength(200);
             b.Property(x => x.MotivoUso).HasColumnType("text");
@@ -1148,6 +1149,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.SolicitadoPorNombre).HasMaxLength(200);
             b.Property(x => x.ResueltoPorNombre).HasMaxLength(200);
             b.Property(x => x.Respuesta).HasColumnType("text");
+            b.Property(x => x.RespuestaHtml).HasColumnType("text");
             b.Property(x => x.Estado).HasConversion<int>();
             b.Property(x => x.Tipo).HasConversion<int>();
             b.HasIndex(x => new { x.TenantId, x.Estado, x.CreatedAt });

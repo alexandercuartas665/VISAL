@@ -221,4 +221,138 @@ public sealed class PatronCierreHcTests
         Assert.Equal("Rechazada", ctrl.SolicitudEstado);
         Assert.Equal("Fecha incorrecta", ctrl.SolicitudRespuesta);
     }
+
+    // -- IMP-71: observaciones enriquecidas del autorizador ----------------------
+
+    private const string Png1x1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+
+    [Fact]
+    public void ObservacionRica_sanea_extrae_texto_y_respeta_el_tope()
+    {
+        var r = ObservacionRica.Normalizar(
+            "<p>Hola <b>equipo</b></p><script>alert(1)</script><p>Linea 2</p>" +
+            $"<img src=\"{Png1x1}\" onerror=\"alert(2)\">");
+        Assert.NotNull(r.Html);
+        Assert.DoesNotContain("script", r.Html!, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("onerror", r.Html!, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("data:image/png;base64", r.Html!);
+        Assert.Equal("Hola equipo\nLinea 2", r.Texto);
+        Assert.Equal(1, r.Imagenes);
+
+        // Texto plano: compatibilidad (sin HTML).
+        var plano = ObservacionRica.Normalizar("  Solo texto  ");
+        Assert.Null(plano.Html);
+        Assert.Equal("Solo texto", plano.Texto);
+
+        // Parrafo vacio = vacia.
+        Assert.True(ObservacionRica.Normalizar("<p>&nbsp;</p>").Vacia);
+
+        // Solo imagen: marcador de texto.
+        var img = ObservacionRica.Normalizar($"<p><img src=\"{Png1x1}\"></p>");
+        Assert.Null(img.Texto);
+        Assert.Equal("(imagen adjunta)", ObservacionRica.TextoOMarcador(img));
+
+        // Tope de ~2 MB.
+        var grande = "<p><img src=\"data:image/png;base64," + new string('A', ObservacionRica.MaxHtmlChars) + "\"></p>";
+        Assert.Throws<InvalidOperationException>(() => ObservacionRica.Normalizar(grande));
+    }
+
+    [Fact]
+    public async Task Aprobar_con_observacion_rica_la_ve_el_profesional_en_la_hc()
+    {
+        await using var ctx = NewCtx();
+        var hc = await SembrarHcAsync(ctx, "ENFERMERIA", Ahora.AddDays(-2), "ENFERMERIA", PatronCierreHc.MismoDia);
+        var prof = await SembrarUsuarioAsync(ctx, null);
+        var coord = await SembrarUsuarioAsync(ctx, PermisosUsuario.Autorizaciones);
+        await HcSvc(ctx).SolicitarAutorizacionFechaAsync(hc, "Registro tardio", null, "PROF", prof);
+        var tok = TokenSvc(ctx);
+        var sol = (await tok.ListarSolicitudesAsync(true)).Single();
+
+        var html = $"<p>Aprobado, <b>adjunta</b> la lista de firmas</p><p><img src=\"{Png1x1}\"></p>";
+        Assert.True((await tok.AprobarSolicitudAsync(sol.Id, html, "COORD", coord)).Ok);
+
+        var fila = (await tok.ListarSolicitudesAsync(false)).Single();
+        Assert.True(fila.RespuestaRica);
+        Assert.Equal("Aprobado, adjunta la lista de firmas", fila.Respuesta);
+        Assert.Contains("<img", await tok.ObtenerObservacionHtmlAsync(sol.Id, esToken: false) ?? "");
+
+        // El profesional la ve en la HC: una sola entrada (el token "usado" de la aprobacion no se duplica).
+        var obs = await tok.ListarObservacionesDeHcAsync(hc);
+        var o = Assert.Single(obs);
+        Assert.Equal("Solicitud", o.Origen);
+        Assert.Equal("Aprobada", o.Estado);
+        Assert.Equal("COORD", o.AutorNombre);
+        Assert.Contains("<b>adjunta</b>", o.Html);
+
+        // El token del historial guarda la misma observacion.
+        var token = await ctx.AutorizacionTokens.AsNoTracking().SingleAsync();
+        Assert.Equal("Aprobado, adjunta la lista de firmas", token.Observacion);
+        Assert.NotNull(token.ObservacionHtml);
+    }
+
+    [Fact]
+    public async Task Aprobar_sin_observacion_no_genera_entrada_para_el_profesional()
+    {
+        await using var ctx = NewCtx();
+        var hc = await SembrarHcAsync(ctx, "ENFERMERIA", Ahora.AddDays(-2), "ENFERMERIA", PatronCierreHc.MismoDia);
+        var prof = await SembrarUsuarioAsync(ctx, null);
+        var coord = await SembrarUsuarioAsync(ctx, PermisosUsuario.Autorizaciones);
+        await HcSvc(ctx).SolicitarAutorizacionFechaAsync(hc, "Registro tardio", null, "PROF", prof);
+        var tok = TokenSvc(ctx);
+        var sol = (await tok.ListarSolicitudesAsync(true)).Single();
+        Assert.True((await tok.AprobarSolicitudAsync(sol.Id, "<p></p>", "COORD", coord)).Ok);
+        Assert.Empty(await tok.ListarObservacionesDeHcAsync(hc));
+        Assert.Equal("Aprobada desde solicitud del profesional.",
+            (await ctx.AutorizacionTokens.AsNoTracking().SingleAsync()).Observacion);
+    }
+
+    [Fact]
+    public async Task Rechazo_con_solo_imagen_llega_enriquecido_al_control_de_la_hc()
+    {
+        await using var ctx = NewCtx();
+        var hc = await SembrarHcAsync(ctx, "ENFERMERIA", Ahora.AddDays(-2), "ENFERMERIA", PatronCierreHc.MismoDia);
+        var prof = await SembrarUsuarioAsync(ctx, null);
+        var coord = await SembrarUsuarioAsync(ctx, PermisosUsuario.Autorizaciones);
+        var svc = HcSvc(ctx);
+        await svc.SolicitarAutorizacionFechaAsync(hc, "Registro tardio", null, "PROF", prof);
+        var tok = TokenSvc(ctx);
+        var sol = (await tok.ListarSolicitudesAsync(true)).Single();
+
+        // Vacio (parrafo en blanco) no se acepta.
+        Assert.False((await tok.RechazarSolicitudAsync(sol.Id, "<p>&nbsp;</p>", "COORD", coord)).Ok);
+
+        Assert.True((await tok.RechazarSolicitudAsync(sol.Id, $"<p><img src=\"{Png1x1}\"></p>", "COORD", coord)).Ok);
+        var ctrl = await svc.EvaluarControlFechaAsync(hc, prof);
+        Assert.Equal("Rechazada", ctrl.SolicitudEstado);
+        Assert.Equal("(imagen adjunta)", ctrl.SolicitudRespuesta);
+        Assert.Contains("<img", ctrl.SolicitudRespuestaHtml ?? "");
+        Assert.Equal("Rechazada", Assert.Single(await tok.ListarObservacionesDeHcAsync(hc)).Estado);
+    }
+
+    [Fact]
+    public async Task Token_con_observacion_rica_la_ve_quien_lo_usa()
+    {
+        await using var ctx = NewCtx();
+        var hc = await SembrarHcAsync(ctx, "ENFERMERIA", Ahora.AddDays(-2), "ENFERMERIA", PatronCierreHc.MismoDia);
+        var prof = await SembrarUsuarioAsync(ctx, null);
+        var tok = TokenSvc(ctx);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => tok.GenerarAsync(null, "<p> </p>", "COORD", Guid.NewGuid()));
+        var codigo = await tok.GenerarAsync("Otro", "<p>Usalo <u>solo</u> hoy</p>", "COORD", Guid.NewGuid());
+        var fila = Assert.Single(await tok.ListarAsync());
+        Assert.True(fila.ObservacionRica);
+        Assert.Equal("Usalo solo hoy", fila.Observacion);
+
+        // Uso del token en la HC (lo que hace AutorizarFechaConTokenAsync: estado Usado + HC).
+        var t = await ctx.AutorizacionTokens.SingleAsync(x => x.Codigo == codigo);
+        t.Estado = AutorizacionTokenEstado.Usado;
+        t.UsadoEn = Ahora;
+        t.UsadoPorUserId = prof;
+        t.HistoriaClinicaId = hc;
+        await ctx.SaveChangesAsync();
+        var o = Assert.Single(await tok.ListarObservacionesDeHcAsync(hc));
+        Assert.Equal("Token", o.Origen);
+        Assert.Contains("<u>solo</u>", o.Html);
+    }
 }
+

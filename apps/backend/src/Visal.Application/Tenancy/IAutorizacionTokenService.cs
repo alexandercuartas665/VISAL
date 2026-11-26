@@ -23,7 +23,9 @@ public sealed record AutorizacionTokenDto(
     long? HistoriaClinicaConsecutivo,
     Guid? AsignacionId,
     long? AsignacionConsecutivo,
-    string? MotivoUso);
+    string? MotivoUso,
+    // IMP-71: la observacion tiene version enriquecida (se carga aparte con ObtenerObservacionHtmlAsync).
+    bool ObservacionRica = false);
 
 /// <summary>Fila del tab "Solicitudes" de /autorizaciones (solicitudes de cierre fuera del
 /// patron que hacen los profesionales).</summary>
@@ -47,7 +49,22 @@ public sealed record AutorizacionSolicitudDto(
     DateTimeOffset? ResueltoEn,
     string? ResueltoPorNombre,
     string? Respuesta,
-    AutorizacionSolicitudTipo Tipo = AutorizacionSolicitudTipo.FechaAtencion);
+    AutorizacionSolicitudTipo Tipo = AutorizacionSolicitudTipo.FechaAtencion,
+    // IMP-71: la respuesta tiene version enriquecida (se carga aparte con ObtenerObservacionHtmlAsync).
+    bool RespuestaRica = false);
+
+/// <summary>IMP-71: observacion que el autorizador dejo sobre una historia clinica (al aprobar o
+/// rechazar una solicitud, o en el token que el profesional uso). <see cref="Html"/> es el HTML
+/// saneado (null = solo texto plano en <see cref="Texto"/>).</summary>
+public sealed record ObservacionAutorizacionDto(
+    Guid Id,
+    string Origen,          // "Solicitud" | "Token"
+    string Estado,          // "Aprobada" | "Rechazada" | "Usado"
+    string? Concepto,
+    string? Texto,
+    string? Html,
+    string? AutorNombre,
+    DateTimeOffset En);
 
 /// <summary>Resultado de validar/consumir un token.</summary>
 public sealed record UsarTokenResult(bool Ok, string? Mensaje, Guid? TokenId = null);
@@ -80,6 +97,15 @@ public interface IAutorizacionTokenService
 
     /// <summary>Rechaza una solicitud pendiente con observacion obligatoria.</summary>
     Task<UsarTokenResult> RechazarSolicitudAsync(Guid solicitudId, string observacion, string? actorNombre, Guid actor, CancellationToken ct = default);
+
+    // -- IMP-71: observaciones enriquecidas --------------------------------------
+    /// <summary>HTML de la observacion de un token (<paramref name="esToken"/>) o de la respuesta de
+    /// una solicitud. Null si no tiene version enriquecida.</summary>
+    Task<string?> ObtenerObservacionHtmlAsync(Guid id, bool esToken, CancellationToken ct = default);
+
+    /// <summary>Observaciones del autorizador sobre una HC (solicitudes resueltas con observacion y
+    /// tokens usados en ella), recientes primero. Las ve el profesional en la historia.</summary>
+    Task<IReadOnlyList<ObservacionAutorizacionDto>> ListarObservacionesDeHcAsync(Guid historiaClinicaId, CancellationToken ct = default);
 
     // ── Conceptos configurables ──────────────────────────────────────────────────
     /// <summary>Lista los conceptos del tenant (ordenados). Siembra ejemplos la primera vez.</summary>

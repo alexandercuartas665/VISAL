@@ -116,15 +116,19 @@ else
                                         @if (r.Estado == AutorizacionSolicitudEstado.Pendiente)
                                         {
                                             <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;">
-                                                <button class="btn btn-success btn-sm" @onclick="() => AprobarAsync(r)" disabled="@_busy">&#10003; Aprobar</button>
-                                                <button class="btn btn-outline-danger btn-sm" @onclick="() => AbrirRechazo(r)" disabled="@_busy">Rechazar</button>
+                                                <button class="btn btn-success btn-sm" @onclick="() => AbrirResolver(r, true)" disabled="@_busy">&#10003; Aprobar</button>
+                                                <button class="btn btn-outline-danger btn-sm" @onclick="() => AbrirResolver(r, false)" disabled="@_busy">Rechazar</button>
                                             </div>
                                         }
                                         else
                                         {
                                             <span class="badge @(r.Estado == AutorizacionSolicitudEstado.Aprobada ? "bg-success" : "bg-danger")">@(r.Estado == AutorizacionSolicitudEstado.Aprobada ? "Aprobada" : "Rechazada")</span>
                                             <div><small class="text-muted">@r.ResueltoPorNombre @(r.ResueltoEn?.ToOffset(TimeSpan.FromHours(-5)).ToString("dd/MM HH:mm"))</small></div>
-                                            @if (!string.IsNullOrWhiteSpace(r.Respuesta)) { <small class="text-muted">@r.Respuesta</small> }
+                                            @if (!string.IsNullOrWhiteSpace(r.Respuesta)) { <div class="az-obs-corta"><small class="text-muted">@r.Respuesta</small></div> }
+                                            @if (r.RespuestaRica)
+                                            {
+                                                <button class="btn btn-link btn-sm p-0" @onclick="() => VerObservacionAsync(r.Id, false, r.Respuesta)">&#128065; Ver observaci&oacute;n</button>
+                                            }
                                         }
                                     </td>
                                 </tr>
@@ -175,7 +179,13 @@ else
                                     { <span class="badge bg-success">Activo</span> }
                                 </td>
                                 <td>@(string.IsNullOrWhiteSpace(r.ConceptoNombre) ? (MarkupString)"<span class='text-muted'>—</span>" : (MarkupString)System.Net.WebUtility.HtmlEncode(r.ConceptoNombre))</td>
-                                <td>@r.Observacion</td>
+                                <td>
+                                    <div class="az-obs-corta">@r.Observacion</div>
+                                    @if (r.ObservacionRica)
+                                    {
+                                        <button class="btn btn-link btn-sm p-0" @onclick="() => VerObservacionAsync(r.Id, true, r.Observacion)">&#128065; Ver observaci&oacute;n</button>
+                                    }
+                                </td>
                                 <td>
                                     <div>@r.GeneradoEn.ToLocalTime().ToString("dd/MM/yyyy HH:mm")</div>
                                     @if (!string.IsNullOrWhiteSpace(r.GeneradoPorNombre))
@@ -209,25 +219,72 @@ else
     }
 }
 
-@* ============= MODAL RECHAZO ============= *@
-@if (_rechazo is not null)
+@* ============= MODAL RESOLVER (aprobar / rechazar) - IMP-71 ============= *@
+@if (_resolver is not null)
 {
-    <div class="cie-backdrop" @onclick="() => _rechazo = null"></div>
-    <div class="cie-modal" style="width:480px; max-width:95vw;">
+    <div class="cie-backdrop"></div>
+    <div class="cie-modal" style="width:720px; max-width:95vw;">
         <div class="cie-modal-h">
-            <h3>Rechazar solicitud</h3>
-            <button class="cie-modal-close" @onclick="() => _rechazo = null">&times;</button>
+            <h3>@(_resolverAprobar ? "Aprobar solicitud" : "Rechazar solicitud")</h3>
+            <button class="cie-modal-close" @onclick="CerrarResolverAsync" disabled="@_busy">&times;</button>
         </div>
         <div class="cie-modal-body">
-            <div class="az-field">
-                <label>Motivo del rechazo * <small class="text-muted">(lo vera el profesional)</small></label>
-                <textarea class="form-control form-control-sm" rows="3" @bind="_rechazoObs" style="width:100%;"></textarea>
+            <div class="az-res-sum">
+                <div><b>@(_resolver.SolicitadoPorNombre ?? "Profesional")</b> &middot; @(_resolver.PacienteNombre ?? "")
+                    @if (_resolver.HistoriaClinicaConsecutivo is long rhc) { <span class="badge bg-light text-dark">HC-@rhc.ToString("D6")</span> }
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_resolver.ConceptoNombre)) { <div><b>@_resolver.ConceptoNombre</b></div> }
+                <div class="text-muted">@_resolver.Motivo</div>
             </div>
-            @if (_solError is not null) { <div class="text-danger small">@_solError</div> }
+            <div class="az-field">
+                @if (_resolverAprobar)
+                {
+                    <label>Observaci&oacute;n para el profesional <small class="text-muted">(opcional; texto, listas, enlaces e im&aacute;genes - la ver&aacute; en la historia cl&iacute;nica)</small></label>
+                }
+                else
+                {
+                    <label>Motivo del rechazo * <small class="text-muted">(lo ver&aacute; el profesional en la historia cl&iacute;nica; puedes pegar im&aacute;genes)</small></label>
+                }
+                <div class="az-ed"><textarea id="@EditorId"></textarea></div>
+                <small class="text-muted">Pega capturas con Ctrl+V o usa el bot&oacute;n de imagen. M&aacute;ximo 2 MB por observaci&oacute;n.</small>
+            </div>
+            @if (_resError is not null) { <div class="text-danger small">@_resError</div> }
         </div>
         <div class="cie-modal-foot" style="justify-content:flex-end;gap:8px;">
-            <button class="btn btn-outline-secondary btn-sm" @onclick="() => _rechazo = null">Cancelar</button>
-            <button class="btn btn-danger btn-sm" @onclick="RechazarAsync" disabled="@_busy">Rechazar</button>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="CerrarResolverAsync" disabled="@_busy">Cancelar</button>
+            @if (_resolverAprobar)
+            {
+                <button class="btn btn-success btn-sm" @onclick="ConfirmarResolverAsync" disabled="@_busy">&#10003; Aprobar</button>
+            }
+            else
+            {
+                <button class="btn btn-danger btn-sm" @onclick="ConfirmarResolverAsync" disabled="@_busy">Rechazar</button>
+            }
+        </div>
+    </div>
+}
+
+@* ============= MODAL VER OBSERVACION - IMP-71 ============= *@
+@if (_verObsAbierto)
+{
+    <div class="cie-backdrop" @onclick="() => _verObsAbierto = false"></div>
+    <div class="cie-modal" style="width:720px; max-width:95vw;">
+        <div class="cie-modal-h">
+            <h3>Observaci&oacute;n</h3>
+            <button class="cie-modal-close" @onclick="() => _verObsAbierto = false">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            @if (!string.IsNullOrWhiteSpace(_verObsHtml))
+            {
+                <div class="obs-rica">@((MarkupString)_verObsHtml)</div>
+            }
+            else
+            {
+                <div style="white-space:pre-wrap;">@_verObsTexto</div>
+            }
+        </div>
+        <div class="cie-modal-foot" style="justify-content:flex-end;">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => _verObsAbierto = false">Cerrar</button>
         </div>
     </div>
 }
@@ -235,8 +292,8 @@ else
 @* ============= MODAL GENERAR ============= *@
 @if (_modalOpen)
 {
-    <div class="cie-backdrop" @onclick="Cerrar"></div>
-    <div class="cie-modal" style="width:560px; max-width:95vw;">
+    <div class="cie-backdrop"></div>
+    <div class="cie-modal" style="width:720px; max-width:95vw;">
         <div class="cie-modal-h">
             <h3>Generar nuevo token</h3>
             <button class="cie-modal-close" @onclick="Cerrar">&times;</button>
@@ -253,11 +310,10 @@ else
                 </select>
             </div>
             <div class="az-field">
-                <label>Observacion de uso * <small class="text-muted">(por que se autoriza)</small></label>
-                <textarea class="form-control form-control-sm" rows="3" @bind="_fObservacion" style="width:100%;"
-                          placeholder="Ej: Autorizo registro tardio por falla de conectividad del profesional."></textarea>
+                <label>Observacion de uso * <small class="text-muted">(por que se autoriza; la vera quien use el token, en la historia clinica)</small></label>
+                <div class="az-ed"><textarea id="@EditorId"></textarea></div>
             </div>
-            <small class="text-muted">El token tendra 6 caracteres y vence en 30 minutos. Un solo uso.</small>
+            <small class="text-muted">Puedes pegar capturas (Ctrl+V) - maximo 2 MB. El token tendra 6 caracteres y vence en 30 minutos. Un solo uso.</small>
             @if (_modalError is not null) { <div class="text-danger small mt-2">@_modalError</div> }
         </div>
         <div class="cie-modal-foot" style="justify-content:flex-end;gap:8px;">
@@ -317,6 +373,12 @@ else
 
 <style>
     .az-field { margin-bottom: 12px; }
+    .az-ed { min-height: 200px; }
+    .az-res-sum { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 10px; margin-bottom: 12px; font-size: 13px; }
+    .az-obs-corta { max-width: 360px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; }
+    .obs-rica { font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+    .obs-rica img { max-width: 100%; height: auto; border-radius: 6px; border: 1px solid #e2e8f0; margin: 4px 0; }
+    .obs-rica p { margin: 0 0 6px; }
     .az-field label { display: block; font-size: 12px; font-weight: 600; color: #334155; margin-bottom: 3px; }
     .tok-big { font-size: 20px; letter-spacing: 3px; font-weight: 700; }
     .mono { font-family: ui-monospace, Menlo, Consolas, monospace; letter-spacing: 2px; font-weight: 700; }
@@ -354,7 +416,6 @@ else
     private List<AutorizacionTokenDto> _rows = new();
 
     private bool _modalOpen;
-    private string _fObservacion = "";
     private string _fConcepto = "";
     private string? _modalError;
     private string? _tokenGenerado;
@@ -372,8 +433,15 @@ else
     private bool _soloPendientes = true;
     private int _pendientes;
     private string? _solError;
-    private AutorizacionSolicitudDto? _rechazo;
-    private string _rechazoObs = "";
+    // IMP-71: aprobar / rechazar con observacion enriquecida (TinyMCE).
+    private const string EditorId = "az-obs-ed";
+    private AutorizacionSolicitudDto? _resolver;
+    private bool _resolverAprobar;
+    private bool _edPendiente;
+    private string? _resError;
+    private bool _verObsAbierto;
+    private string? _verObsHtml;
+    private string? _verObsTexto;
     private System.Threading.Timer? _refresco;
 
     protected override async Task OnInitializedAsync()
@@ -430,41 +498,78 @@ else
         catch (Exception ex) { _solError = ex.Message; }
     }
 
-    private async Task AprobarAsync(AutorizacionSolicitudDto r)
+    // -- IMP-71: editor enriquecido -----------------------------------------------
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        _solError = null; _busy = true;
-        try
+        if (!_edPendiente) { return; }
+        _edPendiente = false;
+        var ph = _modalOpen
+            ? "Ej: Autorizo registro tardio por falla de conectividad del profesional."
+            : (_resolverAprobar ? "Observacion opcional para el profesional..." : "Explica por que se rechaza...");
+        try { await JS.InvokeVoidAsync("capEditor.initObs", "#" + EditorId, "", ph); }
+        catch (Exception ex) { _resError = _modalError = "No se pudo cargar el editor: " + ex.Message; StateHasChanged(); }
+    }
+
+    private async Task<string> LeerEditorAsync()
+    {
+        try { return await JS.InvokeAsync<string>("capEditor.get", "#" + EditorId) ?? ""; }
+        catch { return ""; }
+    }
+
+    private async Task DestruirEditorAsync()
+    {
+        try { await JS.InvokeVoidAsync("capEditor.destroy", "#" + EditorId); } catch { /* ya no existe */ }
+    }
+
+    private void AbrirResolver(AutorizacionSolicitudDto r, bool aprobar)
+    {
+        _resError = null;
+        _resolver = r;
+        _resolverAprobar = aprobar;
+        _edPendiente = true;
+    }
+
+    private async Task CerrarResolverAsync()
+    {
+        await DestruirEditorAsync();
+        _resolver = null;
+        _resError = null;
+    }
+
+    private async Task ConfirmarResolverAsync()
+    {
+        if (_resolver is null) { return; }
+        _resError = null;
+        var html = await LeerEditorAsync();
+        if (!_resolverAprobar && Visal.Application.Common.ObservacionRica.TextoPlano(html) is null && !html.Contains("<img", StringComparison.OrdinalIgnoreCase))
         {
-            var (actor, nombre) = await ActorAsync();
-            var res = await Svc.AprobarSolicitudAsync(r.Id, null, nombre, actor);
-            if (!res.Ok) { _solError = res.Mensaje; }
-            await CargarSolicitudesAsync();
+            _resError = "Escribe el motivo del rechazo.";
+            return;
         }
-        catch (Exception ex) { _solError = ex.Message; }
-        finally { _busy = false; }
-    }
-
-    private void AbrirRechazo(AutorizacionSolicitudDto r)
-    {
-        _solError = null; _rechazoObs = ""; _rechazo = r;
-    }
-
-    private async Task RechazarAsync()
-    {
-        if (_rechazo is null) { return; }
-        _solError = null;
-        if (string.IsNullOrWhiteSpace(_rechazoObs)) { _solError = "Escribe el motivo del rechazo."; return; }
         _busy = true;
         try
         {
             var (actor, nombre) = await ActorAsync();
-            var res = await Svc.RechazarSolicitudAsync(_rechazo.Id, _rechazoObs, nombre, actor);
-            if (!res.Ok) { _solError = res.Mensaje; return; }
-            _rechazo = null;
+            var obs = string.IsNullOrWhiteSpace(html) ? null : html;
+            var res = _resolverAprobar
+                ? await Svc.AprobarSolicitudAsync(_resolver.Id, obs, nombre, actor)
+                : await Svc.RechazarSolicitudAsync(_resolver.Id, obs ?? "", nombre, actor);
+            if (!res.Ok) { _resError = res.Mensaje; return; }
+            await DestruirEditorAsync();
+            _resolver = null;
             await CargarSolicitudesAsync();
         }
-        catch (Exception ex) { _solError = ex.Message; }
+        catch (Exception ex) { _resError = ex.Message; }
         finally { _busy = false; }
+    }
+
+    private async Task VerObservacionAsync(Guid id, bool esToken, string? texto)
+    {
+        _verObsTexto = texto;
+        _verObsHtml = null;
+        try { _verObsHtml = await Svc.ObtenerObservacionHtmlAsync(id, esToken); }
+        catch (Exception ex) { _error = ex.Message; }
+        _verObsAbierto = true;
     }
 
     private async Task CargarAsync()
@@ -475,23 +580,34 @@ else
 
     private void AbrirGenerar()
     {
-        _modalError = null; _fObservacion = ""; _fConcepto = "";
+        _modalError = null; _fConcepto = "";
         _modalOpen = true;
+        _edPendiente = true;
     }
 
-    private void Cerrar() => _modalOpen = false;
+    private async Task Cerrar()
+    {
+        await DestruirEditorAsync();
+        _modalOpen = false;
+    }
 
     private async Task GenerarAsync()
     {
         _modalError = null;
-        if (string.IsNullOrWhiteSpace(_fObservacion)) { _modalError = "La observacion es obligatoria."; return; }
+        var html = await LeerEditorAsync();
+        if (Visal.Application.Common.ObservacionRica.TextoPlano(html) is null && !html.Contains("<img", StringComparison.OrdinalIgnoreCase))
+        {
+            _modalError = "La observacion es obligatoria.";
+            return;
+        }
         _busy = true; _error = null;
         try
         {
             var (actor, nombre) = await ActorAsync();
-            var codigo = await Svc.GenerarAsync(_fConcepto, _fObservacion, nombre, actor);
+            var codigo = await Svc.GenerarAsync(_fConcepto, html, nombre, actor);
             _tokenGenerado = codigo;
             _tokenGeneradoVence = DateTimeOffset.UtcNow.AddMinutes(30);
+            await DestruirEditorAsync();
             _modalOpen = false;
             await CargarAsync();
         }

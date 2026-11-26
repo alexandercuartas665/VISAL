@@ -2010,6 +2010,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("respuesta");
 
+                    b.Property<string>("RespuestaHtml")
+                        .HasColumnType("text")
+                        .HasColumnName("respuesta_html");
+
                     b.Property<DateTimeOffset?>("ResueltoEn")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("resuelto_en");
@@ -2119,6 +2123,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("observacion");
+
+                    b.Property<string>("ObservacionHtml")
+                        .HasColumnType("text")
+                        .HasColumnName("observacion_html");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")

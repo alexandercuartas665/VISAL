@@ -325,7 +325,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
                         && s.Tipo == AutorizacionSolicitudTipo.CierreAuditoriaIa
                         && (reabiertaEn == null || s.CreatedAt > reabiertaEn))
             .OrderByDescending(s => s.CreatedAt)
-            .Select(s => new { s.Estado, s.Respuesta, s.CreatedAt, s.ResueltoEn })
+            .Select(s => new { s.Estado, s.Respuesta, s.RespuestaHtml, s.CreatedAt, s.ResueltoEn })
             .ToListAsync(ct);
         var desde = reabiertaEn;
         var ultRechazo = sols.Where(s => s.Estado == AutorizacionSolicitudEstado.Rechazada)
@@ -345,7 +345,8 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             _ => null,
         };
         return new BloqueoIaEstado(maximos.Min(), rechazos, estado,
-            estado == "Rechazada" ? ult!.Respuesta : null, ult?.CreatedAt);
+            estado == "Rechazada" ? ult!.Respuesta : null, ult?.CreatedAt,
+            estado == "Rechazada" ? ult!.RespuestaHtml : null);
     }
 
     public async Task<(bool Ok, string? Mensaje)> SolicitarAutorizacionCierreIaAsync(

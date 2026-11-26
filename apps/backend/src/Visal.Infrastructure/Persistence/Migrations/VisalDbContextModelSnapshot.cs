@@ -986,6 +986,10 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("pdf_unico");
 
+                    b.Property<bool>("RespetarOrdenContenidos")
+                        .HasColumnType("boolean")
+                        .HasColumnName("respetar_orden_contenidos");
+
                     b.Property<bool>("RotuloSeparadorCup")
                         .HasColumnType("boolean")
                         .HasColumnName("rotulo_separador_cup");

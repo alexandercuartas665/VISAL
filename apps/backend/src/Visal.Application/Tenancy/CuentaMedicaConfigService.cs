@@ -121,7 +121,8 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
             i.PdfUnico,
             i.UnoPorAutorizacion,
             i.RotuloSeparadorCup,
-            i.MembreteHcCup))
+            i.MembreteHcCup,
+            i.RespetarOrdenContenidos))
             .ToList();
     }
 
@@ -214,6 +215,7 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
         item.UnoPorAutorizacion = req.UnoPorAutorizacion;
         item.RotuloSeparadorCup = req.RotuloSeparadorCup;
         item.MembreteHcCup = req.MembreteHcCup;
+        item.RespetarOrdenContenidos = req.RespetarOrdenContenidos;
         // Campos legacy (1 item = 1 origen): reflejan el primer contenido por
         // compatibilidad; la fuente de verdad es la tabla de contenidos.
         var primero = contenidos[0];
@@ -363,6 +365,7 @@ public sealed class CuentaMedicaConfigService : ICuentaMedicaConfigService
                 UnoPorAutorizacion = src.UnoPorAutorizacion,
                 RotuloSeparadorCup = src.RotuloSeparadorCup,
                 MembreteHcCup = src.MembreteHcCup,
+                RespetarOrdenContenidos = src.RespetarOrdenContenidos,
             };
             if (contPorItem.TryGetValue(src.Id, out var cs))
             {

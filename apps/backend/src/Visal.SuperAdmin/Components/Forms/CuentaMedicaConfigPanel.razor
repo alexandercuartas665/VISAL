@@ -257,6 +257,10 @@ else
                         <input type="checkbox" class="form-check-input" @bind="_itemEdit.MembreteHcCup" />
                         <span>Membrete por documento (estampa HC + CUP + servicio + fecha de atencion en la parte superior de la primera pagina de cada historia clinica, de cada autorizacion y de cada anexo externo, p. ej. los listados de firmas)</span>
                     </label>
+                    <label class="cm-flag" style="margin-top:2px;">
+                        <input type="checkbox" class="form-check-input" @bind="_itemEdit.RespetarOrdenContenidos" />
+                        <span>Respetar el orden de los contenidos (cada &quot;Formulario por tipo&quot; sale en su posicion de la lista, p. ej. Historia clinica &rarr; Certificado &rarr; Notas; si esta apagado, todos los &quot;Formulario por tipo&quot; se juntan en un solo bloque ordenado por CUP/fecha)</span>
+                    </label>
 
                     @* ===== Contenidos del archivo ===== *@
                     <div class="cm-cont-head">
@@ -724,6 +728,7 @@ else
             UnoPorAutorizacion = it.UnoPorAutorizacion,
             RotuloSeparadorCup = it.RotuloSeparadorCup,
             MembreteHcCup = it.MembreteHcCup,
+            RespetarOrdenContenidos = it.RespetarOrdenContenidos,
             Contenidos = it.Contenidos
                 .OrderBy(c => c.Orden)
                 .Select(c => new ContenidoEditModel
@@ -810,7 +815,7 @@ else
                 _itemEdit.Id, aid, _itemEdit.Seccion, _itemEdit.Alias,
                 _itemEdit.Descripcion, _itemEdit.PatronNombre, _itemEdit.Obligatorio,
                 contenidos, ordenNiveles, _itemEdit.PdfUnico, _itemEdit.UnoPorAutorizacion,
-                _itemEdit.RotuloSeparadorCup, _itemEdit.MembreteHcCup),
+                _itemEdit.RotuloSeparadorCup, _itemEdit.MembreteHcCup, _itemEdit.RespetarOrdenContenidos),
                 Guid.Empty);
             CerrarItemModal();
             _items = (await Svc.ListarItemsAsync(aid)).ToList();
@@ -991,6 +996,7 @@ else
         public bool UnoPorAutorizacion { get; set; }
         public bool RotuloSeparadorCup { get; set; }
         public bool MembreteHcCup { get; set; }
+        public bool RespetarOrdenContenidos { get; set; }
         public List<ContenidoEditModel> Contenidos { get; set; } = new();
         // Orden multinivel de Historias medicas (Formulario por tipo). Vacio = cronologico.
         public List<OrdenNivelEditModel> OrdenNiveles { get; set; } = new();

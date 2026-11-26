@@ -1256,6 +1256,8 @@ public sealed class TipologiaZipService : ITipologiaZipService
         // Acumula las HC de TODOS los contenidos "Formulario por tipo" para ordenarlas juntas.
         var formTipoUrls = new List<UrlCup>();
         int? ftInsertIdx = null;
+        // IMP-70: con "Respetar el orden de los contenidos", un bloque por contenido en su posicion.
+        var ftBloques = new List<(int Idx, List<UrlCup> Urls)>();
         foreach (var c in archivo.Contenidos)
         {
             ct.ThrowIfCancellationRequested();
@@ -1274,11 +1276,13 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     }
                     break;
                 case OrigenInformeItem.FormularioPorTipo:
-                    ftInsertIdx ??= partes.Count;
-                    formTipoUrls.AddRange(await ResolverUrlsFormularioPorTipoAsync(
+                {
+                    var urlsFt = await ResolverUrlsFormularioPorTipoAsync(
                         db, pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct,
-                        desde: desde, hasta: hasta, rotuloPorCup: archivo.RotuloSeparadorCup));
+                        desde: desde, hasta: hasta, rotuloPorCup: archivo.RotuloSeparadorCup);
+                    AcumularFormTipo(archivo, partes.Count, urlsFt, formTipoUrls, ref ftInsertIdx, ftBloques);
                     break;
+                }
                 case OrigenInformeItem.DocumentoHc:
                 case OrigenInformeItem.DocumentoPacienteLibre:
                 case OrigenInformeItem.DocumentoSinHistoria:
@@ -1295,8 +1299,43 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     break;
             }
         }
-        InsertarFormTipoUnificado(partes, formTipoUrls, ftInsertIdx, allUrls, archivo);
+        InsertarFormTipo(partes, formTipoUrls, ftInsertIdx, ftBloques, allUrls, archivo);
         return partes;
+    }
+
+    /// <summary>Acumula las URLs de un contenido "Formulario por tipo". Historico: todas en una
+    /// sola lista (bloque unico en la posicion del PRIMER contenido de ese tipo). IMP-70 con
+    /// <c>RespetarOrdenContenidos</c>: un bloque propio en la posicion de ESTE contenido.</summary>
+    private static void AcumularFormTipo(
+        InformeItemDto archivo, int posicion, List<UrlCup> urls,
+        List<UrlCup> formTipoUrls, ref int? ftInsertIdx, List<(int Idx, List<UrlCup> Urls)> ftBloques)
+    {
+        if (archivo.RespetarOrdenContenidos)
+        {
+            ftBloques.Add((posicion, urls));
+            return;
+        }
+        ftInsertIdx ??= posicion;
+        formTipoUrls.AddRange(urls);
+    }
+
+    /// <summary>Inserta las historias de los contenidos "Formulario por tipo" en el plan: bloque
+    /// unico (historico) o, con <c>RespetarOrdenContenidos</c>, cada bloque en su posicion. Los
+    /// bloques se insertan del ultimo al primero para que las posiciones anteriores no se
+    /// corran; dos bloques en la misma posicion conservan el orden configurado.</summary>
+    private static void InsertarFormTipo(
+        List<PartePlan> partes, List<UrlCup> formTipoUrls, int? ftInsertIdx,
+        List<(int Idx, List<UrlCup> Urls)> ftBloques, List<string> allUrls, InformeItemDto archivo)
+    {
+        if (!archivo.RespetarOrdenContenidos)
+        {
+            InsertarFormTipoUnificado(partes, formTipoUrls, ftInsertIdx, allUrls, archivo);
+            return;
+        }
+        for (var k = ftBloques.Count - 1; k >= 0; k--)
+        {
+            InsertarFormTipoUnificado(partes, ftBloques[k].Urls, ftBloques[k].Idx, allUrls, archivo);
+        }
     }
 
     /// <summary>Ordena las HC acumuladas de los contenidos "Formulario por tipo" por CUP->fecha
@@ -1618,6 +1657,8 @@ public sealed class TipologiaZipService : ITipologiaZipService
         // y ordenan por CUP->fecha (igual que el detalle del snapshot); sin anidar sub-documentos.
         var formTipoUrls = new List<UrlCup>();
         int? ftInsertIdx = null;
+        // IMP-70: con "Respetar el orden de los contenidos", un bloque por contenido en su posicion.
+        var ftBloques = new List<(int Idx, List<UrlCup> Urls)>();
         foreach (var c in archivo.Contenidos)
         {
             ct.ThrowIfCancellationRequested();
@@ -1637,11 +1678,13 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     }
                     break;
                 case OrigenInformeItem.FormularioPorTipo:
-                    ftInsertIdx ??= partes.Count;
-                    formTipoUrls.AddRange(await ResolverUrlsFormularioPorTipoAsync(
+                {
+                    var urlsFt = await ResolverUrlsFormularioPorTipoAsync(
                         db, pacienteId, c.FormularioTipo, c.SoloUltimo, archivo.OrdenNiveles, docsRender, ct,
-                        codigo, hcAut, desde, hasta, archivo.RotuloSeparadorCup));
+                        codigo, hcAut, desde, hasta, archivo.RotuloSeparadorCup);
+                    AcumularFormTipo(archivo, partes.Count, urlsFt, formTipoUrls, ref ftInsertIdx, ftBloques);
                     break;
+                }
                 case OrigenInformeItem.DocumentoHc:
                 case OrigenInformeItem.DocumentoPacienteLibre:
                 case OrigenInformeItem.DocumentoSinHistoria:
@@ -1657,7 +1700,7 @@ public sealed class TipologiaZipService : ITipologiaZipService
                     break;
             }
         }
-        InsertarFormTipoUnificado(partes, formTipoUrls, ftInsertIdx, allUrls, archivo);
+        InsertarFormTipo(partes, formTipoUrls, ftInsertIdx, ftBloques, allUrls, archivo);
         // IMP-67: el documento libre (cedula, carne...) acompana a la autorizacion pero no la
         // justifica: si la autorizacion no tiene NADA mas, se trata como vacia (no se genera un
         // PDF con solo la cedula, que esconderia el faltante).

@@ -97,4 +97,10 @@ public class AseguradoraInformeItem : TenantEntity
     /// documento externo (DocumentoHc/DocumentoPacienteLibre/DocumentoNota); las historias,
     /// autorizaciones y firmas no se tocan. Default false.</summary>
     public bool MembreteHcCup { get; set; }
+
+    /// <summary>IMP-70: si true, cada contenido "Formulario por tipo" sale como su PROPIO bloque
+    /// en la posicion configurada (p. ej. HISTORIA CLINICA -> Certificado -> NOTAS). Default
+    /// false = comportamiento historico: todos los "Formulario por tipo" se juntan en un solo
+    /// bloque ordenado por CUP/fecha, insertado en la posicion del primero.</summary>
+    public bool RespetarOrdenContenidos { get; set; }
 }

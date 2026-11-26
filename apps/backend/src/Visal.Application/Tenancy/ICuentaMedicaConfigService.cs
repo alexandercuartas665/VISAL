@@ -58,7 +58,10 @@ public sealed record InformeItemDto(
     bool RotuloSeparadorCup = false,
     // True = estampa un membrete (HC + CUP + servicio) en la primera pagina de cada documento
     // externo (anexo) del archivo. Default false.
-    bool MembreteHcCup = false);
+    bool MembreteHcCup = false,
+    // IMP-70: True = cada "Formulario por tipo" sale en su posicion configurada (no se juntan
+    // en un bloque por CUP/fecha). Default false (historico).
+    bool RespetarOrdenContenidos = false);
 
 /// <summary>Un contenido dentro de un archivo (un origen documental).</summary>
 public sealed record InformeContenidoDto(
@@ -83,7 +86,8 @@ public sealed record GuardarItemRequest(
     bool PdfUnico = false,
     bool UnoPorAutorizacion = false,
     bool RotuloSeparadorCup = false,
-    bool MembreteHcCup = false);
+    bool MembreteHcCup = false,
+    bool RespetarOrdenContenidos = false);
 
 /// <summary>Contenido a persistir dentro de un archivo (sin Id: se reemplazan
 /// todos en cada guardado).</summary>

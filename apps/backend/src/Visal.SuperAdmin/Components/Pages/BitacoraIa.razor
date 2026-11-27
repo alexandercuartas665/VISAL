@@ -1,0 +1,633 @@
+@page "/revision/bitacora-ia"
+@attribute [Authorize]
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using System.Security.Claims
+@using Visal.Application.Common
+@using Visal.Application.Revision.Bitacora
+@using Visal.Application.Tenancy
+@inject IBitacoraIaService Svc
+@inject ITenantContext Tenant
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<PageTitle>Bitacora auditor IA - Visal</PageTitle>
+
+<div class="ase-head">
+    <div>
+        <div class="ase-eyebrow">Infraestructura &amp; IA</div>
+        <h1 class="ase-title">Bitacora del auditor IA</h1>
+        <small class="text-muted">
+            Cada revision que hizo el agente REVISOR CLINICO IA: que historia reviso, cuantos intentos hubo, que
+            recibio, que encontro y como lo justifico. Al abrir una historia se comparan sus intentos: que cambio el
+            profesional entre uno y otro, y si el agente repitio o invento hallazgos sobre campos que ya estaban
+            corregidos.
+        </small>
+    </div>
+</div>
+
+@if (!_puede)
+{
+    <div class="ase-alert">No tienes permiso para este modulo. Pide el permiso "Bitacora del auditor IA" a un administrador.</div>
+}
+else
+{
+    <div class="az-tabs">
+        <button class="az-tab @(_tab == "hc" ? "az-tab-on" : "")" @onclick="@(() => _tab = "hc")">Historias</button>
+        <button class="az-tab @(_tab == "prof" ? "az-tab-on" : "")" @onclick="@(() => _tab = "prof")">Por profesional</button>
+        @if (_esAdmin)
+        {
+            <button class="az-tab @(_tab == "api" ? "az-tab-on" : "")" @onclick="AbrirApiAsync">Conexion API</button>
+        }
+    </div>
+
+    @if (_tab != "api")
+    {
+        <div class="bia-filtros">
+            <div><label>Desde</label><input type="date" class="form-control form-control-sm" @bind="_fDesde" /></div>
+            <div><label>Hasta</label><input type="date" class="form-control form-control-sm" @bind="_fHasta" /></div>
+            <div>
+                <label>Resultado</label>
+                <select class="form-select form-select-sm" @bind="_fResultado">
+                    <option value="">(todos)</option>
+                    <option value="Aprobado">Aprobado</option>
+                    <option value="Rechazado">Rechazado</option>
+                    <option value="Neutral">Neutral</option>
+                    <option value="Fallida">Fallida (sin respuesta)</option>
+                </select>
+            </div>
+            <div>
+                <label>Origen</label>
+                <select class="form-select form-select-sm" @bind="_fOrigen">
+                    <option value="">(todos)</option>
+                    <option value="Cierre">Al cerrar la HC</option>
+                    <option value="Revision">Ordenes / revision</option>
+                </select>
+            </div>
+            <div><label>Profesional</label><input class="form-control form-control-sm" @bind="_fProfesional" placeholder="nombre" /></div>
+            <div><label>HC o documento</label><input class="form-control form-control-sm" @bind="_fHc" placeholder="HC-033421" /></div>
+            <div><label>Formato</label><input class="form-control form-control-sm" @bind="_fFormato" placeholder="codigo o nombre" /></div>
+            <div class="bia-chks">
+                <label class="az-chk"><input type="checkbox" @bind="_fSoloAlertas" /> Solo con incoherencias</label>
+                <label class="az-chk"><input type="checkbox" @bind="_fSoloPulgarAbajo" /> Solo con pulgar abajo</label>
+            </div>
+            <div class="bia-acc">
+                <button class="btn btn-primary btn-sm" @onclick="AplicarAsync" disabled="@_cargando">Aplicar</button>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="LimpiarAsync" disabled="@_cargando">Hoy</button>
+            </div>
+        </div>
+
+        @if (_error is not null) { <div class="ase-alert">@_error</div> }
+
+        @if (_resumen is { } r)
+        {
+            <div class="bia-kpis">
+                <div class="bia-kpi"><div class="l">Corridas</div><div class="v">@r.Corridas.ToString("N0")</div></div>
+                <div class="bia-kpi"><div class="l">Historias revisadas</div><div class="v">@r.Historias.ToString("N0")</div></div>
+                <div class="bia-kpi ok"><div class="l">Aprobadas</div><div class="v">@r.Aprobadas.ToString("N0")</div></div>
+                <div class="bia-kpi bad"><div class="l">Rechazadas</div><div class="v">@r.Rechazadas.ToString("N0")</div></div>
+                <div class="bia-kpi"><div class="l">Fallidas</div><div class="v">@r.Fallidas.ToString("N0")</div></div>
+                <div class="bia-kpi"><div class="l">HC con varios intentos</div><div class="v">@r.HistoriasConVariosIntentos.ToString("N0")</div></div>
+                <div class="bia-kpi warn" title="Historias donde el agente trajo un hallazgo nuevo sobre algo que no cambio (no lo marco antes) o volvio a marcar un campo donde se copio su propia sugerencia">
+                    <div class="l">HC con incoherencias</div>
+                    <div class="v">@r.HistoriasConAlertas.ToString("N0")@(r.AlertasParciales ? "+" : "")</div>
+                </div>
+                <div class="bia-kpi"><div class="l">Calificacion</div><div class="v">&#128077; @r.PulgarArriba &nbsp; &#128078; @r.PulgarAbajo</div></div>
+                <div class="bia-kpi"><div class="l">Tokens (entrada / salida)</div><div class="v sm">@Miles(r.TokensIn) / @Miles(r.TokensOut)</div></div>
+            </div>
+        }
+    }
+
+    @if (_tab == "hc")
+    {
+        <div class="ase-card">
+            <div class="ase-card-body bia-tablewrap">
+                @if (_cargando) { <div class="text-muted">Cargando...</div> }
+                else if (_pagina is null || _pagina.Items.Count == 0) { <div class="text-muted">Sin revisiones con estos filtros.</div> }
+                else
+                {
+                    <table class="table table-sm bia-table">
+                        <thead>
+                            <tr>
+                                <th>HC</th><th>Paciente</th><th>Formato</th><th>Profesional</th>
+                                <th class="text-center">Intentos</th><th>Ultimo resultado</th>
+                                <th>Incoherencias</th><th class="text-center">Calif.</th><th>Ultima corrida</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var h in _pagina.Items)
+                            {
+                                <tr class="bia-row @(h.Senales.Total > 0 ? "bia-row-alerta" : "")" @onclick="() => AbrirDetalleAsync(h.HistoriaClinicaId)">
+                                    <td class="mono-s">@h.Hc<div class="bia-sub">@h.EstadoHc</div></td>
+                                    <td>@h.Paciente<div class="bia-sub">@h.PacienteDocumento</div></td>
+                                    <td>@h.FormatoCodigo<div class="bia-sub">@h.Formato</div></td>
+                                    <td>@(h.Profesional ?? "-")</td>
+                                    <td class="text-center">@h.Corridas@(h.Fallidas > 0 ? $" ({h.Fallidas} fallida{(h.Fallidas == 1 ? "" : "s")})" : "")</td>
+                                    <td><span class="bia-res @ClaseRes(h.UltimoResultado)">@(h.UltimoResultado ?? "-")</span> @Pct(h.UltimaConfianza)</td>
+                                    <td>
+                                        @if (h.Senales.NuevoSinCambio > 0) { <span class="bia-al" title="@BitacoraIaAnalisis.TextoAlerta(BitacoraIaAnalisis.AlertaNuevoSinCambio)">Nuevo sin cambio @h.Senales.NuevoSinCambio</span> }
+                                        @if (h.Senales.ContradiceSugerencia > 0) { <span class="bia-al" title="@BitacoraIaAnalisis.TextoAlerta(BitacoraIaAnalisis.AlertaContradiceSugerencia)">Contradice sugerencia @h.Senales.ContradiceSugerencia</span> }
+                                        @if (h.Senales.RepiteTrasCorregir > 0) { <span class="bia-al gris" title="@BitacoraIaAnalisis.TextoAlerta(BitacoraIaAnalisis.AlertaRepiteTrasCorregir)">Insiste tras corregir @h.Senales.RepiteTrasCorregir</span> }
+                                        @if (h.Senales.Total == 0 && h.Senales.RepiteTrasCorregir == 0) { <span class="text-muted">-</span> }
+                                    </td>
+                                    <td class="text-center">@(h.PulgarArriba > 0 ? $"\U0001F44D{h.PulgarArriba} " : "")@(h.PulgarAbajo > 0 ? $"\U0001F44E{h.PulgarAbajo}" : "")</td>
+                                    <td>@F(h.UltimaEn)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                    <div class="bia-pag">
+                        <span>@_pagina.Total.ToString("N0") historias - pagina @_page de @TotalPaginas</span>
+                        <button class="btn btn-outline-secondary btn-sm" disabled="@(_page <= 1 || _cargando)" @onclick="() => IrPaginaAsync(_page - 1)">Anterior</button>
+                        <button class="btn btn-outline-secondary btn-sm" disabled="@(_page >= TotalPaginas || _cargando)" @onclick="() => IrPaginaAsync(_page + 1)">Siguiente</button>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+    else if (_tab == "prof")
+    {
+        <div class="ase-card">
+            <div class="ase-card-body bia-tablewrap">
+                @if (_resumen is null || _resumen.Profesionales.Count == 0) { <div class="text-muted">Sin datos.</div> }
+                else
+                {
+                    <table class="table table-sm bia-table">
+                        <thead><tr><th>Profesional</th><th class="text-end">Historias</th><th class="text-end">Corridas</th><th class="text-end">Rechazadas</th><th class="text-end">% rechazo</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var p in _resumen.Profesionales)
+                            {
+                                <tr>
+                                    <td>@p.Profesional</td>
+                                    <td class="text-end">@p.Historias</td>
+                                    <td class="text-end">@p.Corridas</td>
+                                    <td class="text-end">@p.Rechazadas</td>
+                                    <td class="text-end">@(p.Corridas == 0 ? "-" : (100.0 * p.Rechazadas / p.Corridas).ToString("0") + "%")</td>
+                                    <td><button class="btn btn-link btn-sm p-0" @onclick="() => FiltrarProfesionalAsync(p.Profesional)">Ver historias</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+            </div>
+        </div>
+    }
+    else if (_tab == "api")
+    {
+        <div class="ase-card">
+            <div class="ase-card-body">
+                <p class="text-muted" style="font-size:13px">
+                    Llave de SOLO LECTURA para consultar la bitacora desde fuera de la aplicacion (por ejemplo, para que
+                    un asistente analice las revisiones y proponga mejoras al agente). La API entrega los datos clinicos
+                    completos que vio el agente: comparte la llave solo con quien deba analizarlos. Cada consulta queda en
+                    la auditoria. Si se filtra, regenerala: la anterior deja de funcionar al instante.
+                </p>
+                @if (_api is null) { <div class="text-muted">Cargando...</div> }
+                else
+                {
+                    <div class="bia-api">
+                        <div><b>Estado:</b> @(!_api.HasKey ? "sin llave" : _api.IsEnabled ? "habilitada" : "deshabilitada")</div>
+                        @if (_api.HasKey)
+                        {
+                            <div><b>Ultimo uso:</b> @(_api.LastUsedAt is { } lu ? F(lu) : "nunca")</div>
+                            <div class="bia-key">
+                                <code>@(_verLlave ? _api.ApiKey : Enmascarar(_api.ApiKey))</code>
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="() => _verLlave = !_verLlave">@(_verLlave ? "Ocultar" : "Mostrar")</button>
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="() => CopiarAsync(_api.ApiKey)">Copiar</button>
+                            </div>
+                        }
+                        <div class="bia-api-acc">
+                            <button class="btn btn-primary btn-sm" @onclick="RegenerarAsync" disabled="@_busy">@(_api.HasKey ? "Regenerar llave" : "Generar llave")</button>
+                            @if (_api.HasKey)
+                            {
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="ToggleApiAsync" disabled="@_busy">@(_api.IsEnabled ? "Deshabilitar" : "Habilitar")</button>
+                            }
+                        </div>
+                        @if (_copiado) { <div class="text-success" style="font-size:12px">Copiado.</div> }
+                    </div>
+                    <h6 class="mt-3">Endpoints</h6>
+                    <pre class="bia-pre">@EjemploApi()</pre>
+                }
+            </div>
+        </div>
+    }
+}
+
+@if (_detalle is { } d)
+{
+    <div class="cie-backdrop" @onclick="CerrarDetalle"></div>
+    <div class="cie-modal bia-modal">
+        <div class="cie-modal-h">
+            <h3>@d.Historia.Hc - @d.Historia.Paciente <small class="text-muted">(@d.Historia.PacienteDocumento)</small></h3>
+            <button class="cie-modal-close" @onclick="CerrarDetalle">&times;</button>
+        </div>
+        <div class="cie-modal-body">
+            <div class="bia-hc-info">
+                <span><b>Formato:</b> @d.Historia.FormatoCodigo - @d.Historia.Formato</span>
+                <span><b>Profesional:</b> @(d.Historia.Profesional ?? "-")</span>
+                <span><b>Estado HC:</b> @d.Historia.EstadoHc</span>
+                <span><b>Intentos:</b> @d.Historia.Corridas</span>
+            </div>
+
+            @foreach (var c in d.Corridas.Reverse())
+            {
+                var a = d.Analisis.FirstOrDefault(x => x.Id == c.Id);
+                <div class="bia-int @(a is { Alertas: > 0 } ? "bia-int-alerta" : "")">
+                    <div class="bia-int-h">
+                        <span class="bia-num">Intento @(a?.Numero ?? 0)</span>
+                        <span>@F(c.En)</span>
+                        <span class="bia-tag">@(c.Origen == "Cierre" ? "Al cerrar la HC" : "Ordenes / revision")</span>
+                        @if (c.Ok) { <span class="bia-res @ClaseRes(c.Resultado)">@c.Resultado</span> <span>@Pct(c.Confianza)</span> }
+                        else { <span class="bia-res fail">Fallida</span> }
+                        <span class="bia-sub">por @(c.DisparadoPor ?? "sistema") - @c.Modelo - @Miles(c.TokensIn)/@Miles(c.TokensOut) tokens</span>
+                        @if (c.FeedbackUtil == true) { <span title="Le sirvio">&#128077;</span> }
+                        @if (c.FeedbackUtil == false) { <span title="No le sirvio">&#128078;</span> }
+                    </div>
+
+                    @if (!c.Ok)
+                    {
+                        <div class="bia-err">@c.Error</div>
+                    }
+                    else
+                    {
+                        @if (a is { AnteriorId: not null })
+                        {
+                            <details class="bia-sec" open="@(a.CamposCambiados.Count > 0 && a.CamposCambiados.Count <= 4)">
+                                <summary>Que cambio el profesional desde el intento anterior (@a.CamposCambiados.Count campo@(a.CamposCambiados.Count == 1 ? "" : "s"))</summary>
+                                @if (a.CamposCambiados.Count == 0) { <div class="text-muted bia-sm">No cambio ningun campo de la historia.</div> }
+                                @foreach (var cc in a.CamposCambiados)
+                                {
+                                    <div class="bia-diff">
+                                        <div class="bia-diff-c">@cc.Campo</div>
+                                        <div class="bia-diff-g">
+                                            <div class="antes"><span>Antes</span>@(string.IsNullOrWhiteSpace(cc.Antes) ? "(vacio)" : cc.Antes)</div>
+                                            <div class="despues"><span>Despues</span>@(string.IsNullOrWhiteSpace(cc.Despues) ? "(vacio)" : cc.Despues)</div>
+                                        </div>
+                                    </div>
+                                }
+                                @if (a.SugerenciasAdoptadas.Count > 0)
+                                {
+                                    <div class="bia-sm mt-1">Copio la sugerencia del agente en: <b>@string.Join(", ", a.SugerenciasAdoptadas)</b></div>
+                                }
+                            </details>
+                        }
+
+                        <div class="bia-sec">
+                            <div class="bia-sec-t">Justificacion del agente</div>
+                            <div class="bia-nota">@(c.Nota ?? "(sin nota)")</div>
+                        </div>
+
+                        @if (a is { Hallazgos.Count: > 0 })
+                        {
+                            <div class="bia-sec">
+                                <div class="bia-sec-t">Hallazgos (@a.Hallazgos.Count)</div>
+                                <ul class="bia-hall">
+                                    @foreach (var h in a.Hallazgos)
+                                    {
+                                        var esInsiste = h.Alerta == BitacoraIaAnalisis.AlertaRepiteTrasCorregir;
+                                        <li class="@(h.Alerta is null ? "" : esInsiste ? "al-gris" : "al")">
+                                            <span class="bia-est @h.Estado.ToLowerInvariant()">@h.Estado</span>
+                                            @h.Texto
+                                            @if (h.Alerta is not null) { <div class="bia-al-t @(esInsiste ? "gris" : "")">&#9888; @BitacoraIaAnalisis.TextoAlerta(h.Alerta)@(h.CamposMencionados.Count > 0 ? " (" + string.Join(", ", h.CamposMencionados) + ")" : "")</div> }
+                                            @if (h.HallazgoAnterior is not null && h.Estado == "Repetido") { <div class="bia-sm text-muted">Antes: @h.HallazgoAnterior</div> }
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
+                        }
+                        @if (a is { HallazgosResueltos.Count: > 0 })
+                        {
+                            <div class="bia-sec">
+                                <div class="bia-sec-t">Ya no los menciona (resueltos desde el intento anterior)</div>
+                                <ul class="bia-hall res">@foreach (var h in a.HallazgosResueltos) { <li>@h</li> }</ul>
+                            </div>
+                        }
+                        @if (c.Sugerencias.Count > 0)
+                        {
+                            <details class="bia-sec">
+                                <summary>Texto sugerido (@c.Sugerencias.Count)</summary>
+                                @foreach (var s in c.Sugerencias)
+                                {
+                                    <div class="bia-diff"><div class="bia-diff-c">@s.Campo</div><div class="bia-pre-s">@s.TextoSugerido</div></div>
+                                }
+                            </details>
+                        }
+                        @if (c.FeedbackComentario is not null)
+                        {
+                            <div class="bia-sec bia-fb">
+                                <div class="bia-sec-t">Comentario del usuario @(c.FeedbackPor is null ? "" : "(" + c.FeedbackPor + ")")</div>
+                                @c.FeedbackComentario
+                            </div>
+                        }
+                    }
+
+                    <div class="bia-sec">
+                        @if (_completa.TryGetValue(c.Id, out var comp))
+                        {
+                            <div class="az-tabs">
+                                @foreach (var t in TabsCompleta)
+                                {
+                                    <button class="az-tab @(TabDe(c.Id) == t ? "az-tab-on" : "")" @onclick="() => _tabCompleta[c.Id] = t">@t</button>
+                                }
+                                <button class="az-tab" @onclick="() => CopiarAsync(TextoCompleta(comp, TabDe(c.Id)))">Copiar</button>
+                            </div>
+                            <pre class="bia-pre">@(TextoCompleta(comp, TabDe(c.Id)) ?? "(vacio)")</pre>
+                        }
+                        else
+                        {
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="() => CargarCompletaAsync(c.Id)">Ver lo que recibio y respondio</button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+<style>
+    .bia-filtros { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
+    .bia-filtros label { display: block; font-size: 11px; font-weight: 600; color: #475569; margin-bottom: 2px; }
+    .bia-filtros > div { min-width: 130px; }
+    .bia-chks { display: flex; flex-direction: column; gap: 2px; }
+    .bia-acc { display: flex; gap: 6px; }
+    .bia-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-bottom: 12px; }
+    .bia-kpi { background: #fff; border: 1px solid #e2e8f0; border-radius: 10px; padding: 8px 10px; }
+    .bia-kpi .l { font-size: 11px; color: #64748b; font-weight: 600; }
+    .bia-kpi .v { font-size: 20px; font-weight: 700; color: #0f172a; }
+    .bia-kpi .v.sm { font-size: 14px; }
+    .bia-kpi.ok .v { color: #15803d; } .bia-kpi.bad .v { color: #b91c1c; } .bia-kpi.warn .v { color: #b45309; }
+    .bia-tablewrap { overflow-x: auto; }
+    .bia-table { font-size: 13px; }
+    .bia-row { cursor: pointer; } .bia-row:hover { background: #f1f5f9; }
+    .bia-row-alerta { background: #fffbeb; }
+    .bia-sub { font-size: 11px; color: #64748b; }
+    .mono-s { font-family: ui-monospace, Menlo, Consolas, monospace; font-weight: 600; }
+    .bia-res { border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 700; background: #e2e8f0; color: #334155; }
+    .bia-res.aprobado { background: #dcfce7; color: #166534; } .bia-res.rechazado { background: #fee2e2; color: #991b1b; }
+    .bia-res.neutral { background: #e0e7ff; color: #3730a3; } .bia-res.fail { background: #f1f5f9; color: #64748b; }
+    .bia-al { display: inline-block; background: #fef3c7; color: #92400e; border-radius: 6px; padding: 0 6px; font-size: 11px; font-weight: 600; margin: 1px 2px; }
+    .bia-al.gris { background: #f1f5f9; color: #475569; }
+    .bia-hall li.al-gris { background: #f8fafc; border-radius: 6px; padding: 2px 4px; }
+    .bia-al-t.gris { color: #475569; }
+    .bia-pag { display: flex; gap: 8px; align-items: center; justify-content: flex-end; font-size: 12px; color: #64748b; }
+    .bia-modal { width: 1100px; }
+    .bia-hc-info { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; margin-bottom: 12px; }
+    .bia-int { border: 1px solid #e2e8f0; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; }
+    .bia-int-alerta { border-color: #f59e0b; box-shadow: 0 0 0 1px #fde68a inset; }
+    .bia-int-h { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; font-size: 13px; margin-bottom: 6px; }
+    .bia-num { font-weight: 700; }
+    .bia-tag { background: #f1f5f9; border-radius: 6px; padding: 0 6px; font-size: 11px; }
+    .bia-sec { margin-top: 8px; font-size: 13px; }
+    .bia-sec summary { cursor: pointer; font-weight: 600; color: #334155; }
+    .bia-sec-t { font-weight: 600; color: #334155; margin-bottom: 2px; }
+    .bia-nota { white-space: pre-line; background: #f8fafc; border-radius: 6px; padding: 6px 8px; }
+    .bia-hall { margin: 0; padding-left: 18px; } .bia-hall li { margin-bottom: 4px; }
+    .bia-hall li.al { background: #fffbeb; border-radius: 6px; padding: 2px 4px; }
+    .bia-hall.res li { color: #15803d; }
+    .bia-est { border-radius: 4px; padding: 0 5px; font-size: 10px; font-weight: 700; margin-right: 4px; text-transform: uppercase; }
+    .bia-est.nuevo { background: #dbeafe; color: #1e40af; } .bia-est.repetido { background: #e2e8f0; color: #334155; } .bia-est.primero { background: #f1f5f9; color: #64748b; }
+    .bia-al-t { color: #92400e; font-size: 12px; font-weight: 600; }
+    .bia-diff { border-top: 1px dashed #e2e8f0; padding: 6px 0; }
+    .bia-diff-c { font-weight: 600; font-size: 12px; color: #0f172a; }
+    .bia-diff-g { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .bia-diff-g > div { white-space: pre-wrap; font-size: 12px; border-radius: 6px; padding: 4px 6px; max-height: 220px; overflow: auto; overflow-wrap: anywhere; }
+    .bia-diff-g span { display: block; font-size: 10px; font-weight: 700; text-transform: uppercase; color: #64748b; }
+    .bia-diff-g .antes { background: #fef2f2; } .bia-diff-g .despues { background: #f0fdf4; }
+    .bia-pre-s { white-space: pre-wrap; font-size: 12px; background: #f8fafc; border-radius: 6px; padding: 4px 6px; }
+    .bia-pre { white-space: pre-wrap; font-size: 12px; background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 10px; max-height: 420px; overflow: auto; overflow-wrap: anywhere; }
+    .bia-err { color: #b91c1c; font-size: 13px; }
+    .bia-fb { background: #fef2f2; border-radius: 6px; padding: 6px 8px; }
+    .bia-sm { font-size: 12px; }
+    .bia-api { display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+    .bia-key { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .bia-key code { background: #f1f5f9; padding: 3px 8px; border-radius: 6px; }
+    .bia-api-acc { display: flex; gap: 6px; }
+    .az-tabs { display: flex; gap: 4px; margin: 6px 0 10px; border-bottom: 1px solid #e2e8f0; flex-wrap: wrap; }
+    .az-tab { background: none; border: none; border-bottom: 2px solid transparent; padding: 6px 14px; font-weight: 600; color: #64748b; }
+    .az-tab-on { color: #0f172a; border-bottom-color: #2563eb; }
+    .az-chk { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; }
+    .cie-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,.45); z-index: 1050; }
+    .cie-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%); max-width: 96vw; max-height: 92vh; background: #fff; border-radius: 12px; box-shadow: 0 20px 60px rgba(15,23,42,.25); z-index: 1051; display: flex; flex-direction: column; }
+    .cie-modal-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid #e2e8f0; }
+    .cie-modal-h h3 { margin: 0; font-size: 16px; font-weight: 700; color: #0f172a; }
+    .cie-modal-close { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: #64748b; }
+    .cie-modal-body { padding: 18px; overflow: auto; }
+    @@media (max-width: 700px) { .bia-diff-g { grid-template-columns: 1fr; } .bia-filtros > div { min-width: 45%; } }
+</style>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+
+    private const int PageSize = 50;
+    private static readonly TimeSpan Bogota = TimeSpan.FromHours(-5);
+    private static readonly string[] TabsCompleta = ["Instrucciones", "Contexto enviado", "HC legible", "Tools", "Respuesta cruda"];
+
+    private bool _puede;
+    private bool _esAdmin;
+    private Guid _actor;
+    private Guid _tenantId;
+    private string _tab = "hc";
+    private bool _cargando;
+    private bool _busy;
+    private string? _error;
+
+    private DateTime? _fDesde;
+    private DateTime? _fHasta;
+    private string _fResultado = "";
+    private string _fOrigen = "";
+    private string? _fProfesional;
+    private string? _fHc;
+    private string? _fFormato;
+    private bool _fSoloAlertas;
+    private bool _fSoloPulgarAbajo;
+
+    private int _page = 1;
+    private BitacoraPagina<BitacoraHcFilaDto>? _pagina;
+    private BitacoraResumenDto? _resumen;
+    private BitacoraHcDetalleDto? _detalle;
+    private readonly Dictionary<Guid, BitacoraCorridaCompletaDto> _completa = new();
+    private readonly Dictionary<Guid, string> _tabCompleta = new();
+
+    private BitacoraApiConfigDto? _api;
+    private bool _verLlave;
+    private bool _copiado;
+
+    private int TotalPaginas => _pagina is null ? 1 : Math.Max(1, (int)Math.Ceiling(_pagina.Total / (double)PageSize));
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ResolverPermisoAsync();
+        if (!_puede) { return; }
+        if (Tenant.TenantId is not Guid t) { _puede = false; return; }
+        _tenantId = t;
+        var hoy = DateTime.UtcNow.Add(Bogota).Date;
+        _fDesde = hoy;
+        _fHasta = hoy;
+        await CargarAsync();
+    }
+
+    private async Task ResolverPermisoAsync()
+    {
+        if (AuthState is null) { return; }
+        var st = await AuthState;
+        var rol = st.User.FindFirst(ClaimTypes.Role)?.Value ?? "";
+        var tenantRole = st.User.FindFirst("tenant_role")?.Value ?? "";
+        var platformRole = st.User.FindFirst("platform_role")?.Value ?? "";
+        _esAdmin = string.Equals(tenantRole, "Owner", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(tenantRole, "Admin", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(rol, "Administrador", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(platformRole, "SuperAdmin", StringComparison.OrdinalIgnoreCase);
+        var perms = st.User.FindFirst("perms")?.Value;
+        var tienePermiso = !string.IsNullOrEmpty(perms)
+            && perms.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Any(p => string.Equals(p.Trim(), PermisosUsuario.BitacoraIa, StringComparison.OrdinalIgnoreCase));
+        _puede = _esAdmin || tienePermiso;
+        _actor = Guid.TryParse(st.User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var g) ? g : Guid.Empty;
+    }
+
+    private BitacoraFiltro Filtro() => new(
+        _fDesde is { } d ? DateOnly.FromDateTime(d) : null,
+        _fHasta is { } h ? DateOnly.FromDateTime(h) : null,
+        string.IsNullOrWhiteSpace(_fResultado) ? null : _fResultado,
+        string.IsNullOrWhiteSpace(_fOrigen) ? null : _fOrigen,
+        _fProfesional, _fHc, _fFormato, _fSoloAlertas, _fSoloPulgarAbajo);
+
+    private async Task CargarAsync()
+    {
+        _cargando = true;
+        _error = null;
+        try
+        {
+            // Cada llamada usa su propio contexto (factory): se pueden pedir en paralelo.
+            var f = Filtro();
+            var tResumen = Svc.ResumenAsync(_tenantId, f);
+            var tPagina = Svc.ListarHistoriasAsync(_tenantId, f, _page, PageSize);
+            await Task.WhenAll(tResumen, tPagina);
+            _resumen = tResumen.Result;
+            _pagina = tPagina.Result;
+        }
+        catch (Exception ex) { _error = "No se pudo cargar la bitacora: " + ex.Message; }
+        finally { _cargando = false; }
+    }
+
+    private async Task AplicarAsync() { _page = 1; await CargarAsync(); }
+
+    private async Task LimpiarAsync()
+    {
+        var hoy = DateTime.UtcNow.Add(Bogota).Date;
+        _fDesde = hoy; _fHasta = hoy;
+        _fResultado = ""; _fOrigen = ""; _fProfesional = null; _fHc = null; _fFormato = null;
+        _fSoloAlertas = false; _fSoloPulgarAbajo = false;
+        await AplicarAsync();
+    }
+
+    private async Task IrPaginaAsync(int p)
+    {
+        _page = Math.Max(1, p);
+        _cargando = true;
+        try { _pagina = await Svc.ListarHistoriasAsync(_tenantId, Filtro(), _page, PageSize); }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _cargando = false; }
+    }
+
+    private async Task FiltrarProfesionalAsync(string nombre)
+    {
+        _fProfesional = nombre == "(sin profesional)" ? null : nombre;
+        _tab = "hc";
+        await AplicarAsync();
+    }
+
+    private async Task AbrirDetalleAsync(Guid hcId)
+    {
+        _completa.Clear();
+        _tabCompleta.Clear();
+        try { _detalle = await Svc.DetalleHistoriaAsync(_tenantId, hcId.ToString()); }
+        catch (Exception ex) { _error = "No se pudo abrir la historia: " + ex.Message; }
+    }
+
+    private void CerrarDetalle() => _detalle = null;
+
+    private async Task CargarCompletaAsync(Guid logId)
+    {
+        var c = await Svc.CorridaAsync(_tenantId, logId);
+        if (c is not null) { _completa[logId] = c; }
+    }
+
+    private string TabDe(Guid id) => _tabCompleta.TryGetValue(id, out var t) ? t : TabsCompleta[0];
+
+    private static string? TextoCompleta(BitacoraCorridaCompletaDto c, string tab) => tab switch
+    {
+        "Instrucciones" => c.SystemPrompt,
+        "Contexto enviado" => c.ContextoEnviado,
+        "HC legible" => c.CamposLegiblesJson,
+        "Tools" => c.ToolsJson,
+        _ => c.RespuestaCruda,
+    };
+
+    private async Task CopiarAsync(string? texto)
+    {
+        if (string.IsNullOrEmpty(texto)) { return; }
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", texto);
+            _copiado = true;
+        }
+        catch { }
+    }
+
+    // -- API --
+    private async Task AbrirApiAsync()
+    {
+        _tab = "api";
+        _copiado = false;
+        _api = await Svc.GetApiAsync(_tenantId);
+    }
+
+    private async Task RegenerarAsync()
+    {
+        if (!_esAdmin) { return; }
+        if (_api is { HasKey: true }
+            && !await JS.InvokeAsync<bool>("confirm", "La llave actual dejara de funcionar. Generar una nueva?"))
+        {
+            return;
+        }
+        _busy = true;
+        try { _api = await Svc.RegenerarApiAsync(_tenantId, _actor); _verLlave = true; }
+        finally { _busy = false; }
+    }
+
+    private async Task ToggleApiAsync()
+    {
+        if (!_esAdmin || _api is null) { return; }
+        _busy = true;
+        try { _api = await Svc.SetApiHabilitadaAsync(_tenantId, !_api.IsEnabled, _actor); }
+        finally { _busy = false; }
+    }
+
+    private string EjemploApi()
+    {
+        var b = Nav.BaseUri.TrimEnd('/') + "/api/bitacora-ia";
+        return $@"Header: X-Api-Key: <llave>
+
+GET {b}/                      indice de la API (endpoints, filtros, alertas)
+GET {b}/resumen?desde=2026-11-26&hasta=2026-11-26
+GET {b}/historias?desde=2026-11-26&soloAlertas=true&page=1&size=50
+GET {b}/historias/HC-033421    intentos de la HC + comparacion entre intentos
+GET {b}/corridas?desde=2026-11-26&resultado=Rechazado
+GET {b}/corridas/<id>          corrida completa (prompt, contexto, HC legible, tools, respuesta)
+
+Filtros: desde, hasta (dia local), resultado (Aprobado|Rechazado|Neutral|Fallida), origen (Cierre|Revision),
+profesional, hc (HC-000123 | documento del paciente), formato, soloAlertas, soloPulgarAbajo
+
+Ejemplo (PowerShell):
+Invoke-RestMethod -Uri ""{b}/historias?soloAlertas=true"" -Headers @{{ ""X-Api-Key"" = ""<llave>"" }}";
+    }
+
+    private static string Enmascarar(string? k)
+        => string.IsNullOrEmpty(k) ? "" : k.Length <= 10 ? new string('*', k.Length) : k[..6] + new string('*', k.Length - 10) + k[^4..];
+
+    // -- formato --
+    private static string F(DateTimeOffset d) => d.ToOffset(Bogota).ToString("yyyy-MM-dd HH:mm");
+    private static string Pct(decimal? c) => c is decimal v ? (v * 100m).ToString("0") + "%" : "";
+    private static string Miles(long n) => n >= 1_000_000 ? (n / 1_000_000d).ToString("0.0") + "M" : n >= 1000 ? (n / 1000d).ToString("0.0") + "K" : n.ToString();
+    private static string ClaseRes(string? r) => (r ?? "").ToLowerInvariant();
+}

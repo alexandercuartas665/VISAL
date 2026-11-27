@@ -88,6 +88,7 @@ public static class NavMenuCatalog
         new("automatizaciones", "Automatizaciones", "automatizaciones", "rayo", "automatizaciones", "Infraestructura & IA"),
         new("metricas", "Metricas", "metricas", "grafico", "metricas", "Infraestructura & IA"),
         new("ai-usage", "Auditoria uso IA", "admin/ai-usage", "medidor", "admin.ai-usage", "Infraestructura & IA"),
+        new("bitacora-ia", "Bitacora auditor IA", "revision/bitacora-ia", "check-doc", "revision.bitacora-ia", "Infraestructura & IA"),
         new("cfg-voz", "Voz IA (llamadas)", "config/voz-ia", "telefono", "cfg-voz", "Infraestructura & IA"),
 
         // ===== Intramural (programacion de agenda: turnos, agendas, calendario, novedades) =====

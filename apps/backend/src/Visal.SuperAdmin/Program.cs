@@ -709,6 +709,88 @@ app.MapPost("/api/public/leads", async (
         : Results.Json(new { ok = false, error = result.Error }, statusCode: 400);
 }).AllowAnonymous().DisableAntiforgery();
 
+// IMP-72: API de SOLO LECTURA de la bitacora del auditor IA (revision_agente_logs). Auth por la
+// llave del modulo /revision/bitacora-ia (header X-Api-Key), distinta a la de leads. Cada consulta
+// queda en auditoria (endpoint + parametros, sin datos). Limite: 120 consultas/min por llave.
+// Devuelve datos clinicos completos (decision del usuario): la llave solo la genera Owner/Admin.
+var bitacoraApi = app.MapGroup("/api/bitacora-ia").AllowAnonymous().DisableAntiforgery();
+bitacoraApi.AddEndpointFilter(async (ctx, next) =>
+{
+    var http = ctx.HttpContext;
+    var key = http.Request.Headers["X-Api-Key"].ToString();
+    if (string.IsNullOrWhiteSpace(key))
+    {
+        return Results.Json(new { error = "Falta el header X-Api-Key." }, statusCode: 401);
+    }
+    var cache = http.RequestServices.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>();
+    var keyHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(key.Trim())))[..16];
+    var rlKey = $"bitacora-ia-rl:{keyHash}:{DateTimeOffset.UtcNow:yyyyMMddHHmm}";
+    var count = cache.TryGetValue(rlKey, out var existing) && existing is int c ? c : 0;
+    if (count >= 120) { return Results.Json(new { error = "Demasiadas consultas; espera un minuto." }, statusCode: 429); }
+    using (var rlEntry = cache.CreateEntry(rlKey))
+    {
+        rlEntry.Value = count + 1;
+        rlEntry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(2);
+    }
+    var svc = http.RequestServices.GetRequiredService<Visal.Application.Revision.Bitacora.IBitacoraIaService>();
+    var tenantId = await svc.ResolverLlaveAsync(key, http.Request.Path.Value ?? "", http.Request.QueryString.Value, http.RequestAborted);
+    if (tenantId is null)
+    {
+        return Results.Json(new { error = "Llave invalida o deshabilitada." }, statusCode: 401);
+    }
+    http.Items["bitacora-ia-tenant"] = tenantId.Value;
+    return await next(ctx);
+});
+static Guid BitacoraTenant(HttpContext http) => (Guid)http.Items["bitacora-ia-tenant"]!;
+static Visal.Application.Revision.Bitacora.BitacoraFiltro BitacoraFiltroDe(HttpRequest r)
+{
+    string? Q(string k) => r.Query.TryGetValue(k, out var v) && !string.IsNullOrWhiteSpace(v) ? v.ToString() : null;
+    DateOnly? D(string k) => DateOnly.TryParse(Q(k), System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null;
+    bool B(string k) => Q(k) is string x && (x == "1" || x.Equals("true", StringComparison.OrdinalIgnoreCase));
+    return new Visal.Application.Revision.Bitacora.BitacoraFiltro(
+        D("desde"), D("hasta"), Q("resultado"), Q("origen"), Q("profesional"), Q("hc"), Q("formato"),
+        B("soloAlertas"), B("soloPulgarAbajo"));
+}
+static int BitacoraInt(HttpRequest r, string k, int def) => int.TryParse(r.Query[k], out var n) ? n : def;
+
+// Indice: que endpoints hay y que parametros aceptan (para descubrir la API sin documentacion aparte).
+bitacoraApi.MapGet("/", () => Results.Json(new
+{
+    api = "Bitacora del auditor IA (solo lectura)",
+    filtros = "desde, hasta (yyyy-MM-dd, dia local Colombia), resultado (Aprobado|Rechazado|Neutral|Fallida), origen (Cierre|Revision), profesional, hc (HC-000123 | consecutivo | documento paciente | id), formato, soloAlertas, soloPulgarAbajo",
+    endpoints = new[]
+    {
+        "GET /api/bitacora-ia/resumen?{filtros}",
+        "GET /api/bitacora-ia/historias?{filtros}&page=1&size=50   (agrupado por HC con senales de incoherencia)",
+        "GET /api/bitacora-ia/historias/{hc}   (intentos de la HC + comparacion entre intentos)",
+        "GET /api/bitacora-ia/corridas?{filtros}&page=1&size=50   (corridas sueltas, sin textos pesados)",
+        "GET /api/bitacora-ia/corridas/{id}   (corrida completa: prompt, contexto enviado, HC legible, tools, respuesta cruda)",
+    },
+    alertas = new
+    {
+        NuevoSinCambio = "Incoherencia: hallazgo nuevo sobre algo que no cambio (no lo marco en intentos anteriores)",
+        ContradiceSugerencia = "Incoherencia: vuelve a marcar un campo donde el profesional copio su propia sugerencia",
+        RepiteTrasCorregir = "Para revisar (no cuenta como incoherencia): insiste en el hallazgo aunque el campo se corrigio",
+        nota = "senales.total = NuevoSinCambio + ContradiceSugerencia",
+    },
+}));
+bitacoraApi.MapGet("/resumen", async (HttpContext http, Visal.Application.Revision.Bitacora.IBitacoraIaService svc, CancellationToken ct)
+    => Results.Json(await svc.ResumenAsync(BitacoraTenant(http), BitacoraFiltroDe(http.Request), ct)));
+bitacoraApi.MapGet("/historias", async (HttpContext http, Visal.Application.Revision.Bitacora.IBitacoraIaService svc, CancellationToken ct)
+    => Results.Json(await svc.ListarHistoriasAsync(BitacoraTenant(http), BitacoraFiltroDe(http.Request),
+        BitacoraInt(http.Request, "page", 1), BitacoraInt(http.Request, "size", 50), ct)));
+bitacoraApi.MapGet("/historias/{hc}", async (string hc, HttpContext http, Visal.Application.Revision.Bitacora.IBitacoraIaService svc, CancellationToken ct)
+    => await svc.DetalleHistoriaAsync(BitacoraTenant(http), hc, ct) is { } d
+        ? Results.Json(d)
+        : Results.Json(new { error = "No hay corridas del auditor IA para esa historia." }, statusCode: 404));
+bitacoraApi.MapGet("/corridas", async (HttpContext http, Visal.Application.Revision.Bitacora.IBitacoraIaService svc, CancellationToken ct)
+    => Results.Json(await svc.ListarCorridasAsync(BitacoraTenant(http), BitacoraFiltroDe(http.Request),
+        BitacoraInt(http.Request, "page", 1), BitacoraInt(http.Request, "size", 50), ct)));
+bitacoraApi.MapGet("/corridas/{id:guid}", async (Guid id, HttpContext http, Visal.Application.Revision.Bitacora.IBitacoraIaService svc, CancellationToken ct)
+    => await svc.CorridaAsync(BitacoraTenant(http), id, ct) is { } d
+        ? Results.Json(d)
+        : Results.Json(new { error = "Corrida no encontrada." }, statusCode: 404));
+
 // Webhook publico de formularios web (WordPress: Contactanos + PQRS). El token va EN LA URL
 // porque el webhook de Elementor no envia headers custom de forma fiable; identifica y autentica
 // al tenant (TenantFormWebhookConfig, secreto distinto del API key de leads). Crea una tarjeta en

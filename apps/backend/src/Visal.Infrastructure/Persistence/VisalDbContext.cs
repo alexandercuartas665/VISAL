@@ -36,6 +36,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
     public DbSet<EmailConfig> EmailConfigs => Set<EmailConfig>();
     public DbSet<GoogleAuthConfig> GoogleAuthConfigs => Set<GoogleAuthConfig>();
     public DbSet<TenantApiConfig> TenantApiConfigs => Set<TenantApiConfig>();
+    public DbSet<BitacoraIaApiConfig> BitacoraIaApiConfigs => Set<BitacoraIaApiConfig>();
     public DbSet<TenantFormWebhookConfig> TenantFormWebhookConfigs => Set<TenantFormWebhookConfig>();
     public DbSet<FormWebhookEvent> FormWebhookEvents => Set<FormWebhookEvent>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
@@ -406,6 +407,13 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         });
 
         modelBuilder.Entity<TenantApiConfig>(b =>
+        {
+            b.Property(x => x.ApiKeyHash).HasMaxLength(80);
+            b.HasIndex(x => x.ApiKeyHash);
+            b.HasIndex(x => x.TenantId).IsUnique();
+        });
+
+        modelBuilder.Entity<BitacoraIaApiConfig>(b =>
         {
             b.Property(x => x.ApiKeyHash).HasMaxLength(80);
             b.HasIndex(x => x.ApiKeyHash);
@@ -1166,6 +1174,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
         modelBuilder.Entity<RevisionAgenteLog>(b =>
         {
             b.Property(x => x.AgenteCodigo).HasMaxLength(120).IsRequired();
+            b.Property(x => x.Origen).HasMaxLength(20);
             b.Property(x => x.Proveedor).HasMaxLength(60);
             b.Property(x => x.Modelo).HasMaxLength(120);
             b.Property(x => x.Resultado).HasMaxLength(20);
@@ -1182,6 +1191,7 @@ public class VisalDbContext : DbContext, IApplicationDbContext, IDataProtectionK
             b.Property(x => x.FeedbackComentario).HasColumnType("text");
             b.HasIndex(x => new { x.TenantId, x.RevisionClinicaId });
             b.HasIndex(x => x.HistoriaClinicaId);
+            b.HasIndex(x => new { x.TenantId, x.CreatedAt });
         });
 
         modelBuilder.Entity<TenantUserTipoCoordinado>(b =>

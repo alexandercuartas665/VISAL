@@ -2166,6 +2166,63 @@ namespace Visal.Infrastructure.Persistence.Migrations
                     b.ToTable("autorizacion_tokens", (string)null);
                 });
 
+            modelBuilder.Entity("Visal.Domain.Entities.BitacoraIaApiConfig", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ApiKeyEncrypted")
+                        .HasColumnType("text")
+                        .HasColumnName("api_key_encrypted");
+
+                    b.Property<string>("ApiKeyHash")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)")
+                        .HasColumnName("api_key_hash");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_enabled");
+
+                    b.Property<DateTimeOffset?>("LastUsedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("last_used_at");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset?>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<Guid?>("UpdatedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("updated_by");
+
+                    b.HasKey("Id")
+                        .HasName("pk_bitacora_ia_api_configs");
+
+                    b.HasIndex("ApiKeyHash")
+                        .HasDatabaseName("ix_bitacora_ia_api_configs_api_key_hash");
+
+                    b.HasIndex("TenantId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_bitacora_ia_api_configs_tenant_id");
+
+                    b.ToTable("bitacora_ia_api_configs", (string)null);
+                });
+
             modelBuilder.Entity("Visal.Domain.Entities.CatalogoPaciente", b =>
                 {
                     b.Property<Guid>("Id")
@@ -9667,6 +9724,11 @@ namespace Visal.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean")
                         .HasColumnName("ok");
 
+                    b.Property<string>("Origen")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("origen");
+
                     b.Property<string>("Proveedor")
                         .HasMaxLength(60)
                         .HasColumnType("character varying(60)")
@@ -9722,6 +9784,9 @@ namespace Visal.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("HistoriaClinicaId")
                         .HasDatabaseName("ix_revision_agente_logs_historia_clinica_id");
+
+                    b.HasIndex("TenantId", "CreatedAt")
+                        .HasDatabaseName("ix_revision_agente_logs_tenant_id_created_at");
 
                     b.HasIndex("TenantId", "RevisionClinicaId")
                         .HasDatabaseName("ix_revision_agente_logs_tenant_id_revision_clinica_id");

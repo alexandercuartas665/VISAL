@@ -198,6 +198,8 @@ public static class DependencyInjection
         services.AddScoped<Revision.Ia.IRevisionMcpToolsService, Revision.Ia.RevisionMcpToolsService>();
         // Orquestador del agente REVISOR CLINICO IA (Ola 5).
         services.AddScoped<Revision.Ia.IPreRevisionIaService, Revision.Ia.PreRevisionIaService>();
+        // IMP-72: bitacora del auditor IA (modulo + API de solo lectura).
+        services.AddScoped<Revision.Bitacora.IBitacoraIaService, Revision.Bitacora.BitacoraIaService>();
         // Metricas del dashboard Kanban de /ordenes (Ola 7 RC7a).
         services.AddScoped<Revision.IRevisionDashboardService, Revision.RevisionDashboardService>();
         // Notificador WA al profesional cuando su HC es rechazada (Ola 8 RC8c).

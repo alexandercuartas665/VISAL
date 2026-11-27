@@ -49,6 +49,10 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         _audit = audit;
     }
 
+    /// <summary>IMP-72: valores de RevisionAgenteLog.Origen.</summary>
+    public const string OrigenCierre = "Cierre";
+    public const string OrigenRevision = "Revision";
+
     public async Task<PreRevisionIaResult> EjecutarAsync(Guid revisionClinicaId, Guid? agenteId = null, CancellationToken ct = default)
     {
         Guid hcId;
@@ -177,7 +181,8 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
     /// <summary>Registra en el ciclo de revision el resultado de una auditoria YA hecha: evento
     /// PreRevisionAgente, log completo del agente y adopcion automatica (si la politica lo permite).
     /// Si la auditoria fallo, deja el log del fallo (cuando alcanzo a llamar al proveedor).</summary>
-    private async Task<PreRevisionIaResult> RegistrarAuditoriaAsync(Guid revisionClinicaId, AuditoriaIaResultado a, CancellationToken ct)
+    private async Task<PreRevisionIaResult> RegistrarAuditoriaAsync(Guid revisionClinicaId, AuditoriaIaResultado a, CancellationToken ct,
+        string origen = OrigenRevision)
     {
         using var db = _dbFactory.Create();
         var revision = await db.RevisionesClinica.AsNoTracking()
@@ -190,7 +195,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             {
                 await GuardarAgenteLogAsync(db, revision.TenantId, revision.Id, revision.HistoriaClinicaId, a.Traza,
                     ok: false, error: a.Error, resultado: null, confianza: null,
-                    a.InputTokens, a.OutputTokens, ct);
+                    a.InputTokens, a.OutputTokens, ct, origen: origen);
             }
             return Err(a.Error ?? "La auditoria no produjo veredicto.") with { InputTokens = a.InputTokens, OutputTokens = a.OutputTokens };
         }
@@ -223,7 +228,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             await GuardarAgenteLogAsync(db, revision.TenantId, revision.Id, revision.HistoriaClinicaId, a.Traza,
                 ok: true, error: null, resultado: resultado.ToString(), confianza: a.Confianza,
                 a.InputTokens, a.OutputTokens, ct,
-                nota: a.Nota, hallazgos: a.Hallazgos, sugerencias: a.Sugerencias);
+                nota: a.Nota, hallazgos: a.Hallazgos, sugerencias: a.Sugerencias, origen: origen);
         }
 
         // Ola 6 RC6c — Adopcion automatica del veredicto agente.
@@ -421,7 +426,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         // Abre (o reusa) el ciclo de revision de la HC ya cerrada y registra el MISMO resultado
         // que vio el profesional: Ordenes Clinicas llega con el veredicto cargado, sin reprocesar.
         var rev = await _revision.SolicitarAsync(new SolicitarRevisionCmd(historiaClinicaId, actor, null), ct);
-        var res = await RegistrarAuditoriaAsync(rev.Id, auditoria, ct);
+        var res = await RegistrarAuditoriaAsync(rev.Id, auditoria, ct, OrigenCierre);
 
         await AuditarEventoAsync(actor, historiaClinicaId,
             cerradaPeseARechazo ? "historia-clinica.cerrar-pese-rechazo-ia" : "historia-clinica.auditoria-ia-cierre",
@@ -448,7 +453,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         return await GuardarAgenteLogAsync(db, tenantId.Value, null, auditoria.HistoriaClinicaId, auditoria.Traza,
             ok: true, error: null, resultado: auditoria.Resultado.ToString(), confianza: auditoria.Confianza,
             auditoria.InputTokens, auditoria.OutputTokens, ct,
-            nota: auditoria.Nota, hallazgos: auditoria.Hallazgos, sugerencias: auditoria.Sugerencias);
+            nota: auditoria.Nota, hallazgos: auditoria.Hallazgos, sugerencias: auditoria.Sugerencias, origen: OrigenCierre);
     }
 
     public async Task<bool> RegistrarFeedbackAsync(Guid logId, bool util, string? comentario, Guid actor, CancellationToken ct = default)
@@ -814,7 +819,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         bool ok, string? error, string? resultado, decimal? confianza,
         int tokensIn, int tokensOut, CancellationToken ct,
         string? nota = null, IReadOnlyList<string>? hallazgos = null,
-        IReadOnlyList<SugerenciaTexto>? sugerencias = null)
+        IReadOnlyList<SugerenciaTexto>? sugerencias = null, string origen = OrigenRevision)
     {
         var contexto = traza.Contexto;
         try
@@ -836,6 +841,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
                 RevisionClinicaId = revisionId,
                 HistoriaClinicaId = historiaClinicaId,
                 AgenteCodigo = traza.AgenteNombre,
+                Origen = origen,
                 Proveedor = traza.Proveedor,
                 Modelo = traza.Modelo,
                 Ok = ok,

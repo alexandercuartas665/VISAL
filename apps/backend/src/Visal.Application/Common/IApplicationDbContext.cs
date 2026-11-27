@@ -174,6 +174,7 @@ public interface IApplicationDbContext : System.IDisposable, System.IAsyncDispos
     DbSet<EmailConfig> EmailConfigs { get; }
     DbSet<GoogleAuthConfig> GoogleAuthConfigs { get; }
     DbSet<TenantApiConfig> TenantApiConfigs { get; }
+    DbSet<BitacoraIaApiConfig> BitacoraIaApiConfigs { get; }
     DbSet<TenantFormWebhookConfig> TenantFormWebhookConfigs { get; }
     DbSet<FormWebhookEvent> FormWebhookEvents { get; }
     DbSet<PasswordResetToken> PasswordResetTokens { get; }

@@ -55,6 +55,9 @@ public static class ModuloCatalogo
         new("formularios.versionado", "Formularios - Historial y restaurar versiones", "Operacion Clinica"),
         new("lineas", "Lineas WhatsApp", "Infraestructura & IA"),
         new("agentes", "Agentes IA", "Infraestructura & IA"),
+        // IMP-72: bitacora del auditor IA (que reviso, intentos, hallazgos, contexto). Contiene datos
+        // clinicos. Owner/Admin lo tienen implicito; la llave de la API solo la generan ellos.
+        new(PermisosUsuario.BitacoraIa, "Bitacora del auditor IA", "Infraestructura & IA"),
         new("automatizaciones", "Automatizaciones", "Infraestructura & IA"),
         new("metricas", "Metricas", "Infraestructura & IA"),
         new("cfg-aseguradoras", "Entidades Aseguradoras", "Configuracion del Sistema"),

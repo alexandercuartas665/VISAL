@@ -19,6 +19,11 @@ public class RevisionAgenteLog : TenantEntity
 
     /// <summary>Codigo/nombre del agente (ej. "REVISOR CLINICO IA").</summary>
     public string AgenteCodigo { get; set; } = null!;
+
+    /// <summary>IMP-72: de donde salio la corrida. "Cierre" = auditoria al cerrar la HC en Atencion;
+    /// "Revision" = Ordenes Clinicas / worker / revision masiva. Null en filas viejas = Revision.
+    /// Quien la disparo es CreatedBy.</summary>
+    public string? Origen { get; set; }
     public string? Proveedor { get; set; }
     public string? Modelo { get; set; }
 

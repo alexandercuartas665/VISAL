@@ -17,6 +17,10 @@ public static class PermisosUsuario
     /// <summary>Permiso del modulo /autorizaciones (generar tokens, aprobar solicitudes).</summary>
     public const string Autorizaciones = "autorizaciones";
 
+    /// <summary>IMP-72: modulo /revision/bitacora-ia (bitacora del auditor IA). La llave de la API
+    /// solo la genera Owner/Admin.</summary>
+    public const string BitacoraIa = "revision.bitacora-ia";
+
     /// <summary>
     /// True si el usuario tiene el permiso <paramref name="modulo"/> (Ver) en su rol, o es
     /// Owner/Admin del tenant. Usuario sin fila en tenant_users (super admin de plataforma o

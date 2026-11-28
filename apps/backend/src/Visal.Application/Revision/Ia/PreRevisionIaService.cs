@@ -83,42 +83,9 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             .FirstOrDefaultAsync(ct);
         if (hcExiste is null) { return AuditoriaIaResultado.Fallo(historiaClinicaId, "La historia clinica no existe."); }
 
-        // Resolucion del agente:
-        //   - Si viene agenteId (usuario eligio en el selector) buscamos por Id.
-        //     El global query filter por tenant garantiza que no se pueda usar
-        //     un agente de otro tenant aunque el Id se conozca.
-        //   - Sin agenteId (triggers automaticos, cierre, botones legacy) caemos al
-        //     canonico REVISOR CLINICO IA por nombre.
-        AiAgent? agent;
-        if (agenteId is Guid aid)
-        {
-            agent = await db.AiAgents.AsNoTracking().FirstOrDefaultAsync(a => a.Id == aid, ct);
-            if (agent is null) { return AuditoriaIaResultado.Fallo(historiaClinicaId, "El agente seleccionado no existe o no pertenece a este tenant."); }
-            if (!agent.IsActive) { return AuditoriaIaResultado.Fallo(historiaClinicaId, $"El agente '{agent.Name}' esta apagado."); }
-        }
-        else
-        {
-            agent = await db.AiAgents.AsNoTracking()
-                .FirstOrDefaultAsync(a => a.Name == IPreRevisionIaService.AgenteNombre, ct);
-            if (agent is null) { return AuditoriaIaResultado.Fallo(historiaClinicaId, $"No hay agente '{IPreRevisionIaService.AgenteNombre}' configurado para este tenant."); }
-            if (!agent.IsActive) { return AuditoriaIaResultado.Fallo(historiaClinicaId, $"El agente '{IPreRevisionIaService.AgenteNombre}' esta apagado."); }
-        }
-
-        var providerCfg = await db.AiProviderConfigs.AsNoTracking()
-            .FirstOrDefaultAsync(c => c.Provider == agent.Provider, ct);
-        if (providerCfg is null || !providerCfg.IsEnabled || string.IsNullOrWhiteSpace(providerCfg.ApiKeyEncrypted))
-        {
-            return AuditoriaIaResultado.Fallo(historiaClinicaId, $"El proveedor {agent.Provider} no esta habilitado en la plataforma.");
-        }
-
-        string apiKey;
-        try { apiKey = _secretProtector.Unprotect(providerCfg.ApiKeyEncrypted); }
-        catch { return AuditoriaIaResultado.Fallo(historiaClinicaId, "La API key del proveedor esta cifrada con una version anterior. Vuelve a guardarla en Servidores de IA."); }
-
-        var meta = AiProviderCatalog.For(agent.Provider);
-        var model = !string.IsNullOrWhiteSpace(agent.Model) ? agent.Model!
-            : !string.IsNullOrWhiteSpace(providerCfg.Model) ? providerCfg.Model!
-            : meta.DefaultModel;
+        var (ag, errAgente) = await ResolverAgenteAsync(db, agenteId, ct);
+        if (ag is null) { return AuditoriaIaResultado.Fallo(historiaClinicaId, errAgente!); }
+        var (agent, apiKey, model, baseUrl) = (ag.Agent, ag.ApiKey, ag.Model, ag.BaseUrl);
 
         var quota = await _usage.GetQuotaAsync(ct);
         if (quota.Exceeded && quota.Hard)
@@ -160,23 +127,13 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             return Reutilizar(historiaClinicaId, previo);
         }
 
-        var instruccion = "Revisa el 'documento_a_revisar' del siguiente JSON y emite tu veredicto SOLO sobre ese documento. "
-                        + "El 'historial_del_paciente' son historias ANTERIORES (solo contexto, no se califican). ";
-        if (memoria is not null)
-        {
-            instruccion += "'revision_anterior' es TU concepto previo sobre este mismo documento y los campos que el profesional "
-                         + "cambio desde entonces: aplica las reglas de REVISION ANTERIOR. ";
-        }
-        if (opc.AlCerrar)
-        {
-            instruccion += "El profesional esta CERRANDO esta historia en este momento (ver 'momento'). ";
-        }
+        var instruccion = ArmarInstruccion(memoria is not null, opc.AlCerrar);
         var turns = new List<AiChatTurn>
         {
             new("user", instruccion + "Responde SOLO con el JSON pedido en el system prompt.\n\n" + contextoJson),
         };
 
-        var result = await CompleteWithRetryAsync(agent, apiKey, providerCfg.BaseUrl, model, systemPrompt, turns, ct);
+        var result = await CompleteWithRetryAsync(agent, apiKey, baseUrl, model, systemPrompt, turns, ct);
 
         await _usage.RecordAsync(agent.Id, agent.Provider, model, result.InputTokens, result.OutputTokens, "revision", result.Ok, ct);
 
@@ -206,6 +163,151 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             Traza = traza,
             Observaciones = parsed.Observaciones,
         };
+    }
+
+    private sealed record AgenteResuelto(AiAgent Agent, string ApiKey, string? BaseUrl, string Model);
+
+    /// <summary>Agente (elegido o el canonico REVISOR CLINICO IA), su proveedor y la llave. El filtro
+    /// global por tenant impide usar un agente de otro tenant aunque se conozca su Id.</summary>
+    private async Task<(AgenteResuelto? Agente, string? Error)> ResolverAgenteAsync(IApplicationDbContext db, Guid? agenteId, CancellationToken ct)
+    {
+        AiAgent? agent;
+        if (agenteId is Guid aid)
+        {
+            agent = await db.AiAgents.AsNoTracking().FirstOrDefaultAsync(a => a.Id == aid, ct);
+            if (agent is null) { return (null, "El agente seleccionado no existe o no pertenece a este tenant."); }
+            if (!agent.IsActive) { return (null, $"El agente '{agent.Name}' esta apagado."); }
+        }
+        else
+        {
+            agent = await db.AiAgents.AsNoTracking()
+                .FirstOrDefaultAsync(a => a.Name == IPreRevisionIaService.AgenteNombre, ct);
+            if (agent is null) { return (null, $"No hay agente '{IPreRevisionIaService.AgenteNombre}' configurado para este tenant."); }
+            if (!agent.IsActive) { return (null, $"El agente '{IPreRevisionIaService.AgenteNombre}' esta apagado."); }
+        }
+
+        var providerCfg = await db.AiProviderConfigs.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Provider == agent.Provider, ct);
+        if (providerCfg is null || !providerCfg.IsEnabled || string.IsNullOrWhiteSpace(providerCfg.ApiKeyEncrypted))
+        {
+            return (null, $"El proveedor {agent.Provider} no esta habilitado en la plataforma.");
+        }
+
+        string apiKey;
+        try { apiKey = _secretProtector.Unprotect(providerCfg.ApiKeyEncrypted); }
+        catch { return (null, "La API key del proveedor esta cifrada con una version anterior. Vuelve a guardarla en Servidores de IA."); }
+
+        var meta = AiProviderCatalog.For(agent.Provider);
+        var model = !string.IsNullOrWhiteSpace(agent.Model) ? agent.Model!
+            : !string.IsNullOrWhiteSpace(providerCfg.Model) ? providerCfg.Model!
+            : meta.DefaultModel;
+        return (new AgenteResuelto(agent, apiKey, providerCfg.BaseUrl, model), null);
+    }
+
+    /// <summary>Mensaje de usuario que acompana al JSON de contexto.</summary>
+    internal static string ArmarInstruccion(bool conMemoria, bool alCerrar)
+    {
+        var instruccion = "Revisa el 'documento_a_revisar' del siguiente JSON y emite tu veredicto SOLO sobre ese documento. "
+                        + "El 'historial_del_paciente' son historias ANTERIORES (solo contexto, no se califican). ";
+        if (conMemoria)
+        {
+            instruccion += "'revision_anterior' es TU concepto previo sobre este mismo documento y los campos que el profesional "
+                         + "cambio desde entonces: aplica las reglas de REVISION ANTERIOR. ";
+        }
+        if (alCerrar)
+        {
+            instruccion += "El profesional esta CERRANDO esta historia en este momento (ver 'momento'). ";
+        }
+        return instruccion;
+    }
+
+    // ------------- Reproceso: misma entrada, instrucciones actuales (experimento) -------------
+
+    public const string FuenteUsoReproceso = "revision-reproceso";
+
+    public async Task<ReprocesoIaResultado> ReprocesarCorridaAsync(Guid corridaId, OpcionesReproceso? opciones = null, CancellationToken ct = default)
+    {
+        var opc = opciones ?? new OpcionesReproceso();
+        using var db = _dbFactory.Create();
+        var log = await db.RevisionAgenteLogs.AsNoTracking()
+            .Where(l => l.Id == corridaId)
+            .Select(l => new { l.HistoriaClinicaId, l.Ok, l.Origen, l.Resultado, l.Confianza, l.Nota, l.HallazgosJson, l.ContextoEnviado })
+            .FirstOrDefaultAsync(ct);
+        if (log is null) { return new ReprocesoIaResultado(corridaId, Guid.Empty, false, "La corrida no existe.", null, null); }
+
+        var (h0, o0) = HallazgosIa.Separar(log.HallazgosJson);
+        var original = new ConceptoIa(log.Ok ? log.Resultado : "Fallida", log.Confianza, log.Nota, h0, o0);
+        ReprocesoIaResultado Falla(string error, int tin = 0, int tout = 0, string? modelo = null, string? cruda = null)
+            => new(corridaId, log.HistoriaClinicaId, false, error, original, null, tin, tout, modelo, cruda);
+
+        var alCerrar = string.Equals(log.Origen, OrigenCierre, StringComparison.OrdinalIgnoreCase);
+        var contextoJson = PrepararContextoReproceso(log.ContextoEnviado, opc.ConMemoria, alCerrar, out var conMemoria);
+        if (contextoJson is null)
+        {
+            return Falla("La corrida no guardo el contexto en el formato actual (es anterior a la bitacora estructurada); no se puede reprocesar.");
+        }
+
+        var (ag, errAgente) = await ResolverAgenteAsync(db, null, ct);
+        if (ag is null) { return Falla(errAgente!); }
+
+        var quota = await _usage.GetQuotaAsync(ct);
+        if (quota.Exceeded && quota.Hard)
+        {
+            return Falla($"Alcanzaste el limite de tokens de IA de tu plan este mes ({quota.MonthlyLimitTokens:N0}).");
+        }
+
+        var instrucciones = string.IsNullOrWhiteSpace(opc.Instrucciones) ? ag.Agent.SystemPrompt : opc.Instrucciones!;
+        var systemPrompt = ArmarSystemPrompt(instrucciones);
+        var turns = new List<AiChatTurn>
+        {
+            new("user", ArmarInstruccion(conMemoria, alCerrar) + "Responde SOLO con el JSON pedido en el system prompt.\n\n" + contextoJson),
+        };
+
+        var result = await CompleteWithRetryAsync(ag.Agent, ag.ApiKey, ag.BaseUrl, ag.Model, systemPrompt, turns, ct);
+        await _usage.RecordAsync(ag.Agent.Id, ag.Agent.Provider, ag.Model, result.InputTokens, result.OutputTokens,
+            FuenteUsoReproceso, result.Ok, ct);
+
+        if (!result.Ok || string.IsNullOrWhiteSpace(result.Text))
+        {
+            return Falla(result.Error ?? "El proveedor no devolvio texto.", result.InputTokens, result.OutputTokens, ag.Model);
+        }
+
+        VeredictoParsed parsed;
+        try { parsed = ParseVeredicto(result.Text!); }
+        catch (Exception ex)
+        {
+            return Falla("No se pudo interpretar la respuesta del agente: " + ex.Message,
+                result.InputTokens, result.OutputTokens, ag.Model, result.Text);
+        }
+
+        var nuevo = new ConceptoIa(parsed.Resultado.ToString(), parsed.Confianza, parsed.Nota, parsed.Hallazgos, parsed.Observaciones);
+        return new ReprocesoIaResultado(corridaId, log.HistoriaClinicaId, true, null, original, nuevo,
+            result.InputTokens, result.OutputTokens, ag.Model, result.Text);
+    }
+
+    /// <summary>Contexto de una corrida guardada listo para reenviarlo: sin 'revision_anterior' (salvo
+    /// que se pida conservarlo) y con 'momento' si la corrida fue al cerrar. Null si el contexto no es
+    /// el JSON estructurado (corridas antiguas).</summary>
+    public static string? PrepararContextoReproceso(string? contextoEnviado, bool conMemoria, bool alCerrar, out bool tieneMemoria)
+    {
+        tieneMemoria = false;
+        if (string.IsNullOrWhiteSpace(contextoEnviado)) { return null; }
+        JsonObject raiz;
+        try
+        {
+            if (JsonNode.Parse(contextoEnviado) is not JsonObject o || o["documento_a_revisar"] is null) { return null; }
+            raiz = o;
+        }
+        catch (JsonException) { return null; }
+
+        if (!conMemoria) { raiz.Remove("revision_anterior"); }
+        tieneMemoria = raiz.ContainsKey("revision_anterior");
+        if (alCerrar && !raiz.ContainsKey("momento")) { raiz["momento"] = TextoMomentoCierre; }
+        return raiz.ToJsonString(new JsonSerializerOptions
+        {
+            WriteIndented = false,
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        });
     }
 
     // ------------- IMP-73: memoria entre intentos y reuso del resultado -------------
@@ -874,6 +976,10 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         RevisionMcpToolNames.ListNotasHc,
     };
 
+    /// <summary>Bloque 'momento' de las corridas al cerrar.</summary>
+    internal const string TextoMomentoCierre = "CIERRE: el profesional esta cerrando esta historia ahora mismo. Por eso su estado es "
+        + "'Abierta' y aun no tiene fecha de cierre; eso NO es hallazgo ni observacion.";
+
     /// <summary>
     /// Arma el mensaje al modelo como UN JSON con bloques separados e inequivocos:
     /// <c>documento_a_revisar</c> (el objeto de la revision), <c>datos_del_paciente</c> (contexto
@@ -937,8 +1043,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         };
         if (alCerrar)
         {
-            raiz["momento"] = "CIERRE: el profesional esta cerrando esta historia ahora mismo. Por eso su estado es "
-                            + "'Abierta' y aun no tiene fecha de cierre; eso NO es hallazgo ni observacion.";
+            raiz["momento"] = TextoMomentoCierre;
         }
         if (revisionAnterior is not null) { raiz["revision_anterior"] = revisionAnterior; }
 

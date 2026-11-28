@@ -902,6 +902,108 @@ public sealed class PreRevisionIaServiceTests
         Assert.DoesNotContain("puedes listar lo que validaste", p);
     }
 
+    // ---- Reproceso (experimento de instrucciones) ----
+
+    private const string BodyAprobadoConObs =
+        "{\"resultado\":\"Aprobado\",\"confianza\":0.9,\"nota\":\"Acredita la atencion\",\"hallazgos\":[]," +
+        "\"observaciones\":[\"Podria detallar la tolerancia\"],\"sugerencias\":[]}";
+
+    /// <summary>Dos intentos al cerrar: el segundo log lleva 'revision_anterior' y 'momento'.</summary>
+    private static async Task<(Fixture Fx, Guid LogId)> CorridaConMemoriaAsync()
+    {
+        var fx = await BuildAsync(TenantA, OkResponse(BodyRechazoConSugerencia), crearRevision: false,
+            estadoHc: HistoriaClinicaEstado.Abierta);
+        await SetValoresAsync(fx, "{\"evolucion\":\"texto copiado del turno anterior\"}");
+        var a1 = await fx.Svc.AuditarHcAsync(fx.HcId, null, default, OpcionesAuditoriaIa.Cierre);
+        await fx.Svc.GuardarLogIntentoCierreAsync(a1);
+        await SetValoresAsync(fx, "{\"evolucion\":\"otro texto\"}");
+        var a2 = await fx.Svc.AuditarHcAsync(fx.HcId, null, default, OpcionesAuditoriaIa.Cierre);
+        var log2 = await fx.Svc.GuardarLogIntentoCierreAsync(a2);
+        Assert.Contains("revision_anterior", fx.AiClient.LastUserMessage);
+        return (fx, log2!.Value);
+    }
+
+    [Fact]
+    public async Task Reproceso_reenvia_el_contexto_sin_memoria_y_no_escribe_logs()
+    {
+        var (fx, logId) = await CorridaConMemoriaAsync();
+        var logsAntes = await fx.Db.RevisionAgenteLogs.CountAsync();
+        fx.AiClient.Siguiente = OkResponse(BodyAprobadoConObs, 300, 50);
+
+        var r = await fx.Svc.ReprocesarCorridaAsync(logId);
+
+        Assert.True(r.Ok, r.Error);
+        Assert.Equal(3, fx.AiClient.CantidadLlamadas);
+        Assert.Equal(fx.HcId, r.HistoriaClinicaId);
+        Assert.Equal("Rechazado", r.Original!.Resultado);
+        Assert.Equal("Aprobado", r.Nuevo!.Resultado);
+        Assert.Empty(r.Nuevo.Hallazgos);
+        Assert.Single(r.Nuevo.Observaciones);
+        Assert.Equal(300, r.InputTokens);
+        var msg = fx.AiClient.LastUserMessage!;
+        Assert.DoesNotContain("revision_anterior", msg);
+        Assert.Contains("\"documento_a_revisar\"", msg);
+        Assert.Contains("\"momento\"", msg);
+        Assert.Contains("CERRANDO", msg);
+        Assert.Equal(logsAntes, await fx.Db.RevisionAgenteLogs.CountAsync());
+        Assert.Equal(1, await fx.Db.AiUsageLogs.CountAsync(u => u.Source == PreRevisionIaService.FuenteUsoReproceso));
+    }
+
+    [Fact]
+    public async Task Reproceso_con_instrucciones_propias_y_memoria()
+    {
+        var (fx, logId) = await CorridaConMemoriaAsync();
+        var r = await fx.Svc.ReprocesarCorridaAsync(logId, new OpcionesReproceso("INSTRUCCIONES DE PRUEBA V9", ConMemoria: true));
+
+        Assert.True(r.Ok, r.Error);
+        Assert.Contains("INSTRUCCIONES DE PRUEBA V9", fx.AiClient.LastSystemPrompt);
+        Assert.Contains("REVISION ANTERIOR", fx.AiClient.LastSystemPrompt);   // el sufijo de codigo se conserva
+        Assert.Contains("revision_anterior", fx.AiClient.LastUserMessage);
+    }
+
+    [Fact]
+    public async Task Reproceso_de_corrida_antigua_u_otro_tenant_no_llama_al_proveedor()
+    {
+        var fx = await BuildAsync(TenantA, OkResponse(BodyAprobadoConObs), crearRevision: false,
+            estadoHc: HistoriaClinicaEstado.Abierta);
+        var antigua = new RevisionAgenteLog
+        {
+            TenantId = TenantA, HistoriaClinicaId = fx.HcId, AgenteCodigo = "REVISOR", Ok = true,
+            Resultado = "Rechazado", ContextoEnviado = "texto plano de una version anterior", CreatedAt = DateTimeOffset.UtcNow,
+        };
+        var ajena = new RevisionAgenteLog
+        {
+            TenantId = TenantB, HistoriaClinicaId = fx.HcId, AgenteCodigo = "REVISOR", Ok = true,
+            Resultado = "Rechazado", ContextoEnviado = "{\"documento_a_revisar\":{}}", CreatedAt = DateTimeOffset.UtcNow,
+        };
+        fx.Db.RevisionAgenteLogs.AddRange(antigua, ajena);
+        await fx.Db.SaveChangesAsync();
+
+        var r1 = await fx.Svc.ReprocesarCorridaAsync(antigua.Id);
+        var r2 = await fx.Svc.ReprocesarCorridaAsync(ajena.Id);
+
+        Assert.False(r1.Ok);
+        Assert.Contains("formato actual", r1.Error);
+        Assert.False(r2.Ok);
+        Assert.Equal("La corrida no existe.", r2.Error);
+        Assert.Equal(0, fx.AiClient.CantidadLlamadas);
+    }
+
+    [Fact]
+    public void PrepararContextoReproceso_agrega_momento_solo_al_cerrar()
+    {
+        const string ctx = "{\"documento_a_revisar\":{\"a\":1},\"revision_anterior\":{\"resultado\":\"Rechazado\"}}";
+        var s1 = PreRevisionIaService.PrepararContextoReproceso(ctx, conMemoria: false, alCerrar: true, out var m1)!;
+        Assert.False(m1);
+        Assert.Contains("\"momento\"", s1);
+        Assert.DoesNotContain("revision_anterior", s1);
+
+        var s2 = PreRevisionIaService.PrepararContextoReproceso(ctx, conMemoria: true, alCerrar: false, out var m2)!;
+        Assert.True(m2);
+        Assert.DoesNotContain("\"momento\"", s2);
+        Assert.Null(PreRevisionIaService.PrepararContextoReproceso("{\"otro\":1}", false, false, out _));
+    }
+
     // ---- Fakes ----
 
     private sealed class FakeAiClient : IAiProviderClient

@@ -107,6 +107,8 @@ builder.Services.AddScoped<Visal.SuperAdmin.Facturacion.ITipologiaZipService, Vi
 builder.Services.AddSingleton<Visal.SuperAdmin.Facturacion.ITipologiaZipJobService, Visal.SuperAdmin.Facturacion.TipologiaZipJobService>();
 // Tokens de un solo uso para render de HC a PDF (Cuenta medica -> Formulario por tipo).
 builder.Services.AddSingleton<Visal.SuperAdmin.Facturacion.IHcPrintTokenStore, Visal.SuperAdmin.Facturacion.HcPrintTokenStore>();
+// Lotes de reproceso del auditor IA (API /api/bitacora-ia/reprocesos; en memoria del proceso).
+builder.Services.AddSingleton<Visal.SuperAdmin.Revision.ReprocesoIaJobs>();
 // Tunel de desarrollo real (cloudflared); reemplaza el no-op de Application.
 builder.Services.AddSingleton<Visal.Application.Tenancy.IDevTunnel, Visal.SuperAdmin.RealTime.CloudflaredTunnel>();
 // Storage de archivos servibles (wwwroot/uploads) para que servicios de Application
@@ -756,7 +758,7 @@ static int BitacoraInt(HttpRequest r, string k, int def) => int.TryParse(r.Query
 // Indice: que endpoints hay y que parametros aceptan (para descubrir la API sin documentacion aparte).
 bitacoraApi.MapGet("/", () => Results.Json(new
 {
-    api = "Bitacora del auditor IA (solo lectura)",
+    api = "Bitacora del auditor IA (lectura; solo /reprocesos consume tokens)",
     filtros = "desde, hasta (yyyy-MM-dd, dia local Colombia), resultado (Aprobado|Rechazado|Neutral|Fallida), origen (Cierre|Revision), profesional, hc (HC-000123 | consecutivo | documento paciente | id), formato, soloAlertas, soloPulgarAbajo",
     endpoints = new[]
     {
@@ -765,6 +767,9 @@ bitacoraApi.MapGet("/", () => Results.Json(new
         "GET /api/bitacora-ia/historias/{hc}   (intentos de la HC + comparacion entre intentos)",
         "GET /api/bitacora-ia/corridas?{filtros}&page=1&size=50   (corridas sueltas, sin textos pesados)",
         "GET /api/bitacora-ia/corridas/{id}   (corrida completa: prompt, contexto enviado, HC legible, tools, respuesta cruda)",
+        "POST /api/bitacora-ia/reprocesos   body {corridas:[ids], instrucciones?:texto, conMemoria?:false}   (reenvia el MISMO contexto con las instrucciones actuales o las indicadas; consume tokens; max 300; no toca la HC)",
+        "GET /api/bitacora-ia/reprocesos/{id}?crudo=1   (avance + matriz original -> nuevo + detalle por corrida)",
+        "DELETE /api/bitacora-ia/reprocesos/{id}   (cancela el lote en curso)",
     },
     alertas = new
     {
@@ -790,6 +795,24 @@ bitacoraApi.MapGet("/corridas/{id:guid}", async (Guid id, HttpContext http, Visa
     => await svc.CorridaAsync(BitacoraTenant(http), id, ct) is { } d
         ? Results.Json(d)
         : Results.Json(new { error = "Corrida no encontrada." }, statusCode: 404));
+
+// Reproceso (experimento de instrucciones): es la UNICA parte de esta API que consume tokens. Reenvia
+// el contexto guardado de cada corrida al agente; no escribe en la HC ni en el ciclo de revision.
+bitacoraApi.MapPost("/reprocesos", (Visal.SuperAdmin.Revision.ReprocesoIaBody body, HttpContext http, Visal.SuperAdmin.Revision.ReprocesoIaJobs jobs) =>
+{
+    var (lote, error) = jobs.Iniciar(BitacoraTenant(http), body.Corridas ?? new List<Guid>(), body.Instrucciones, body.ConMemoria);
+    return lote is null
+        ? Results.Json(new { error }, statusCode: 400)
+        : Results.Json(new { id = lote.Id, total = lote.Total, estado = lote.Estado }, statusCode: 202);
+});
+bitacoraApi.MapGet("/reprocesos/{id:guid}", (Guid id, HttpContext http, Visal.SuperAdmin.Revision.ReprocesoIaJobs jobs)
+    => jobs.Obtener(BitacoraTenant(http), id) is { } l
+        ? Results.Json(Visal.SuperAdmin.Revision.ReprocesoIaJobs.Vista(l, http.Request.Query["crudo"] == "1"))
+        : Results.Json(new { error = "Lote no encontrado (los lotes viven en memoria 24 h y se pierden si la app se reinicia)." }, statusCode: 404));
+bitacoraApi.MapDelete("/reprocesos/{id:guid}", (Guid id, HttpContext http, Visal.SuperAdmin.Revision.ReprocesoIaJobs jobs)
+    => jobs.Cancelar(BitacoraTenant(http), id)
+        ? Results.Json(new { ok = true })
+        : Results.Json(new { error = "Lote no encontrado o ya terminado." }, statusCode: 404));
 
 // Webhook publico de formularios web (WordPress: Contactanos + PQRS). El token va EN LA URL
 // porque el webhook de Elementor no envia headers custom de forma fiable; identifica y autentica

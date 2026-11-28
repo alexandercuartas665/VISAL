@@ -159,4 +159,34 @@ public interface IPreRevisionIaService
 
     /// <summary>Intento de cierre que el profesional decidio corregir: solo queda en auditoria (metricas).</summary>
     Task RegistrarIntentoCierreAsync(Guid historiaClinicaId, AuditoriaIaResultado auditoria, Guid actor, CancellationToken ct = default);
+
+    /// <summary>Reproceso (experimento de instrucciones): vuelve a enviar al agente EXACTAMENTE el
+    /// contexto que recibio una corrida guardada, con las instrucciones actuales del agente (o las
+    /// indicadas), y devuelve ambos conceptos para compararlos. NO toca el ciclo de revision, NO
+    /// guarda log del agente ni cambia la HC; solo registra el consumo de tokens (source
+    /// "revision-reproceso").</summary>
+    Task<ReprocesoIaResultado> ReprocesarCorridaAsync(Guid corridaId, OpcionesReproceso? opciones = null, CancellationToken ct = default);
 }
+
+/// <summary>Opciones del reproceso. <paramref name="Instrucciones"/>: texto que reemplaza (solo para
+/// este reproceso) las instrucciones del agente; null = las vigentes. <paramref name="ConMemoria"/>:
+/// conservar el bloque 'revision_anterior' que traia el contexto original (por defecto se quita para
+/// que el agente juzgue el documento desde cero, sin el concepto del prompt anterior).</summary>
+public sealed record OpcionesReproceso(string? Instrucciones = null, bool ConMemoria = false);
+
+/// <summary>Concepto del agente (original guardado o nuevo del reproceso).</summary>
+public sealed record ConceptoIa(string? Resultado, decimal? Confianza, string? Nota,
+    IReadOnlyList<string> Hallazgos, IReadOnlyList<string> Observaciones);
+
+public sealed record ReprocesoIaResultado(
+    Guid CorridaId,
+    Guid HistoriaClinicaId,
+    bool Ok,
+    string? Error,
+    ConceptoIa? Original,
+    ConceptoIa? Nuevo,
+    int InputTokens = 0,
+    int OutputTokens = 0,
+    string? Modelo = null,
+    string? RespuestaCruda = null);
+

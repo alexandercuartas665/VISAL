@@ -294,6 +294,13 @@ else
                                 </ul>
                             </div>
                         }
+                        @if (c.Observaciones.Count > 0)
+                        {
+                            <div class="bia-sec">
+                                <div class="bia-sec-t">Observaciones (@c.Observaciones.Count) &mdash; no impiden aprobar</div>
+                                <ul class="bia-hall res">@foreach (var ob in c.Observaciones) { <li>@ob</li> }</ul>
+                            </div>
+                        }
                         @if (a is { HallazgosResueltos.Count: > 0 })
                         {
                             <div class="bia-sec">

@@ -53,7 +53,11 @@ public sealed record RevisionAgenteLogDto(
     bool? FeedbackUtil = null,
     string? FeedbackComentario = null,
     DateTimeOffset? FeedbackEn = null,
-    bool EsIntentoCierre = false);
+    bool EsIntentoCierre = false)
+{
+    /// <summary>IMP-73: observaciones menores (no impiden aprobar), separadas de los hallazgos.</summary>
+    public IReadOnlyList<string> Observaciones { get; init; } = Array.Empty<string>();
+}
 
 /// <summary>Comando para abrir el ciclo. Si ya existe una revision viva para la HC, la devuelve.</summary>
 public sealed record SolicitarRevisionCmd(Guid HistoriaClinicaId, Guid? SolicitadaPor, string? Nota);

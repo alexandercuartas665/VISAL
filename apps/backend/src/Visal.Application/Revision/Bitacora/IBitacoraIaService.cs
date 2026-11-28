@@ -76,7 +76,11 @@ public sealed record BitacoraCorridaDto(
     bool? FeedbackUtil,
     string? FeedbackComentario,
     string? FeedbackPor,
-    DateTimeOffset? FeedbackEn);
+    DateTimeOffset? FeedbackEn)
+{
+    /// <summary>IMP-73: observaciones menores (no impiden aprobar); no entran al analisis.</summary>
+    public IReadOnlyList<string> Observaciones { get; init; } = [];
+}
 
 public sealed record BitacoraHcDetalleDto(
     BitacoraHcFilaDto Historia,

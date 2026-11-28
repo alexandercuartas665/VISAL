@@ -839,15 +839,7 @@ public sealed class RelacionFacturasSelector(IApplicationDbContextFactory dbFact
     /// <summary>Cantidad de hallazgos del log del agente (arreglo JSON). 0 si no hay o no se puede leer.</summary>
     internal static int ContarHallazgosIa(string? hallazgosJson)
     {
-        if (string.IsNullOrWhiteSpace(hallazgosJson)) { return 0; }
-        try
-        {
-            using var doc = JsonDocument.Parse(hallazgosJson);
-            return doc.RootElement.ValueKind == JsonValueKind.Array ? doc.RootElement.GetArrayLength() : 0;
-        }
-        catch (JsonException)
-        {
-            return 0;
-        }
+        // IMP-73: las observaciones (prefijo [Observacion]) no cuentan como hallazgos.
+        return Visal.Application.Revision.Ia.HallazgosIa.Separar(hallazgosJson).Hallazgos.Count;
     }
 }

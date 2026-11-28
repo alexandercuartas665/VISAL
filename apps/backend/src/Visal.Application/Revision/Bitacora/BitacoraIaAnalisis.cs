@@ -244,21 +244,11 @@ public static class BitacoraIaAnalisis
         return res;
     }
 
-    public static IReadOnlyList<string> ParseHallazgos(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json)) { return []; }
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array) { return []; }
-            return doc.RootElement.EnumerateArray()
-                .Select(e => e.ValueKind == JsonValueKind.String ? e.GetString() : e.GetRawText())
-                .Where(s => !string.IsNullOrWhiteSpace(s))
-                .Select(s => s!)
-                .ToList();
-        }
-        catch (JsonException) { return []; }
-    }
+    /// <summary>Hallazgos de la corrida (sin las observaciones, IMP-73).</summary>
+    public static IReadOnlyList<string> ParseHallazgos(string? json) => Ia.HallazgosIa.Separar(json).Hallazgos;
+
+    /// <summary>Observaciones de la corrida (IMP-73: no impiden aprobar; no entran al analisis).</summary>
+    public static IReadOnlyList<string> ParseObservaciones(string? json) => Ia.HallazgosIa.Separar(json).Observaciones;
 
     public static IReadOnlyList<SugerenciaTexto> ParseSugerencias(string? json)
     {

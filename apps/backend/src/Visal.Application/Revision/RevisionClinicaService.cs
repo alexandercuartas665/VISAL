@@ -131,10 +131,13 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
         return logs.Select(l => new RevisionAgenteLogDto(
             l.Id, l.CreatedAt, l.AgenteCodigo, l.Proveedor, l.Modelo, l.Ok, l.Error,
             l.Resultado, l.Confianza, l.TokensIn, l.TokensOut,
-            l.Nota, DeserializarHallazgos(l.HallazgosJson),
+            l.Nota, Visal.Application.Revision.Ia.HallazgosIa.Separar(l.HallazgosJson).Hallazgos,
             l.SystemPrompt, l.ContextoEnviado, l.CamposLegiblesJson, l.ToolsJson, l.RespuestaCruda,
             DeserializarSugerencias(l.SugerenciasJson),
-            l.FeedbackUtil, l.FeedbackComentario, l.FeedbackEn, l.RevisionClinicaId is null))
+            l.FeedbackUtil, l.FeedbackComentario, l.FeedbackEn, l.RevisionClinicaId is null)
+        {
+            Observaciones = Visal.Application.Revision.Ia.HallazgosIa.Separar(l.HallazgosJson).Observaciones,
+        })
             .ToList();
     }
 
@@ -157,17 +160,6 @@ public sealed class RevisionClinicaService : IRevisionClinicaService
         }
         catch { /* JSON viejo o corrupto: sin sugerencias */ }
         return res;
-    }
-
-    private static IReadOnlyList<string> DeserializarHallazgos(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json)) { return Array.Empty<string>(); }
-        try
-        {
-            var lista = System.Text.Json.JsonSerializer.Deserialize<List<string>>(json);
-            return lista?.Where(s => !string.IsNullOrWhiteSpace(s)).ToList() ?? (IReadOnlyList<string>)Array.Empty<string>();
-        }
-        catch { return Array.Empty<string>(); }
     }
 
     public async Task<RevisionClinicaDto> AsignarRevisorAsync(AsignarRevisorCmd cmd, CancellationToken ct = default)

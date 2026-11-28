@@ -740,6 +740,168 @@ public sealed class PreRevisionIaServiceTests
         Assert.Equal(2, leida.AuditoriaIaBloqueo.Count);
     }
 
+    // ---- IMP-73: reuso sin cambios, memoria entre intentos, hallazgos vs observaciones ----
+
+    private static async Task SetValoresAsync(Fixture fx, string valoresJson)
+    {
+        using var db = new VisalDbContext(fx.Opts, new FakeTenantContext { TenantId = TenantA, UserId = Actor });
+        var hc = await db.HistoriasClinicas.SingleAsync(h => h.Id == fx.HcId);
+        hc.ValoresJson = valoresJson;
+        await db.SaveChangesAsync();
+    }
+
+    private const string BodyConObservaciones =
+        "{\"resultado\":\"Rechazado\",\"confianza\":0.8,\"nota\":\"Signo vital imposible\"," +
+        "\"hallazgos\":[\"Temperatura 85 C imposible\",\"Verificado sin hallazgo: los 11 campos estan llenos\"," +
+        "\"Completitud: los 8 campos requeridos estan diligenciados\",\"Observacion administrativa: el registro se abrio dos dias despues\"]," +
+        "\"observaciones\":[\"Campo Registro igual al documento\"],\"sugerencias\":[]}";
+
+    [Fact]
+    public void Parse_separa_observaciones_y_descarta_validaciones_positivas()
+    {
+        var (h, o) = PreRevisionIaService.ParsearHallazgos(BodyConObservaciones);
+        Assert.Equal(new[] { "Temperatura 85 C imposible" }, h);
+        Assert.Equal(2, o.Count);
+        Assert.Contains("Campo Registro igual al documento", o);
+        Assert.Contains(o, x => x.StartsWith("el registro se abrio dos dias despues", StringComparison.Ordinal));
+
+        // Una validacion con "pero"/"falta" SI es hallazgo.
+        var (h2, _) = PreRevisionIaService.ParsearHallazgos(
+            "{\"resultado\":\"Rechazado\",\"hallazgos\":[\"Completitud: los campos estan llenos pero falta la firma\"]}");
+        Assert.Single(h2);
+    }
+
+    [Fact]
+    public async Task Observaciones_viajan_en_el_log_con_prefijo_y_se_separan_al_leer()
+    {
+        var fx = await BuildAsync(TenantA, OkResponse(BodyConObservaciones), crearRevision: false,
+            estadoHc: HistoriaClinicaEstado.Abierta);
+        var a = await fx.Svc.AuditarHcAsync(fx.HcId, null, default, OpcionesAuditoriaIa.Cierre);
+        Assert.Single(a.Hallazgos);
+        Assert.Equal(2, a.Observaciones.Count);
+
+        var logId = await fx.Svc.GuardarLogIntentoCierreAsync(a);
+        var log = await fx.Db.RevisionAgenteLogs.AsNoTracking().SingleAsync(l => l.Id == logId);
+        var (hs, os) = HallazgosIa.Separar(log.HallazgosJson);
+        Assert.Equal(a.Hallazgos, hs);
+        Assert.Equal(a.Observaciones, os);
+        Assert.Contains(HallazgosIa.PrefijoObservacion, log.HallazgosJson);
+        Assert.Single(HallazgosIa.Separar(log.HallazgosJson).Hallazgos); // lo que cuenta Facturacion
+    }
+
+    [Fact]
+    public async Task Cierre_sin_cambios_reutiliza_el_resultado_sin_llamar_al_proveedor()
+    {
+        var fx = await BuildAsync(TenantA, OkResponse(BodyRechazoConSugerencia), crearRevision: false,
+            estadoHc: HistoriaClinicaEstado.Abierta);
+        await SetValoresAsync(fx, "{\"evolucion\":\"texto copiado del turno anterior\"}");
+
+        var a1 = await fx.Svc.AuditarHcAsync(fx.HcId, null, default, OpcionesAuditoriaIa.Cierre);
+        var log1 = await fx.Svc.GuardarLogIntentoCierreAsync(a1);
+        Assert.NotNull(log1);
+        Assert.Contains("\"momento\"", fx.AiClient.LastUserMessage);
+        Assert.DoesNotContain("revision_anterior", fx.AiClient.LastUserMessage);
+
+        // Vuelve a cerrar sin tocar nada: mismo concepto, sin proveedor ni log nuevo.
+        var a2 = await fx.Svc.AuditarHcAsync(fx.HcId, null, default, OpcionesAuditoriaIa.Cierre);
+        Assert.Equal(1, fx.AiClient.CantidadLlamadas);
+        Assert.True(a2.Ok);
+        Assert.NotNull(a2.ReutilizadaDe);
+        Assert.Equal(log1, a2.LogId);
+        Assert.Equal(RevisionResultado.Rechazado, a2.Resultado);
+        Assert.Equal(a1.Hallazgos, a2.Hallazgos);
+        Assert.Single(a2.Sugerencias);
+        Assert.Equal(1, await fx.Db.RevisionAgenteLogs.CountAsync());
+        Assert.Equal(1, await fx.Db.AiUsageLogs.CountAsync());
+
+        // Registrar el cierre con el resultado reutilizado vincula el MISMO log al ciclo.
+        var res = await fx.Svc.RegistrarAuditoriaCierreAsync(fx.HcId, a2, cerradaPeseARechazo: true, Actor);
+        Assert.True(res.Ok, res.Error);
+        Assert.Equal(1, await fx.Db.RevisionAgenteLogs.CountAsync());
+        Assert.NotNull((await fx.Db.RevisionAgenteLogs.AsNoTracking().SingleAsync()).RevisionClinicaId);
+    }
+
+    [Fact]
+    public async Task Cierre_con_cambios_vuelve_a_auditar_con_la_revision_anterior()
+    {
+        var fx = await BuildAsync(TenantA, OkResponse(BodyRechazoConSugerencia), crearRevision: false,
+            estadoHc: HistoriaClinicaEstado.Abierta);
+        await SetValoresAsync(fx, "{\"evolucion\":\"texto copiado del turno anterior\",\"plan\":\"igual\"}");
+        var a1 = await fx.Svc.AuditarHcAsync(fx.HcId, null, default, OpcionesAuditoriaIa.Cierre);
+        await fx.Svc.GuardarLogIntentoCierreAsync(a1);
+
+        await SetValoresAsync(fx, "{\"evolucion\":\"eventos propios de este turno\",\"plan\":\"igual\"}");
+        var a2 = await fx.Svc.AuditarHcAsync(fx.HcId, null, default, OpcionesAuditoriaIa.Cierre);
+
+        Assert.Equal(2, fx.AiClient.CantidadLlamadas);
+        Assert.Null(a2.ReutilizadaDe);
+        var msg = fx.AiClient.LastUserMessage!;
+        Assert.Contains("revision_anterior", msg);
+        Assert.Contains("ENTREGA identica a HC-028780", msg);       // su hallazgo previo
+        Assert.Contains("\"campos_cambiados_desde_entonces\":[\"evolucion\"]", msg);
+        Assert.Contains("\"documento_sin_cambios\":false", msg);
+        Assert.Contains("REVISION ANTERIOR", fx.AiClient.LastSystemPrompt);
+    }
+
+    [Fact]
+    public async Task Sin_opcion_de_reuso_siempre_llama_pero_lleva_memoria()
+    {
+        var fx = await BuildAsync(TenantA, OkResponse(BodyRechazoConSugerencia), crearRevision: false,
+            estadoHc: HistoriaClinicaEstado.Abierta);
+        await SetValoresAsync(fx, "{\"evolucion\":\"x\"}");
+        var a1 = await fx.Svc.AuditarHcAsync(fx.HcId);
+        await fx.Svc.GuardarLogIntentoCierreAsync(a1);
+
+        var a2 = await fx.Svc.AuditarHcAsync(fx.HcId);           // Ordenes: re-ejecucion explicita
+        Assert.Equal(2, fx.AiClient.CantidadLlamadas);
+        Assert.Null(a2.ReutilizadaDe);
+        Assert.Contains("\"documento_sin_cambios\":true", fx.AiClient.LastUserMessage);
+        Assert.DoesNotContain("\"momento\"", fx.AiClient.LastUserMessage);
+    }
+
+    [Fact]
+    public async Task Reuso_no_aplica_si_cambio_el_prompt_o_paso_la_ventana()
+    {
+        var fx = await BuildAsync(TenantA, OkResponse(BodyRechazoConSugerencia), crearRevision: false,
+            estadoHc: HistoriaClinicaEstado.Abierta);
+        await SetValoresAsync(fx, "{\"evolucion\":\"x\"}");
+        var a1 = await fx.Svc.AuditarHcAsync(fx.HcId, null, default, OpcionesAuditoriaIa.Cierre);
+        var logId = await fx.Svc.GuardarLogIntentoCierreAsync(a1);
+
+        // Cambian las instrucciones del agente: se vuelve a auditar.
+        using (var db = new VisalDbContext(fx.Opts, new FakeTenantContext { TenantId = TenantA, UserId = Actor }))
+        {
+            var ag = await db.AiAgents.SingleAsync();
+            ag.SystemPrompt = "Eres el revisor (v2).";
+            await db.SaveChangesAsync();
+        }
+        await fx.Svc.AuditarHcAsync(fx.HcId, null, default, OpcionesAuditoriaIa.Cierre);
+        Assert.Equal(2, fx.AiClient.CantidadLlamadas);
+
+        // Corrida de hace mas de 24 h (con el prompt vigente) tampoco se reutiliza.
+        var prompt = fx.AiClient.LastSystemPrompt!;
+        var previo = new PreRevisionIaService.CorridaPrevia(Guid.NewGuid(), DateTimeOffset.UtcNow.AddHours(-25), "Rechazado",
+            0.7m, null, null, null, prompt, "{\"documento_a_revisar\":{\"a\":1}}", null);
+        Assert.False(PreRevisionIaService.EsReutilizable(previo, prompt, "{\"documento_a_revisar\":{\"a\":1}}", DateTimeOffset.UtcNow));
+        Assert.True(PreRevisionIaService.EsReutilizable(previo with { CreatedAt = DateTimeOffset.UtcNow.AddHours(-1) },
+            prompt, "{\"documento_a_revisar\":{\"a\":1},\"revision_anterior\":{}}", DateTimeOffset.UtcNow));
+        Assert.False(PreRevisionIaService.EsReutilizable(previo with { CreatedAt = DateTimeOffset.UtcNow.AddHours(-1) },
+            prompt, "{\"documento_a_revisar\":{\"a\":2}}", DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public void Prompt_separa_hallazgos_de_observaciones_y_trae_reglas_de_memoria_y_cierre()
+    {
+        var fx = BuildAsync(TenantA, OkResponse(BodyRechazoConSugerencia), crearRevision: false).GetAwaiter().GetResult();
+        fx.Svc.AuditarHcAsync(fx.HcId).GetAwaiter().GetResult();
+        var p = fx.AiClient.LastSystemPrompt!;
+        Assert.Contains("\"observaciones\"", p);
+        Assert.Contains("HALLAZGOS vs OBSERVACIONES", p);
+        Assert.Contains("REVISION ANTERIOR", p);
+        Assert.Contains("MOMENTO DE CIERRE", p);
+        Assert.DoesNotContain("puedes listar lo que validaste", p);
+    }
+
     // ---- Fakes ----
 
     private sealed class FakeAiClient : IAiProviderClient
@@ -747,6 +909,8 @@ public sealed class PreRevisionIaServiceTests
         private readonly AiChatResult _respuesta;
         public int CantidadLlamadas { get; private set; }
         public string? LastSystemPrompt { get; private set; }
+        public string? LastUserMessage { get; private set; }
+        public AiChatResult? Siguiente { get; set; }
 
         public FakeAiClient(AiChatResult respuesta) { _respuesta = respuesta; }
 
@@ -757,7 +921,8 @@ public sealed class PreRevisionIaServiceTests
         {
             CantidadLlamadas++;
             LastSystemPrompt = systemPrompt;
-            return Task.FromResult(_respuesta);
+            LastUserMessage = turns.LastOrDefault()?.Text;
+            return Task.FromResult(Siguiente ?? _respuesta);
         }
 
         public Task<AiModelsResult> ListModelsAsync(

@@ -360,7 +360,10 @@ public sealed class BitacoraIaService : IBitacoraIaService
         BitacoraIaAnalisis.ParseSugerencias(l.SugerenciasJson),
         l.FeedbackUtil, l.FeedbackComentario,
         l.FeedbackUsuarioId is Guid fu && usuarios.TryGetValue(fu, out var fn) ? fn : null,
-        l.FeedbackEn);
+        l.FeedbackEn)
+    {
+        Observaciones = BitacoraIaAnalisis.ParseObservaciones(l.HallazgosJson),
+    };
 
     private static async Task<IReadOnlyDictionary<Guid, string>> NombresUsuariosAsync(IApplicationDbContext db, IEnumerable<LogLite> logs, CancellationToken ct)
     {

@@ -16,7 +16,20 @@ public sealed record PreRevisionIaResult(
     string? Error,
     int InputTokens,
     int OutputTokens,
-    IReadOnlyList<SugerenciaTexto>? Sugerencias = null);
+    IReadOnlyList<SugerenciaTexto>? Sugerencias = null)
+{
+    /// <summary>IMP-73: observaciones menores/administrativas (no impiden aprobar).</summary>
+    public IReadOnlyList<string> Observaciones { get; init; } = Array.Empty<string>();
+}
+
+/// <summary>IMP-73: como se llama al agente.
+/// <see cref="AlCerrar"/>: el profesional esta cerrando la HC en este momento (por eso sigue Abierta).
+/// <see cref="ReutilizarSiSinCambios"/>: si el documento no cambio desde la ultima corrida (mismas
+/// instrucciones, menos de 24 h), se devuelve ese mismo resultado sin llamar al proveedor.</summary>
+public sealed record OpcionesAuditoriaIa(bool AlCerrar = false, bool ReutilizarSiSinCambios = false)
+{
+    public static readonly OpcionesAuditoriaIa Cierre = new(AlCerrar: true, ReutilizarSiSinCambios: true);
+}
 
 /// <summary>Redaccion mejorada que propone el agente para un campo con hallazgo. Solo lectura:
 /// nunca se aplica sola a la HC. Usa solo hechos ya escritos; lo faltante va como [COMPLETAR: ...].</summary>
@@ -47,6 +60,11 @@ public sealed record AuditoriaIaResultado(
     /// <summary>Log ya guardado para esta corrida (intento de cierre). Al registrar el cierre se
     /// vincula ese mismo log al ciclo en vez de crear otro.</summary>
     public Guid? LogId { get; init; }
+    /// <summary>IMP-73: observaciones menores/administrativas (no impiden aprobar).</summary>
+    public IReadOnlyList<string> Observaciones { get; init; } = Array.Empty<string>();
+    /// <summary>IMP-73: si no es null, el documento no cambio y se devolvio el resultado de la corrida
+    /// de esa fecha (sin llamar al proveedor ni crear otro log).</summary>
+    public DateTimeOffset? ReutilizadaDe { get; init; }
 
     public static AuditoriaIaResultado Fallo(Guid hcId, string error, int inTok = 0, int outTok = 0, AuditoriaIaTraza? traza = null)
         => new(false, error, null, 0m, null, Array.Empty<string>(), Array.Empty<SugerenciaTexto>(), inTok, outTok)
@@ -108,7 +126,8 @@ public interface IPreRevisionIaService
 
     /// <summary>Audita la HC (contexto + LLM + parseo) SIN registrar nada en el ciclo de revision.
     /// Solo deja el consumo de tokens. Funciona con la HC abierta (auditoria al cerrar).</summary>
-    Task<AuditoriaIaResultado> AuditarHcAsync(Guid historiaClinicaId, Guid? agenteId = null, CancellationToken ct = default);
+    Task<AuditoriaIaResultado> AuditarHcAsync(Guid historiaClinicaId, Guid? agenteId = null, CancellationToken ct = default,
+        OpcionesAuditoriaIa? opciones = null);
 
     /// <summary>Si la auditoria al cerrar aplica a esta HC (politica encendida + formato incluido),
     /// devuelve su configuracion; si no, null.</summary>

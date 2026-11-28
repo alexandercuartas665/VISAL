@@ -1201,6 +1201,10 @@
     .aud-sec { font-size:12px; font-weight:700; text-transform:uppercase; color:#334155; margin:14px 0 6px; letter-spacing:.03em; }
     .aud-hall { margin:0; padding-left:20px; font-size:13px; color:#1e293b; }
     .aud-hall li { margin-bottom:6px; }
+    .aud-sec-obs span { font-weight:400; color:#64748b; text-transform:none; letter-spacing:0; }
+    .aud-obs { margin:0; padding-left:20px; font-size:12.5px; color:#475569; }
+    .aud-obs li { margin-bottom:4px; }
+    .aud-reuso { background:#eff6ff; border:1px solid #bfdbfe; color:#1e3a8a; border-radius:8px; padding:8px 10px; font-size:12.5px; margin-bottom:10px; }
     .aud-sug-help { font-size:11.5px; color:#64748b; margin-bottom:6px; }
     .aud-sug { border:1px solid #c7d2fe; border-radius:8px; margin-bottom:8px; overflow:hidden; }
     .aud-sug-h { display:flex; justify-content:space-between; align-items:center; background:#eef2ff; padding:6px 10px; font-size:12.5px; }
@@ -1288,6 +1292,10 @@
                 </div>
             </div>
             <div class="aud-body">
+                @if (_audRes.ReutilizadaDe is DateTimeOffset reu)
+                {
+                    <div class="aud-reuso">&#8635; No has cambiado nada desde la revisi&oacute;n de las @reu.ToOffset(TimeSpan.FromHours(-5)).ToString("HH:mm"): este es el mismo concepto. Corrige los hallazgos y vuelve a cerrar.</div>
+                }
                 @if (bloqueado && _audBloq!.SolicitudEstado == "Rechazada" && !string.IsNullOrWhiteSpace(_audBloq.SolicitudRespuesta))
                 {
                     <div class="aud-coord">El coordinador rechaz&oacute; la solicitud anterior: @ObsInline(_audBloq.SolicitudRespuestaHtml, _audBloq.SolicitudRespuesta, "")</div>
@@ -1299,6 +1307,13 @@
                     <ol class="aud-hall">
                         @foreach (var hz in _audRes.Hallazgos) { <li>@hz</li> }
                     </ol>
+                }
+                @if (_audRes.Observaciones.Count > 0)
+                {
+                    <div class="aud-sec aud-sec-obs">Observaciones <span>(no impiden el cierre)</span></div>
+                    <ul class="aud-obs">
+                        @foreach (var ob in _audRes.Observaciones) { <li>@ob</li> }
+                    </ul>
                 }
                 @if (_audRes.Sugerencias.Count > 0)
                 {
@@ -3678,7 +3693,7 @@
         var tick = TickAuditoriaAsync(_audCts.Token);
         Visal.Application.Revision.Ia.AuditoriaIaResultado? res = null;
         var vencida = false;
-        try { res = await PreIaSvc.AuditarHcAsync(h.Id, null, _audCts.Token); }
+        try { res = await PreIaSvc.AuditarHcAsync(h.Id, null, _audCts.Token, Visal.Application.Revision.Ia.OpcionesAuditoriaIa.Cierre); }
         catch (OperationCanceledException) { vencida = true; }
         catch (Exception ex)
         {

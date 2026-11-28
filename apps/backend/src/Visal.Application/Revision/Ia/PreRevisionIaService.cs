@@ -5,6 +5,7 @@ using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Visal.Application.Admin;
 using Visal.Application.Common;
+using Visal.Application.Revision.Bitacora;
 using Visal.Application.Tenancy;
 using Visal.Application.Tenancy.Forms;
 using Visal.Domain.Entities;
@@ -71,8 +72,10 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         return await RegistrarAuditoriaAsync(revisionClinicaId, auditoria, ct);
     }
 
-    public async Task<AuditoriaIaResultado> AuditarHcAsync(Guid historiaClinicaId, Guid? agenteId = null, CancellationToken ct = default)
+    public async Task<AuditoriaIaResultado> AuditarHcAsync(Guid historiaClinicaId, Guid? agenteId = null, CancellationToken ct = default,
+        OpcionesAuditoriaIa? opciones = null)
     {
+        var opc = opciones ?? new OpcionesAuditoriaIa();
         using var db = _dbFactory.Create();
         var hcExiste = await db.HistoriasClinicas.AsNoTracking()
             .Where(h => h.Id == historiaClinicaId)
@@ -137,14 +140,40 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             new OpcionesHistorial(policy.EnviarHistorialPaciente, policy.HistorialMeses,
                 policy.HistorialMaxCompletas, policy.HistorialMaxTokens));
 
-        var contextoJson = SerializarContexto(contexto);
-
         var systemPrompt = ArmarSystemPrompt(agent.SystemPrompt);
+
+        // IMP-73: ultima corrida valida de ESTA HC (memoria entre intentos + reuso si no cambio nada).
+        var previo = await db.RevisionAgenteLogs.AsNoTracking()
+            .Where(l => l.HistoriaClinicaId == historiaClinicaId && l.Ok && l.Resultado != null)
+            .OrderByDescending(l => l.CreatedAt)
+            .Select(l => new CorridaPrevia(l.Id, l.CreatedAt, l.Resultado!, l.Confianza, l.Nota, l.HallazgosJson,
+                l.SugerenciasJson, l.SystemPrompt, l.ContextoEnviado, l.CamposLegiblesJson))
+            .FirstOrDefaultAsync(ct);
+        var camposActuales = previo is null ? null : await BuildCamposLegiblesAsync(db, historiaClinicaId, ct);
+
+        var memoria = previo is null ? null : ArmarRevisionAnterior(previo, camposActuales);
+        var contextoJson = SerializarContexto(contexto, memoria, opc.AlCerrar);
+
+        if (opc.ReutilizarSiSinCambios && previo is not null
+            && EsReutilizable(previo, systemPrompt, contextoJson, DateTimeOffset.UtcNow))
+        {
+            return Reutilizar(historiaClinicaId, previo);
+        }
+
+        var instruccion = "Revisa el 'documento_a_revisar' del siguiente JSON y emite tu veredicto SOLO sobre ese documento. "
+                        + "El 'historial_del_paciente' son historias ANTERIORES (solo contexto, no se califican). ";
+        if (memoria is not null)
+        {
+            instruccion += "'revision_anterior' es TU concepto previo sobre este mismo documento y los campos que el profesional "
+                         + "cambio desde entonces: aplica las reglas de REVISION ANTERIOR. ";
+        }
+        if (opc.AlCerrar)
+        {
+            instruccion += "El profesional esta CERRANDO esta historia en este momento (ver 'momento'). ";
+        }
         var turns = new List<AiChatTurn>
         {
-            new("user", "Revisa el 'documento_a_revisar' del siguiente JSON y emite tu veredicto SOLO sobre ese documento. "
-                      + "El 'historial_del_paciente' son historias ANTERIORES (solo contexto, no se califican). "
-                      + "Responde SOLO con el JSON pedido en el system prompt.\n\n" + contextoJson),
+            new("user", instruccion + "Responde SOLO con el JSON pedido en el system prompt.\n\n" + contextoJson),
         };
 
         var result = await CompleteWithRetryAsync(agent, apiKey, providerCfg.BaseUrl, model, systemPrompt, turns, ct);
@@ -175,6 +204,84 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         {
             HistoriaClinicaId = historiaClinicaId,
             Traza = traza,
+            Observaciones = parsed.Observaciones,
+        };
+    }
+
+    // ------------- IMP-73: memoria entre intentos y reuso del resultado -------------
+
+    /// <summary>Ventana maxima para reutilizar una corrida si el documento no cambio.</summary>
+    public static readonly TimeSpan VentanaReuso = TimeSpan.FromHours(24);
+
+    public sealed record CorridaPrevia(Guid Id, DateTimeOffset CreatedAt, string Resultado, decimal? Confianza,
+        string? Nota, string? HallazgosJson, string? SugerenciasJson, string? SystemPrompt,
+        string? ContextoEnviado, string? CamposLegiblesJson);
+
+    /// <summary>Bloque 'revision_anterior' que recibe el agente: su concepto previo y los campos que el
+    /// profesional cambio desde entonces (comparando la HC legible guardada en aquel log con la actual).</summary>
+    internal static JsonObject ArmarRevisionAnterior(CorridaPrevia previo, string? camposActuales)
+    {
+        var (hallazgos, observaciones) = HallazgosIa.Separar(previo.HallazgosJson);
+        var cambios = BitacoraIaAnalisis.DiffCampos(
+            BitacoraIaAnalisis.ParseCampos(previo.CamposLegiblesJson),
+            BitacoraIaAnalisis.ParseCampos(camposActuales));
+        var arr = new JsonArray();
+        foreach (var c in cambios.Take(40)) { arr.Add(c.Campo); }
+        var sug = new JsonArray();
+        foreach (var x in BitacoraIaAnalisis.ParseSugerencias(previo.SugerenciasJson)) { sug.Add(x.Campo); }
+        var h = new JsonArray();
+        foreach (var x in hallazgos) { h.Add(x); }
+        var o = new JsonArray();
+        foreach (var x in observaciones) { o.Add(x); }
+        return new JsonObject
+        {
+            ["rol"] = "TU concepto anterior sobre ESTE MISMO documento. No es otra historia: es tu revision previa.",
+            ["fecha_utc"] = previo.CreatedAt.UtcDateTime.ToString("yyyy-MM-dd HH:mm"),
+            ["resultado"] = previo.Resultado,
+            ["nota"] = previo.Nota,
+            ["hallazgos"] = h,
+            ["observaciones"] = o,
+            ["campos_con_texto_sugerido"] = sug,
+            ["campos_cambiados_desde_entonces"] = arr,
+            ["documento_sin_cambios"] = cambios.Count == 0,
+        };
+    }
+
+    /// <summary>El 'documento_a_revisar' del contexto (JSON), o null si no se puede leer.</summary>
+    internal static string? BloqueDocumento(string? contextoJson)
+    {
+        if (string.IsNullOrWhiteSpace(contextoJson)) { return null; }
+        try
+        {
+            return JsonNode.Parse(contextoJson) is JsonObject o && o["documento_a_revisar"] is JsonNode d
+                ? d.ToJsonString()
+                : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    /// <summary>Se reutiliza la corrida previa solo si: es de menos de 24 h, uso las MISMAS
+    /// instrucciones (system prompt) y el documento enviado (campos, ordenes, escalas, evoluciones,
+    /// documentos) es identico al de ahora.</summary>
+    public static bool EsReutilizable(CorridaPrevia previo, string systemPrompt, string contextoJson, DateTimeOffset ahora)
+    {
+        if (ahora - previo.CreatedAt > VentanaReuso) { return false; }
+        if (!string.Equals(previo.SystemPrompt, systemPrompt, StringComparison.Ordinal)) { return false; }
+        if (!Enum.TryParse<RevisionResultado>(previo.Resultado, out _)) { return false; }
+        var antes = BloqueDocumento(previo.ContextoEnviado);
+        return antes is not null && string.Equals(antes, BloqueDocumento(contextoJson), StringComparison.Ordinal);
+    }
+
+    private static AuditoriaIaResultado Reutilizar(Guid hcId, CorridaPrevia previo)
+    {
+        var (hallazgos, observaciones) = HallazgosIa.Separar(previo.HallazgosJson);
+        return new AuditoriaIaResultado(true, null, Enum.Parse<RevisionResultado>(previo.Resultado), previo.Confianza ?? 0m,
+            previo.Nota, hallazgos, BitacoraIaAnalisis.ParseSugerencias(previo.SugerenciasJson), 0, 0)
+        {
+            HistoriaClinicaId = hcId,
+            LogId = previo.Id,
+            Observaciones = observaciones,
+            ReutilizadaDe = previo.CreatedAt,
         };
     }
 
@@ -228,7 +335,8 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             await GuardarAgenteLogAsync(db, revision.TenantId, revision.Id, revision.HistoriaClinicaId, a.Traza,
                 ok: true, error: null, resultado: resultado.ToString(), confianza: a.Confianza,
                 a.InputTokens, a.OutputTokens, ct,
-                nota: a.Nota, hallazgos: a.Hallazgos, sugerencias: a.Sugerencias, origen: origen);
+                nota: a.Nota, hallazgos: a.Hallazgos, sugerencias: a.Sugerencias, origen: origen,
+                observaciones: a.Observaciones);
         }
 
         // Ola 6 RC6c — Adopcion automatica del veredicto agente.
@@ -252,7 +360,10 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             catch { /* Silencio: el veredicto quedo grabado, la adopcion es best-effort. */ }
         }
 
-        return new PreRevisionIaResult(true, resultado, a.Confianza, a.Nota, a.Hallazgos, null, a.InputTokens, a.OutputTokens, a.Sugerencias);
+        return new PreRevisionIaResult(true, resultado, a.Confianza, a.Nota, a.Hallazgos, null, a.InputTokens, a.OutputTokens, a.Sugerencias)
+        {
+            Observaciones = a.Observaciones,
+        };
     }
 
     // ───────────── Auditoria IA AL CERRAR (Atencion -> "Guardar definitivamente") ─────────────
@@ -436,6 +547,8 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
                 resultado = auditoria.Resultado?.ToString(),
                 confianza = auditoria.Confianza,
                 hallazgos = auditoria.Hallazgos.Count,
+                observaciones = auditoria.Observaciones.Count,
+                reutilizada = auditoria.ReutilizadaDe is not null,
                 cerradaPeseARechazo,
                 revisionId = rev.Id,
             }, ct);
@@ -453,7 +566,8 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         return await GuardarAgenteLogAsync(db, tenantId.Value, null, auditoria.HistoriaClinicaId, auditoria.Traza,
             ok: true, error: null, resultado: auditoria.Resultado.ToString(), confianza: auditoria.Confianza,
             auditoria.InputTokens, auditoria.OutputTokens, ct,
-            nota: auditoria.Nota, hallazgos: auditoria.Hallazgos, sugerencias: auditoria.Sugerencias, origen: OrigenCierre);
+            nota: auditoria.Nota, hallazgos: auditoria.Hallazgos, sugerencias: auditoria.Sugerencias, origen: OrigenCierre,
+            observaciones: auditoria.Observaciones);
     }
 
     public async Task<bool> RegistrarFeedbackAsync(Guid logId, bool util, string? comentario, Guid actor, CancellationToken ct = default)
@@ -496,6 +610,8 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             resultado = auditoria.Resultado?.ToString(),
             confianza = auditoria.Confianza,
             hallazgos = auditoria.Hallazgos.Count,
+            observaciones = auditoria.Observaciones.Count,
+            reutilizada = auditoria.ReutilizadaDe is not null,
             error = auditoria.Error,
         }, ct);
 
@@ -612,7 +728,8 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         sb.AppendLine("  \"resultado\": \"Aprobado\" | \"Rechazado\" | \"Neutral\",");
         sb.AppendLine("  \"confianza\": number entre 0 y 1,");
         sb.AppendLine("  \"nota\": \"justificacion clara y especifica de tu decision, en 2 a 4 frases\",");
-        sb.AppendLine("  \"hallazgos\": [\"hallazgo concreto 1\", \"hallazgo concreto 2\"],");
+        sb.AppendLine("  \"hallazgos\": [\"lo que el profesional DEBE corregir 1\", \"... 2\"],");
+        sb.AppendLine("  \"observaciones\": [\"detalle menor o administrativo que NO impide aprobar\"],");
         sb.AppendLine("  \"sugerencias\": [{ \"campo\": \"etiqueta del campo\", \"texto_sugerido\": \"redaccion mejorada\" }]");
         sb.AppendLine("}");
         sb.AppendLine();
@@ -625,8 +742,33 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         sb.AppendLine("  llegaste a ese resultado, CITANDO los datos concretos de la HC que lo sustentan (nombres de");
         sb.AppendLine("  campos, fechas, valores, ordenes, incongruencias). Si RECHAZAS, di EXACTAMENTE que falta o");
         sb.AppendLine("  que esta mal, en que parte de la HC, y POR QUE impide aprobar o facturar.");
-        sb.AppendLine("- Cada 'hallazgo' es un punto CONCRETO y verificable (no generalidades): nombra el campo o dato");
-        sb.AppendLine("  y el problema puntual. Si Apruebas, puedes listar lo que validaste. Ordena los mas graves primero.");
+        sb.AppendLine("- HALLAZGOS vs OBSERVACIONES (regla dura): 'hallazgos' son SOLO los problemas que el profesional");
+        sb.AppendLine("  DEBE corregir en el documento: cada uno CONCRETO y verificable (nombra el campo y el problema");
+        sb.AppendLine("  puntual), ordenados del MAS GRAVE al menos grave (primero lo que pone en riesgo al paciente o");
+        sb.AppendLine("  hace inverosimil el registro, p.ej. un signo vital imposible). Maximo 6. 'observaciones' son los");
+        sb.AppendLine("  detalles menores, administrativos o de estilo que NO impiden aprobar (maximo 4). NUNCA pongas en");
+        sb.AppendLine("  ninguna de las dos listas lo que validaste o lo que esta correcto ('Verificado sin hallazgo',");
+        sb.AppendLine("  'Completitud: los N campos estan llenos', 'la fecha coincide'), ni comentarios sobre lo que NO");
+        sb.AppendLine("  vas a reportar ('el formato no define X, por lo que no se reporta'): eso, si aporta, va en la nota.");
+        sb.AppendLine("  Si el resultado es 'Rechazado' debe haber al menos un hallazgo; si solo quedan observaciones, el");
+        sb.AppendLine("  resultado es 'Aprobado'.");
+        sb.AppendLine("- NO son hallazgos (a lo sumo una observacion, y solo si es relevante): los dias entre la atencion y");
+        sb.AppendLine("  la apertura o el cierre del registro, el estado 'Abierta' de la historia, el numero del campo");
+        sb.AppendLine("  'Registro' del profesional, la sigla del tipo de documento, o el RIPS.");
+        sb.AppendLine("- REVISION ANTERIOR (si llega 'revision_anterior'): es TU concepto previo sobre ESTE MISMO documento y");
+        sb.AppendLine("  la lista 'campos_cambiados_desde_entonces'. Se CONSISTENTE con lo que ya dijiste:");
+        sb.AppendLine("  1) Revisa cada hallazgo anterior: si el profesional lo corrigio (el campo cambio y ya no tiene el");
+        sb.AppendLine("     problema), NO lo repitas. Si sigue sin resolver, repitelo con el MISMO fondo (no lo reformules");
+        sb.AppendLine("     como un problema distinto).");
+        sb.AppendLine("  2) NO agregues hallazgos NUEVOS sobre campos que NO cambiaron y que no marcaste antes, salvo que sean");
+        sb.AppendLine("     CRITICOS: valor imposible o riesgo para el paciente, copia/pega evidente de un campo clinico,");
+        sb.AppendLine("     campo requerido vacio, o contradiccion clinica grave. Lo demas va a 'observaciones'.");
+        sb.AppendLine("  3) Si el profesional copio tu texto sugerido en un campo ('campos_con_texto_sugerido'), no vuelvas a");
+        sb.AppendLine("     marcar ese campo salvo que haya quedado un [COMPLETAR: ...] sin llenar.");
+        sb.AppendLine("  4) Si corrigio todo lo que senalaste y no hay criticos nuevos, el resultado es 'Aprobado'.");
+        sb.AppendLine("  5) Si 'documento_sin_cambios' es true, el veredicto debe ser el MISMO de la revision anterior.");
+        sb.AppendLine("- MOMENTO DE CIERRE (si llega 'momento'): el profesional esta cerrando la historia ahora; que figure");
+        sb.AppendLine("  'Abierta', sin fecha de cierre o con apertura posterior a la atencion NO es hallazgo ni observacion.");
         sb.AppendLine("- Se especifico y evita frases de relleno. La nota debe permitirle a un auditor humano entender");
         sb.AppendLine("  tu decision sin volver a leer toda la HC.");
         sb.AppendLine("- ALCANCE SEGUN EL FORMATO (PRIORIDAD MAXIMA): la tool get_form_definition te entrega el");
@@ -738,7 +880,8 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
     /// administrativo) e <c>historial_del_paciente</c> (historias ANTERIORES, solo contexto).
     /// Cada payload de tool se inserta como JSON anidado (no como string escapado).
     /// </summary>
-    public static string SerializarContexto(HistoriaClinicaContextoIa contexto)
+    public static string SerializarContexto(HistoriaClinicaContextoIa contexto, JsonObject? revisionAnterior = null,
+        bool alCerrar = false)
     {
         var porTool = new Dictionary<string, ToolInvocationResult>(StringComparer.OrdinalIgnoreCase);
         foreach (var inv in contexto.InvocacionesExitosas) { porTool.TryAdd(inv.ToolName, inv); }
@@ -792,6 +935,12 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             ["datos_del_paciente"] = pac,
             ["historial_del_paciente"] = histObj,
         };
+        if (alCerrar)
+        {
+            raiz["momento"] = "CIERRE: el profesional esta cerrando esta historia ahora mismo. Por eso su estado es "
+                            + "'Abierta' y aun no tiene fecha de cierre; eso NO es hallazgo ni observacion.";
+        }
+        if (revisionAnterior is not null) { raiz["revision_anterior"] = revisionAnterior; }
 
         if (contexto.InvocacionesFallidas.Count > 0)
         {
@@ -819,7 +968,8 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         bool ok, string? error, string? resultado, decimal? confianza,
         int tokensIn, int tokensOut, CancellationToken ct,
         string? nota = null, IReadOnlyList<string>? hallazgos = null,
-        IReadOnlyList<SugerenciaTexto>? sugerencias = null, string origen = OrigenRevision)
+        IReadOnlyList<SugerenciaTexto>? sugerencias = null, string origen = OrigenRevision,
+        IReadOnlyList<string>? observaciones = null)
     {
         var contexto = traza.Contexto;
         try
@@ -838,6 +988,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             var log = new RevisionAgenteLog
             {
                 TenantId = tenantId,
+                CreatedAt = DateTimeOffset.UtcNow, // el interceptor lo vuelve a sellar; sin el (tests) queda la hora real
                 RevisionClinicaId = revisionId,
                 HistoriaClinicaId = historiaClinicaId,
                 AgenteCodigo = traza.AgenteNombre,
@@ -851,9 +1002,7 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
                 TokensIn = tokensIn,
                 TokensOut = tokensOut,
                 Nota = nota,
-                HallazgosJson = hallazgos is { Count: > 0 }
-                    ? JsonSerializer.Serialize(hallazgos, new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping })
-                    : null,
+                HallazgosJson = HallazgosIa.Serializar(hallazgos, observaciones),
                 SugerenciasJson = sugerencias is { Count: > 0 }
                     ? JsonSerializer.Serialize(sugerencias.Select(x => new { campo = x.Campo, texto_sugerido = x.TextoSugerido }),
                         new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping })
@@ -930,12 +1079,13 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
         foreach (var kv in v)
         {
             if (string.IsNullOrWhiteSpace(kv.Value)) { continue; }
-            if ((kv.Key ?? "").Contains("firma", StringComparison.OrdinalIgnoreCase)) { continue; } // firmas base64
             var label = keyToLabel.TryGetValue(kv.Key!, out var lbl) && !string.IsNullOrWhiteSpace(lbl) ? lbl : kv.Key!;
+            var valor = kv.Value;
+            if ((kv.Key ?? "").Contains("firma", StringComparison.OrdinalIgnoreCase)) { valor = "[firma registrada]"; } // firmas base64
             var finalLabel = label;
             var i = 2;
             while (outMap.ContainsKey(finalLabel)) { finalLabel = label + " (" + i++ + ")"; }
-            outMap[finalLabel] = kv.Value;
+            outMap[finalLabel] = valor;
         }
         if (outMap.Count == 0) { return null; }
         return JsonSerializer.Serialize(outMap, new JsonSerializerOptions
@@ -946,7 +1096,14 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
     }
 
     private sealed record VeredictoParsed(RevisionResultado Resultado, decimal Confianza, string? Nota,
-        IReadOnlyList<string> Hallazgos, IReadOnlyList<SugerenciaTexto> Sugerencias);
+        IReadOnlyList<string> Hallazgos, IReadOnlyList<SugerenciaTexto> Sugerencias, IReadOnlyList<string> Observaciones);
+
+    /// <summary>Solo para tests: (hallazgos, observaciones) tal como se interpretan de la respuesta.</summary>
+    public static (IReadOnlyList<string> Hallazgos, IReadOnlyList<string> Observaciones) ParsearHallazgos(string texto)
+    {
+        var p = ParseVeredicto(texto);
+        return (p.Hallazgos, p.Observaciones);
+    }
 
     /// <summary>Solo para tests: parsea la respuesta del modelo y devuelve las sugerencias.</summary>
     public static IReadOnlyList<SugerenciaTexto> ParsearSugerencias(string texto) => ParseVeredicto(texto).Sugerencias;
@@ -971,14 +1128,28 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
 
         var nota = root.TryGetProperty("nota", out var nEl) ? nEl.GetString() : null;
 
-        var hallazgos = new List<string>();
-        if (root.TryGetProperty("hallazgos", out var hEl) && hEl.ValueKind == JsonValueKind.Array)
+        static List<string> Lista(JsonElement root, string nombre)
         {
-            foreach (var it in hEl.EnumerateArray())
+            var res = new List<string>();
+            if (root.TryGetProperty(nombre, out var el) && el.ValueKind == JsonValueKind.Array)
             {
-                var s = it.ValueKind == JsonValueKind.String ? it.GetString() : it.ToString();
-                if (!string.IsNullOrWhiteSpace(s)) { hallazgos.Add(s!.Trim()); }
+                foreach (var it in el.EnumerateArray())
+                {
+                    var s = it.ValueKind == JsonValueKind.String ? it.GetString() : it.ToString();
+                    if (!string.IsNullOrWhiteSpace(s)) { res.Add(s!.Trim()); }
+                }
             }
+            return res;
+        }
+        // IMP-73: 'hallazgos' = lo que hay que corregir; 'observaciones' = menor/administrativo. Si el
+        // modelo igual mete en hallazgos una validacion positiva o una observacion declarada, se mueve.
+        var hallazgos = new List<string>();
+        var observaciones = Lista(root, "observaciones").Select(QuitarPrefijoObservacion).ToList();
+        foreach (var h in Lista(root, "hallazgos"))
+        {
+            if (EsValidacionPositiva(h)) { continue; }
+            if (EsObservacionDeclarada(h)) { observaciones.Add(QuitarPrefijoObservacion(h)); continue; }
+            hallazgos.Add(h);
         }
 
         // Texto sugerido (opcional): [{ campo, texto_sugerido }]. Se toleran nombres alternos y
@@ -1006,7 +1177,47 @@ public sealed class PreRevisionIaService : IPreRevisionIaService
             }
         }
 
-        return new VeredictoParsed(resultado, confianza, nota, hallazgos, sugerencias);
+        return new VeredictoParsed(resultado, confianza, nota, hallazgos, sugerencias, observaciones);
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex RxValidacion = new(
+        @"^\W*(verificado|validado|validacion|se valida|se verifica|completitud( formal| conforme| del formato)?\s*:|aspectos validados|sin hallazgos?\b)",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+    private static readonly System.Text.RegularExpressions.Regex RxObsDeclarada = new(
+        @"^\W*observaci[o\u00f3]n( menor| administrativa)?\b",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>"Verificado sin hallazgo: ...", "Completitud: los 11 campos estan llenos..." no son hallazgos.</summary>
+    internal static bool EsValidacionPositiva(string h)
+    {
+        var t = SinTildes(h);
+        if (System.Text.RegularExpressions.Regex.IsMatch(t, @"\bsin hallazgo")) { return true; }
+        return RxValidacion.IsMatch(t) && !System.Text.RegularExpressions.Regex.IsMatch(t, @"\b(pero|sin embargo|excepto|falta|faltan|vacio|vacia|no coincide|incongru|contradic)");
+    }
+
+    private static string SinTildes(string s)
+    {
+        var d = s.ToLowerInvariant().Normalize(NormalizationForm.FormD);
+        var sb = new StringBuilder(d.Length);
+        foreach (var ch in d)
+        {
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch) != System.Globalization.UnicodeCategory.NonSpacingMark) { sb.Append(ch); }
+        }
+        return sb.ToString();
+    }
+
+    internal static bool EsObservacionDeclarada(string h) => RxObsDeclarada.IsMatch(h.TrimStart());
+
+    private static string QuitarPrefijoObservacion(string h)
+    {
+        var t = HallazgosIa.EsObservacion(h) ? h[HallazgosIa.PrefijoObservacion.Length..] : h;
+        var m = RxObsDeclarada.Match(t.TrimStart());
+        if (m.Success)
+        {
+            t = t.TrimStart()[m.Length..].TrimStart(' ', ':', '-', '(', ')');
+            if (t.StartsWith("riesgo bajo)", StringComparison.OrdinalIgnoreCase)) { t = t["riesgo bajo)".Length..].TrimStart(' ', ':'); }
+        }
+        return t.Trim();
     }
 
     private static RevisionResultado ParseResultado(string? s)
